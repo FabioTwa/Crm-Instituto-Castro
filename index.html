@@ -6478,7 +6478,7 @@
                     </div>
                     <div class="form-group">
                         <label>Senha <span class="required">*</span></label>
-                        <input type="password" class="form-input" name="password" required minlength="6" placeholder="Mínimo 6 caracteres">
+                        <input type="password" class="form-input" name="password" required minlength="8" placeholder="Mínimo 8 caracteres, com maiúscula, número e símbolo">
                     </div>
                     <div class="form-row">
                         <div class="form-group">
@@ -7212,29 +7212,11 @@ async function handleLogin(e) {
     });
 
     if (result.error) {
-        // Fallback: login via tabela users (autenticação própria)
-        var userCheck = await icFiltroAcessoAtivo(
-            supabaseClient.from('users')
-                .select('id, email, name, perfil, status, desligado_em, vendedor_responsavel_id, vendedor_responsavel_nome, telas_permitidas')
-                .eq('email', email).eq('pw', senha)
-        ).maybeSingle();
-        if (!userCheck.data) {
-            setBtnLoading(btn, false);
-            errorEl.textContent = 'E-mail ou senha incorretos. Tente novamente.';
-            errorEl.style.display = 'block';
-            logAudit('login_falhou', 'users', null, null, { email: email });
-            return;
-        }
-        // Login via tabela users - simular currentUser
-        currentUser = { email: userCheck.data.email, id: userCheck.data.id, user_metadata: { name: userCheck.data.name }, _fallbackLogin: true };
-        // Persistir sessão fallback no localStorage (Supabase Auth não cuida desses usuários)
-        try { localStorage.setItem('ic_fallback_user', JSON.stringify(currentUser)); } catch(e) {}
+        // So Supabase Auth. Senha nunca e conferida contra a tabela users.
         setBtnLoading(btn, false);
-        logAudit('login_sucesso', 'users', userCheck.data.id, null, { email: email, metodo: 'fallback' });
-        setupUserUI();
-        await aplicarPermissoesSidebar();
-        try { await detectarERegistrarTelasNovas(); } catch(e) { console.warn('detectar telas novas:', e); }
-        icIrParaRotaInicial(); // [ic] rota que a pessoa pediu antes do login, ou #/pipeline
+        errorEl.textContent = 'E-mail ou senha incorretos. Tente novamente.';
+        errorEl.style.display = 'block';
+        logAudit('login_falhou', 'users', null, null, { email: email });
         return;
     }
 
@@ -7391,30 +7373,8 @@ async function checkSession() {
         icIrParaRotaInicial(); // [ic] lê a hash da URL (ou vai ao Pipeline); valida permissão
         return;
     }
-    // Fallback: tentar restaurar usuário criado direto na tabela users (sem Supabase Auth)
-    try {
-        var fb = localStorage.getItem('ic_fallback_user');
-        if (fb) {
-            var fbUser = JSON.parse(fb);
-            // Revalidar contra o banco — confirma que o usuário ainda existe e está ativo
-            var check = await icComPrazo(icFiltroAcessoAtivo(
-                supabaseClient.from('users').select('id, email, name, status, desligado_em').eq('email', fbUser.email)
-            ).maybeSingle(), 10000, 'revalidar-usuario');
-            if (check.data) {
-                currentUser = fbUser;
-                setupUserUI();
-                await icComPrazo(aplicarPermissoesSidebar(), 12000, 'permissoes');
-        try { await detectarERegistrarTelasNovas(); } catch(e) { console.warn('detectar telas novas:', e); }
-                icIrParaRotaInicial(); // [ic] idem
-                return;
-            }
-            // Usuário não existe mais — limpar fallback
-            localStorage.removeItem('ic_fallback_user');
-        }
-    } catch(e) {
-        if (e && e.icPrazo) throw e;   // prazo nao e usuario invalido: nao apaga o fallback
-        try { localStorage.removeItem('ic_fallback_user'); } catch(e2) {}
-    }
+    // Restos do login antigo por tabela: nao ha mais sessao fora do Supabase Auth.
+    try { localStorage.removeItem('ic_fallback_user'); } catch(e) {}
     // Tinha token guardado e mesmo assim nao ha sessao: expirou. Merece
     // mensagem propria, senao a pessoa acha que perdeu o acesso.
     if (window._icTinhaToken) {
@@ -14218,27 +14178,39 @@ async function handleNovoUsuario(e) {
         }
     }
 
-    // Criar registro na tabela users (autenticação própria, sem Supabase Auth)
+    // Cria a conta no Supabase Auth e a linha em public.users pela Edge Function
+    // ic-usuarios (só Admin). A senha vai só para o Auth; nunca para a tabela users.
     var telasPermitidas = coletarPermissoesDoModal('usuario-permissoes-container');
-    var userData = {
-        name: name,
-        email: email,
-        pw: password,
-        role: perfil.toUpperCase() === 'ADMIN' ? 'admin' : 'operador',
-        perfil: perfil,
-        perfil_id: perfilIdSelecionado,
-        status: 'ativo',
-        vendedor_responsavel_id: vendedorId,
-        vendedor_responsavel_nome: vendedorNome,
-        vendedores_responsaveis_ids: vendedoresIds,
-        telas_permitidas: telasPermitidas
-    };
-
-    var insertResult = await supabaseClient.from('users').insert(userData);
+    var resp = await supabaseClient.functions.invoke('ic-usuarios', {
+        body: {
+            acao: 'criar',
+            name: name,
+            email: email,
+            password: password,
+            perfil: perfil,
+            perfil_id: perfilIdSelecionado,
+            vendedor_responsavel_id: vendedorId,
+            vendedor_responsavel_nome: vendedorNome,
+            vendedores_responsaveis_ids: vendedoresIds,
+            telas_permitidas: telasPermitidas
+        }
+    });
     setBtnLoading(btn, false);
 
-    if (insertResult.error) {
-        showToast('Conta criada, mas erro ao salvar perfil: ' + insertResult.error.message, 'error');
+    var corpo = resp && resp.data ? resp.data : null;
+    if (resp.error || !corpo || !corpo.ok) {
+        var codigo = corpo && corpo.erro ? corpo.erro : '';
+        if (!codigo && resp.error && resp.error.context && typeof resp.error.context.json === 'function') {
+            try { codigo = ((await resp.error.context.json()) || {}).erro || ''; } catch (e) {}
+        }
+        var msgs = {
+            email_ja_cadastrado: 'Este e-mail já está cadastrado.',
+            senha_fraca: 'Senha fraca: use 8+ caracteres com maiúscula, minúscula, número e símbolo.',
+            somente_admin: 'Só Admin pode criar usuários.',
+            perfil_invalido: 'Perfil inválido.',
+            payload_invalido: 'Dados do usuário incompletos ou inválidos.'
+        };
+        showToast(msgs[codigo] || 'Não foi possível criar o usuário. Tente de novo.', 'error');
         return;
     }
 
