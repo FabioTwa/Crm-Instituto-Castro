@@ -77,7 +77,10 @@
 // k) statuses (entregue, lido, tocado) sao IGNORADOS por enquanto.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+
+// Cliente sem tipos gerados do banco (o schema nao e tipado aqui).
+type Supa = SupabaseClient<any, "public", any>;
 import { canonicoTelefone, soDigitos, telefoneBrPlausivel, variacoesTelefone } from "../_shared/telefone.ts";
 import { icFlag } from "../_shared/flags.ts";
 
@@ -372,7 +375,7 @@ async function assinaturaValida(
     false,
     ["sign"],
   );
-  const mac = await crypto.subtle.sign("HMAC", chave, corpoCru);
+  const mac = await crypto.subtle.sign("HMAC", chave, corpoCru as BufferSource);
   const calculado = Array.from(new Uint8Array(mac))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
@@ -393,7 +396,7 @@ async function assinaturaValida(
 // Sem chumbar nome. Se der erro ou funil nao tiver etapas, cai em 'cliente_novo' (nossa
 // primeira coluna real nos dois funis atuais: FullStack e Automacao).
 async function descobrirPrimeiraEtapa(
-  supabase: ReturnType<typeof createClient>,
+  supabase: Supa,
   funilId: string | null,
 ): Promise<string> {
   const FALLBACK = "cliente_novo";
@@ -599,15 +602,15 @@ function extrairConteudoMeta(m: any): { tipo: string; mensagem: string; mediaId:
 // preenche o objeto referral. O unico canal que sobrevive e o texto
 // pre-preenchido do link (?text=), onde o ValueTrack do Google Ads substitui
 // as macros antes do clique. Formato acordado, no fim da mensagem:
-//   [jx:{campaignid}:{gclid}]
+//   [ic:{campaignid}:{gclid}]
 // Le, guarda e TIRA do texto: o vendedor nunca ve o codigo na conversa.
-const MARCA_JX = /\s*\[jx:([0-9]{1,20}):([A-Za-z0-9_-]{1,300})\]\s*/i;
+const MARCA_GOOGLE = /\s*\[ic:([0-9]{1,20}):([A-Za-z0-9_-]{1,300})\]\s*/i;
 
 function extrairMarcaGoogle(texto: string): { campanhaId: string; gclid: string; limpo: string } | null {
   if (!texto) return null;
-  const m = MARCA_JX.exec(texto);
+  const m = MARCA_GOOGLE.exec(texto);
   if (!m) return null;
-  const limpo = texto.replace(MARCA_JX, " ").replace(/\s+/g, " ").trim();
+  const limpo = texto.replace(MARCA_GOOGLE, " ").replace(/\s+/g, " ").trim();
   return { campanhaId: m[1], gclid: m[2], limpo: limpo };
 }
 
@@ -698,7 +701,7 @@ let vendedorCacheEm = 0;
 // card no pipeline.
 let numerosDaCasa = new Set<string>();
 
-async function carregarVendedores(supabase: ReturnType<typeof createClient>): Promise<string | null> {
+async function carregarVendedores(supabase: Supa): Promise<string | null> {
   const { data, error } = await supabase
     .from("vendedores_whatsapp")
     .select("vendedor_id, vendedor_nome, numero_whatsapp, funil_id, meta_phone_id, ativo");
@@ -728,7 +731,7 @@ async function carregarVendedores(supabase: ReturnType<typeof createClient>): Pr
 // para o banco ter recusado a consulta - que foi o que aconteceu hoje sob
 // pressao. Erro de consulta e vazio de cadastro sao coisas diferentes.
 async function acharVendedorPorPhoneId(
-  supabase: ReturnType<typeof createClient>,
+  supabase: Supa,
   phoneNumberId: string,
 ): Promise<{ vendedor: VendedorWa | null; erro: string | null }> {
   if (!phoneNumberId) return { vendedor: null, erro: null };
@@ -742,7 +745,7 @@ async function acharVendedorPorPhoneId(
 // CAMINHO RAPIDO: cards criados pelo bot ja tem numero_whatsapp no formato canonico.
 // Inclui apagados de proposito (a reativacao acontece depois).
 async function buscarCardCaminhoRapido(
-  supabase: ReturnType<typeof createClient>,
+  supabase: Supa,
   vendedorId: string,
   variantes: string[],
 ): Promise<any | null> {
@@ -777,7 +780,7 @@ function normalizarBR(tel: string): string | null {
 }
 
 async function buscarCardPorTelefoneNorm(
-  supabase: ReturnType<typeof createClient>,
+  supabase: Supa,
   funilId: string | null,
   telefone: string,
 ): Promise<any | null> {
@@ -809,7 +812,7 @@ async function buscarCardPorTelefoneNorm(
 //    inteiro por id, entao o resto do fluxo recebe exatamente o mesmo objeto.
 // A ordem (created_at desc, primeiro que casar vence) e identica a da funcao antiga.
 async function buscarCardCaminhoLegado(
-  supabase: ReturnType<typeof createClient>,
+  supabase: Supa,
   vendedorId: string,
   variantesSet: Set<string>,
 ): Promise<any | null> {
@@ -852,7 +855,7 @@ async function buscarCardCaminhoLegado(
 // estranho chegar, o card e procurado pela correspondencia, e NUNCA se cria card.
 // O caminho novo tambem nao GRAVA chat_lid (nao ha LID para guardar).
 async function buscarCardPorChatLid(
-  supabase: ReturnType<typeof createClient>,
+  supabase: Supa,
   vendedorId: string,
   lid: string,
 ): Promise<any | null> {
@@ -897,7 +900,7 @@ function nomeDoContato(value: any, waId: string): string {
 // ehEco = true quando veio de smb_message_echoes, ou seja, o vendedor mandou pelo
 // celular. E o equivalente do fromMe do Z-API.
 async function processarMensagem(
-  supabase: ReturnType<typeof createClient>,
+  supabase: Supa,
   vendedor: { vendedor_id: string; vendedor_nome: string | null; numero_whatsapp: string; funil_id: string | null },
   m: any,
   value: any,
@@ -1075,7 +1078,7 @@ async function processarMensagem(
     const { error: errUpd } = await supabase
       .from("clientes_crm")
       .update(upd)
-      .eq("id", clienteId);
+      .eq("id", clienteExistente.id);
     if (errUpd) {
       console.error("[ic-meta-webhook] update clientes_crm falhou:", errUpd);
     }
@@ -1365,7 +1368,7 @@ async function processarMensagem(
 // esta ligada. Nao espera o resultado (EdgeRuntime.waitUntil) e engole qualquer
 // erro: a IA e opcional, o webhook nao. Autorizacao pelo header x-ic-internal.
 function dispararIaPreAtendimento(
-  supabase: ReturnType<typeof createClient>,
+  supabase: Supa,
   body: { cliente_crm_id: string; conversa_id: string | null; vendedor_id: string; funil_id: string | null },
 ): void {
   const trabalho = (async () => {
