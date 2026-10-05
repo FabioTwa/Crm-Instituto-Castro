@@ -22,7 +22,7 @@
 
     var PGLITE_VER = '0.5.8';
     var CDN = 'https://cdn.jsdelivr.net/npm/@electric-sql/pglite@' + PGLITE_VER + '/dist/';
-    var ARQUIVOS_SQL = ['00_extensoes', '01_funcoes_base', '02_tabelas', '03_encaixe_vendas', '04_chaves_estrangeiras', '05_indices', '06_funcoes', '07_views', '08_gatilhos', '09_rls_e_politicas', '10_realtime', '13_ic_perfis_e_parametros', '14_ic_permissao_dinheiro', '15_ic_rls', '16_ic_jobs', '17_ic_ia', '18_ic_agendamentos', '19_ic_reserva_vendas', '20_ic_apoio_front', '21_ic_funis', '22_ic_historico_realtime', '23_ic_cadastro_padrao', '24_ic_limites_de_texto', '25_ic_usuarios_auth'];
+    var ARQUIVOS_SQL = ['00_extensoes', '01_funcoes_base', '02_tabelas', '03_encaixe_vendas', '04_chaves_estrangeiras', '05_indices', '06_funcoes', '07_views', '08_gatilhos', '09_rls_e_politicas', '10_realtime', '13_ic_perfis_e_parametros', '14_ic_permissao_dinheiro', '15_ic_rls', '16_ic_jobs', '17_ic_ia', '18_ic_agendamentos', '19_ic_reserva_vendas', '20_ic_apoio_front', '21_ic_funis', '22_ic_historico_realtime', '23_ic_cadastro_padrao', '24_ic_limites_de_texto', '25_ic_usuarios_auth', '26_ic_funcoes_sem_anon'];
     var SESSAO_KEY = 'ic_demo_session';
 
     // ---------- aviso visual de que é demo ----------

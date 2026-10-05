@@ -12,7 +12,7 @@ Supabase, com a lógica de negócio no banco (funções SQL, gatilhos e RLS).
 | camada | o que é |
 |---|---|
 | Front | `index.html` único, vanilla, sem build. CSS e JS dentro dele + `encaixes.js`, `encaixes-depois.js`, `ic-extensoes.js` |
-| Banco | Postgres no Supabase: `supabase/sql/00`–`25`, aplicados em ordem |
+| Banco | Postgres no Supabase: `supabase/sql/00`–`26`, aplicados em ordem |
 | Servidor | Supabase Edge Functions (Deno/TS): `supabase/functions/` |
 | Hospedagem | Vercel (site estático montado por `ferramentas/montar-site.mjs`, `vercel.json` com CSP) |
 
@@ -26,15 +26,15 @@ encaixes-depois.js         rotas de telas que não existem -> Kanban
 assets/logo-instituto-castro.svg
 config.example.js          copiar para config.js (URL + chave anon). config.js NÃO vai para o git
 ferramentas/               aplicar-tema-ic.mjs + tema-ic.css: identidade visual (tokens e verificações); auditar-xss.mjs e auditar-textos.mjs
-supabase/sql/              00–12 esquema base · 13 perfis/funis/telas · 14 dinheiro+flags · 15 RLS · 16 jobs · 17 IA · 18 agendamentos · 19 reserva vendas · 20 apoio front · 21 funis · 22 realtime do histórico · 23 cadastro padronizado · 24 limites de texto · 25 usuários só no Auth · LEIA-IC.md
+supabase/sql/              00–12 esquema base · 13 perfis/funis/telas · 14 dinheiro+flags · 15 RLS · 16 jobs · 17 IA · 18 agendamentos · 19 reserva vendas · 20 apoio front · 21 funis · 22 realtime do histórico · 23 cadastro padronizado · 24 limites de texto · 25 usuários só no Auth · 26 funções fora do anon · LEIA-IC.md
 supabase/functions/        ic-meta-webhook · ic-whatsapp-send · ic-ia-pre-atendimento · ic-agendamento · ic-usuarios · _shared/ · LEIA-IC.md
-teste/testar-na-base-vazia.mjs   sobe 00–25 num Postgres local (PGlite) e testa funções, RLS por papel e jobs
+teste/testar-na-base-vazia.mjs   sobe 00–26 num Postgres local (PGlite) e testa funções, RLS por papel e jobs
 docs/                      validações e documentos do projeto (prints e relatórios por correção)
 ```
 
 ## Subir do zero
 
-1. Projeto Supabase novo. Em **SQL Editor**, rode `supabase/sql/00` a `25`, um por vez, na ordem
+1. Projeto Supabase novo. Em **SQL Editor**, rode `supabase/sql/00` a `26`, um por vez, na ordem
    (no `11`, troque `<SEU-PROJETO>`; no `12`, os valores `< >`). Leia `supabase/sql/LEIA-IC.md`.
 2. Crie o primeiro usuário em Authentication → Users e a linha em `public.users` com `pw = 'supabase_auth'`
    (bloco comentado no fim do `13_ic_perfis_e_parametros.sql`).
@@ -89,7 +89,7 @@ cd supabase/functions && deno test --allow-env --allow-read _shared/
 ## Modo demonstração local (só para teste)
 
 Sem Supabase, dá para validar o front inteiro com dados fictícios. O banco real do projeto
-(`supabase/sql/00`–`25`) roda dentro do navegador via PGlite; só o login e a camada REST são simulados
+(`supabase/sql/00`–`26`) roda dentro do navegador via PGlite; só o login e a camada REST são simulados
 (`demo/demo-local.js`). Liga apenas em `localhost` e apenas se o `config.js` local tiver o bloco
 `DEMO_LOCAL` (o `config.js` não vai para o git e `demo/` não vai para a Vercel, ver `.vercelignore`).
 

@@ -496,6 +496,12 @@ await db.exec(`create or replace function auth.jwt() returns jsonb language sql 
 check('[anon] nao le clientes_crm', (await r(`select count(*)::int n from clientes_crm`))[0]?.n === 0);
 check('[anon] nao le users', (await r(`select count(*)::int n from users`))[0]?.n === 0);
 check('[anon] nao le crm_funis', (await r(`select count(*)::int n from crm_funis`))[0]?.n === 0);
+// 26: SECURITY DEFINER ignora RLS; anon nao pode chamar as que devolvem dado de card.
+x = await r(`select crm_cards_irmaos('00000000-0000-0000-0000-000000000000'::uuid) j`);
+check('26: [anon] nao executa crm_cards_irmaos', typeof x === 'string' && x.includes('permission denied'), x);
+x = await r(`select crm_mescla_resumo('00000000-0000-0000-0000-000000000000'::uuid) j`);
+check('26: [anon] nao executa crm_mescla_resumo', typeof x === 'string' && x.includes('permission denied'), x);
+check('26: [anon] ainda executa ic_eh_admin (usada pela RLS) e recebe false', (await r(`select ic_eh_admin() v`))[0]?.v === false);
 // sem RETURNING: devolver a linha exige SELECT, e anon nao tem (o front usa .insert() sem .select(), return=minimal)
 x = await r(`insert into audit_log (user_email, acao) values ('x@y.z', 'login_falhou')`);
 check('[anon] grava login_falhou em audit_log (sem returning)', ok(x), x);
@@ -504,6 +510,8 @@ check('[anon] ...mas nao le de volta (returning negado)', !ok(x), String(x).slic
 await db.exec(`reset role`);
 
 check('auditoria (16) em users gravou em audit_log_critico (insert + update do vendedor)', (await r(`select count(*)::int n from audit_log_critico where tabela = 'users'`))[0]?.n >= 2);
+
+check('26: authenticated executa crm_cards_irmaos e crm_mescla_resumo', (await r(`select has_function_privilege('authenticated', 'public.crm_cards_irmaos(uuid)', 'execute') and has_function_privilege('authenticated', 'public.crm_mescla_resumo(uuid)', 'execute') v`))[0]?.v === true);
 
 console.log('\n----- pg_policies: politicas abertas para public que sobraram -----');
 console.log(JSON.stringify(await r(`select tablename, policyname, cmd from pg_policies where schemaname='public' and roles='{public}' order by 1,2`)));
