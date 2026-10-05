@@ -1,0 +1,46 @@
+-- 19 IC: reserva do espaco de vendas (NAO implementado)
+-- IC CRM, camada sobre o esquema base (00-12).
+--
+-- Este arquivo nao cria tabela, coluna nem funcao. Ele so documenta, no
+-- proprio banco, onde a camada de venda da clinica vai se encaixar quando (e
+-- se) for escrita.
+--
+-- O encaixe previsto no esquema base:
+--
+--   * public.vendas (03_encaixe_vendas.sql): catorze funcoes do nucleo e tres
+--     telas perguntam "este card foi ganho, quando e quanto" com o recorte
+--       cliente_crm_id = <card> and ativa is not false and deleted_at is null
+--       and coalesce(excluida_contabilizacao, false) = false
+--     e leem data_fechamento e valor. Enquanto a tabela estiver vazia, a
+--     conversao e zero e nada quebra. Quando a clinica tiver venda (plano,
+--     cirurgia, pacote de acompanhamento), e UMA linha aqui por venda ganha,
+--     ou uma VIEW com o mesmo nome e as mesmas colunas lendo a tabela de
+--     venda nova. A regra ic_pode_ver_dinheiro() (14) ja cobre valor/valor_pago.
+--
+--   * Colunas de venda que moram no card (clientes_crm.valor, valor_pago,
+--     contrato_status, forma_pagamento, pgto_conciliado, parcelas,
+--     valor_parcela, data_venda): ficam. O gatilho marcar_data_venda (08) usa
+--     contrato_status e valor_pago. O front le por nome. A camada futura pode
+--     passar a preenche-las ou ignora-las, mas nao deve remove-las.
+--
+--   * detalhe_principal / detalhe_lateral: sao os dois paineis do card
+--     completo no front (crm.html, openCRMDetalhe). Hoje mostram dados do
+--     lead, conversa, historico e agendamentos. A camada de venda entra como
+--     uma secao a mais nesses dois paineis (ficha, pagamentos, contrato), sem
+--     tocar no que ja existe. Nenhum objeto de banco corresponde a eles: sao
+--     nomes do front, listados aqui para que quem abrir este arquivo saiba
+--     onde o dado de venda vai aparecer.
+--
+--   * Fora de escopo ate decidir: fn_excluir_venda, fn_excluir_ficha,
+--     crm_cards_por_contrato, dados_preenchidos, formulario_clientes,
+--     inadimplencia_*, rfm_segmentos, mkt_conversao_evento (a mescla ja pula
+--     tabelas que nao existem; ver crm_mesclar_grupo no 06).
+--
+-- Quando a camada for escrita: arquivos 20_ em diante, com cabecalho e
+-- ROLLBACK, sem reescrever funcao dos arquivos 00-12.
+
+comment on table public.vendas is
+  'ENCAIXE do CRM: uma linha por venda ganha de um card (ver 03_encaixe_vendas.sql). IC: RESERVADO para a camada de venda da clinica, ainda nao implementada (ver 19_ic_reserva_vendas.sql). Enquanto vazia, conversao = 0 e nada quebra. Valores sob ic_pode_ver_dinheiro().';
+
+-- ROLLBACK:
+-- comment on table public.vendas is 'ENCAIXE do CRM: uma linha por venda ganha de um card. Ver 03_encaixe_vendas.sql';

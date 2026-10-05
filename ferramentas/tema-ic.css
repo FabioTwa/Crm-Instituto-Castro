@@ -1,0 +1,398 @@
+        /* Tipografia (Parte 2.2): Manrope para títulos/labels/menu/botões, Inter para corpo. */
+        body { font-family: 'Inter', sans-serif; background: var(--ic-bg); color: var(--ic-text); font-size: 14px; line-height: 1.6; }
+        h1, h2, h3, h4, h5, h6, .page-header h1, .fin-header h1, .sidebar-item, .sidebar-section, .btn, button,
+        .form-group label, .perfil-field label, .crm-info-field label, .crm-kpi-label, .leads-num-rotulo, label,
+        .crm-col-title, .users-tab-btn, .crm-card-nome, .sidebar-user-name, .modal-header h2 { font-family: 'Manrope', sans-serif; }
+        h1, .page-header h1, .fin-header h1 { font-weight: 600; font-size: 28px; color: var(--ic-primary); letter-spacing: 0; }
+        h2, h3, .modal-header h2, .crm-info-section h3, .perfil-card h3 { font-weight: 600; font-size: 18px; color: var(--ic-primary); }
+        input, select, textarea, .form-input, .form-select, .form-textarea, .crm-conv-texto, td, .crm-timeline-text { font-family: 'Inter', sans-serif; }
+        .ic-eyebrow { font-family: 'Manrope', sans-serif; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 2px; color: var(--ic-secondary); }
+        .ic-meta { font-family: 'Inter', sans-serif; font-weight: 400; font-size: 12px; color: var(--ic-muted); }
+        .crm-kpi-value, .leads-num-valor { font-family: 'Inter', sans-serif; font-weight: 600; color: var(--ic-secondary); }
+
+        /* Bordas e sombras (Parte 2.4): borda sutil de 2px, sombra só em modal e no card arrastado. */
+        .card, .crm-kpi, .crm-col, .perfil-card, .login-card, .leads-card, .leads-num, .fin-table, .acao-item, .crm-import-box,
+        .users-table, table.fin-table, .crm-detalhe-sidebar .card, .crm-detalhe-main .card, .leads-secao, .ic-painel {
+            box-shadow: none !important; border: 2px solid var(--ic-border); border-radius: 10px; background: var(--ic-white);
+        }
+        .card:hover, .crm-kpi:hover, .perfil-card:hover { box-shadow: none !important; transform: none; }
+        .form-input, .form-select, .form-textarea, .crm-toolbar-select, .fin-filtro-mes, .crm-conv-input, .crm-edit-inline input, .crm-edit-inline select {
+            border: 2px solid var(--ic-border) !important; border-radius: 10px !important; background: var(--ic-white); color: var(--ic-text); font-size: 14px;
+        }
+        .form-input:focus, .form-select:focus, .form-textarea:focus, .crm-conv-input:focus { border-color: var(--ic-accent) !important; box-shadow: 0 0 0 3px var(--ic-accent-soft) !important; outline: none; }
+        .form-input::placeholder, .form-textarea::placeholder, .crm-conv-input::placeholder { color: var(--ic-muted); }
+        .form-group .required, .required { color: var(--ic-danger); }
+
+        /* Botões (Parte 2.4). Primário = pílula teal; .ic-folha = folha sólida (ação de destaque da tela). */
+        .btn { font-family: 'Manrope', sans-serif; font-weight: 600; font-size: 14px; text-transform: none; letter-spacing: 0; border-radius: 30px; }
+        .btn-primary, .cad-btn-novo, .crm-conv-enviar-btn, .icp-acao.ganho, .btn-primary.btn-sm {
+            background: var(--ic-accent) !important; color: var(--ic-white) !important; border: 3px solid #F9F9FEBF !important; border-radius: 30px; font-family: 'Manrope', sans-serif; font-weight: 600;
+        }
+        .btn-primary:hover:not(:disabled), .cad-btn-novo:hover, .crm-conv-enviar-btn:hover, .icp-acao.ganho:hover { background: var(--ic-secondary) !important; color: var(--ic-white) !important; }
+        .btn-secondary, .crm-edit-save, .users-tab-btn { background: transparent !important; color: var(--ic-secondary) !important; border: 2px solid var(--ic-secondary) !important; border-radius: 30px; font-family: 'Manrope', sans-serif; font-weight: 600; }
+        .btn-secondary:hover:not(:disabled), .crm-edit-save:hover { background: var(--ic-secondary-soft) !important; }
+        .users-tab-btn { border-color: var(--ic-border-strong) !important; color: var(--ic-muted) !important; }
+        .users-tab-btn.active { border-color: var(--ic-secondary) !important; color: var(--ic-secondary) !important; background: var(--ic-secondary-soft) !important; }
+        .ic-folha, .crm-btn-marcar-venda, .btn-primary.ic-folha {
+            border-radius: 20px 0 !important; border: none !important; background: var(--ic-accent) !important; color: var(--ic-white) !important;
+            font-family: 'Manrope', sans-serif; font-weight: 700; font-size: 14px; padding: 10px 22px; cursor: pointer;
+        }
+        .ic-folha:hover, .crm-btn-marcar-venda:hover { background: var(--ic-secondary) !important; }
+        .ic-folha-azul { background: var(--ic-secondary) !important; }
+        .ic-folha-azul:hover { background: var(--ic-accent) !important; }
+        .btn-danger, .crm-btn-marcar-perda, .ic-destrutivo, .btn-excluir { background: transparent !important; color: var(--ic-danger) !important; border: 2px solid var(--ic-danger) !important; border-radius: 30px; font-family: 'Manrope', sans-serif; font-weight: 600; }
+        .crm-btn-marcar-perda:hover, .ic-destrutivo:hover { background: var(--ic-danger-soft) !important; }
+        .ic-texto-icone { background: none; border: none; color: var(--ic-secondary); font-family: 'Manrope', sans-serif; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; padding: 6px 8px; }
+        .ic-texto-icone:hover { color: var(--ic-accent); }
+        .btn:disabled, .ic-folha:disabled { opacity: .55; cursor: not-allowed; }
+        .ic-pilula, .crm-chip, .leads-chip, .filtro-chip { border-radius: 30px; border: 3px solid #F9F9FEBF; background: var(--ic-secondary-soft); color: var(--ic-secondary); font-family: 'Manrope', sans-serif; font-weight: 600; font-size: 12px; padding: 4px 12px; }
+
+        /* Sidebar (Parte 3.2): fundo gelo, borda direita sutil, item ativo com fundo card e barra teal. */
+        .sidebar { background: var(--ic-bg-ice) !important; border-right: 2px solid var(--ic-border); color: var(--ic-primary); width: var(--ic-sidebar-w); min-width: var(--ic-sidebar-w); }
+        .sidebar-logo { padding: 22px 20px 12px; display: flex; flex-direction: column; align-items: center; gap: 4px; border-bottom: 2px solid var(--ic-border); background: var(--ic-white); cursor: pointer; }
+        .sidebar-logo img { width: 120px; height: auto; max-height: none; filter: none; }
+        .ic-logo-legenda { font-family: 'Manrope', sans-serif; font-weight: 500; font-size: 13px; color: var(--ic-muted); letter-spacing: 0; }
+        .sidebar-section { font-family: 'Manrope', sans-serif; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 2px; color: var(--ic-secondary); opacity: 1; padding: 14px 20px 6px; }
+        .sidebar-section:hover { color: var(--ic-accent); background: transparent; }
+        .sidebar-section .section-arrow { color: var(--ic-muted); }
+        .sidebar-item { color: var(--ic-text); font-family: 'Manrope', sans-serif; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; border-radius: 0; margin: 0; padding: 11px 18px; border-left: 4px solid transparent; white-space: normal; text-align: left; line-height: 1.3; }
+        .sidebar-item svg { color: var(--ic-muted); stroke: currentColor; }
+        .sidebar-item:hover { background: var(--ic-bg-card); color: var(--ic-primary); }
+        .sidebar-item.active { background: var(--ic-bg-card) !important; color: var(--ic-primary) !important; border-left-color: var(--ic-accent); font-weight: 700; }
+        .sidebar-item.active svg { color: var(--ic-accent); }
+        .sidebar-item.active .sidebar-pill, .sidebar-pill { display: none; }
+        .sidebar-divider { background: var(--ic-border); }
+        .sidebar-footer { border-top: 2px solid var(--ic-border); background: var(--ic-bg-ice); }
+        .sidebar-avatar { border-radius: 40px 0 !important; background: var(--ic-secondary) !important; color: var(--ic-white) !important; font-family: 'Manrope', sans-serif; font-weight: 700; }
+        .sidebar-user-name { color: var(--ic-primary); font-family: 'Manrope', sans-serif; font-weight: 600; }
+        .sidebar-logout-btn { color: var(--ic-muted); }
+        .sidebar-logout-btn:hover { color: var(--ic-danger); background: var(--ic-danger-soft); }
+        .ic-topbar { background: var(--ic-white); border-bottom: 2px solid var(--ic-border); }
+        .mobile-menu-btn { color: var(--ic-primary); background: transparent; }
+
+        /* Boot e login (Parte 3.1) */
+        .app-boot-loading { background: var(--ic-bg); }
+        .app-boot-loading img { height: auto; width: 200px; }
+        .app-boot-spinner { border-top-color: var(--ic-accent) !important; border-color: var(--ic-border-strong); border-top-color: var(--ic-accent) !important; }
+        .login-container { background: var(--ic-bg); }
+        .login-card { border-radius: 10px; background: var(--ic-white); border: 2px solid var(--ic-border); padding: 40px 36px; max-width: 420px; }
+        .login-logo { display: flex; flex-direction: column; align-items: center; gap: 6px; margin-bottom: 28px; }
+        .login-logo img { width: 230px; height: auto; max-height: none; }
+        .login-error { background: var(--ic-danger-soft); color: var(--ic-danger); border: 2px solid var(--ic-danger-soft); border-radius: 10px; font-size: 13px; }
+        .ic-login-rodape { margin-top: 18px; text-align: center; font-size: 12px; color: var(--ic-muted); }
+        .ic-login-sub { text-align: center; color: var(--ic-text); font-size: 14px; margin: -14px 0 22px; }
+
+        /* Cabeçalho de página */
+        .page-header { border-bottom: none; padding-bottom: 0; }
+        .back-link { color: var(--ic-secondary); font-family: 'Manrope', sans-serif; font-weight: 600; }
+
+        /* Kanban (Parte 3.3): coluna, card folha, badges. */
+        .crm-col { background: var(--ic-bg-ice); border: 2px solid var(--ic-border); border-radius: 10px; }
+        .crm-col-header { background: transparent; border-bottom: 2px solid var(--ic-border); }
+        .crm-col-title { font-family: 'Manrope', sans-serif; font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--ic-primary); }
+        .crm-col-count { background: var(--ic-white); color: var(--ic-secondary); border: 2px solid var(--ic-border); border-radius: 30px; font-family: 'Manrope', sans-serif; font-weight: 700; }
+        .crm-col-valor { color: var(--ic-secondary); font-family: 'Inter', sans-serif; font-weight: 600; }
+        .crm-col-body.drag-over { background: var(--ic-accent-soft); outline: 2px dashed var(--ic-accent); outline-offset: -4px; }
+        .crm-card-pro { background: var(--ic-white) !important; border: 2px solid var(--ic-border) !important; border-radius: 20px 0 !important; box-shadow: none !important; padding: 14px 16px; }
+        .crm-card-pro:hover { box-shadow: none !important; transform: none; border-color: var(--ic-accent) !important; }
+        .crm-card-pro.dragging { opacity: .85; transform: rotate(1.5deg); box-shadow: 0 8px 20px #A5AED54D !important; }
+        .crm-card-temp { display: none; }
+        .crm-card-nome { font-family: 'Manrope', sans-serif; font-weight: 600; font-size: 15px; color: var(--ic-primary); padding-right: 0; }
+        .ic-card-tel { font-family: 'Inter', sans-serif; font-size: 13px; color: var(--ic-text); margin: 2px 0 6px; }
+        .ic-card-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+        .ic-temp, .ic-badge { display: inline-flex; align-items: center; gap: 4px; font-family: 'Manrope', sans-serif; font-weight: 700; font-size: 11px; letter-spacing: .3px; padding: 3px 9px; border-radius: 30px; line-height: 1.3; }
+        .ic-temp-quente { background: var(--ic-danger-soft); color: var(--ic-danger); }
+        .ic-temp-morno { background: var(--ic-star-soft); color: var(--ic-primary); }
+        .ic-temp-frio { background: var(--ic-bg-ice); color: var(--ic-muted); border: 1px solid var(--ic-border-strong); }
+        .ic-badge-origem { background: var(--ic-secondary-soft); color: var(--ic-secondary); }
+        .ic-badge-alerta { background: var(--ic-danger-soft); color: var(--ic-danger); }
+        .ic-badge-ok { background: var(--ic-green-soft); color: var(--ic-primary); }
+        .ic-badge-neutro { background: var(--ic-bg-ice); color: var(--ic-muted); border: 1px solid var(--ic-border-strong); }
+        .ic-badge-ia { background: var(--ic-accent-soft); color: var(--ic-accent-dark); }
+        .ic-card-previa { font-family: 'Inter', sans-serif; font-size: 13px; color: var(--ic-text); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 6px; font-style: italic; }
+        .ic-card-previa::before { content: '\201C'; } .ic-card-previa::after { content: '\201D'; }
+        .ic-card-meta { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--ic-muted); }
+        .crm-card-valor { font-family: 'Inter', sans-serif; font-weight: 600; color: var(--ic-secondary) !important; }
+        .crm-card-footer { border-top: 2px solid var(--ic-border); margin-top: 8px; padding-top: 8px; }
+        .crm-card-vendedor { color: var(--ic-muted); font-size: 12px; }
+        .ic-avatar { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 40px 0; background: var(--ic-secondary); color: var(--ic-white); font-family: 'Manrope', sans-serif; font-weight: 700; font-size: 11px; }
+        .ic-avatar-grande { width: 56px; height: 56px; font-size: 18px; border-radius: 40px 0; }
+        .crm-toolbar-select, .crm-toolbar select { font-family: 'Manrope', sans-serif; font-weight: 600; color: var(--ic-primary); }
+        .ic-funil-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+        .ic-funil-tab { border-radius: 30px; border: 2px solid var(--ic-border-strong); background: var(--ic-white); color: var(--ic-text); font-family: 'Manrope', sans-serif; font-weight: 600; font-size: 13px; padding: 7px 16px; cursor: pointer; }
+        .ic-funil-tab.ativo { background: var(--ic-accent); color: var(--ic-white); border-color: var(--ic-accent); }
+        .ic-aviso-discreto { font-size: 12px; color: var(--ic-muted); background: var(--ic-bg-ice); border: 2px solid var(--ic-border); border-radius: 10px; padding: 8px 12px; margin: 0 0 12px; display: inline-flex; gap: 8px; align-items: center; }
+        .ic-aviso-discreto svg { color: var(--ic-secondary); }
+        .ic-tooltip-desabilitado { cursor: not-allowed; opacity: .6; }
+
+        /* Crachá da fila (Parte 3.13): sempre visível no Kanban; alerta quando a fila cresce. */
+        .ic-cracha { display: inline-flex; gap: 14px; align-items: center; background: var(--ic-white); border: 2px solid var(--ic-border); border-radius: 30px; padding: 6px 16px; font-family: 'Manrope', sans-serif; font-weight: 600; font-size: 13px; color: var(--ic-text); }
+        .ic-cracha b { font-family: 'Inter', sans-serif; font-weight: 700; color: var(--ic-secondary); font-size: 16px; margin-right: 4px; }
+        .ic-cracha.ic-alerta { border-color: var(--ic-danger); }
+        .ic-cracha.ic-alerta b.espera { color: var(--ic-danger); }
+
+        /* Detalhe do lead (Parte 3.4) */
+        .crm-detalhe-header { border-bottom: 2px solid var(--ic-border); }
+        #crm-detalhe-nome { font-family: 'Manrope', sans-serif !important; font-weight: 600 !important; font-size: 26px !important; color: var(--ic-primary) !important; }
+        .crm-etapa-step { font-family: 'Manrope', sans-serif; font-weight: 600; font-size: 12px; border-radius: 30px; background: var(--ic-bg-ice); color: var(--ic-muted); border: 2px solid var(--ic-border); }
+        .crm-etapa-step.passed { background: var(--ic-secondary-soft); color: var(--ic-secondary); border-color: transparent; }
+        .crm-etapa-step.active { background: var(--ic-accent); color: var(--ic-white); border-color: var(--ic-accent); }
+        .crm-info-field label { font-family: 'Manrope', sans-serif; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--ic-secondary); }
+        .crm-timeline::before { background: var(--ic-border-strong); }
+        .crm-timeline-dot { background: var(--ic-secondary); border-color: var(--ic-white); box-shadow: 0 0 0 2px var(--ic-border) !important; }
+        .crm-timeline-dot.dot-etapa { background: var(--ic-secondary); }
+        .crm-timeline-dot.dot-criacao { background: var(--ic-accent); }
+        .crm-timeline-dot.dot-anotacao { background: var(--ic-muted); }
+        .crm-timeline-dot.dot-automatico { background: var(--ic-star); }
+        .crm-timeline-dot.dot-reativacao { background: var(--ic-green); }
+        .ic-placeholder { border: 2px dashed var(--ic-border-strong); border-radius: 10px; padding: 18px 20px; background: var(--ic-bg-ice); margin-top: 16px; }
+        .ic-placeholder .ic-eyebrow { display: block; margin-bottom: 8px; }
+        .ic-placeholder p { color: var(--ic-muted); font-size: 13px; margin: 0; }
+        .ic-placeholder.pequeno { padding: 12px 14px; }
+        .ic-selo-automatico { display: inline-block; margin-left: 6px; font-family: 'Manrope', sans-serif; font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--ic-accent-dark); background: var(--ic-accent-soft); padding: 2px 8px; border-radius: 30px; vertical-align: middle; }
+        .ic-hist-linha { padding: 9px 0; border-bottom: 1px solid var(--ic-bg-ice); }
+        .ic-hist-texto { font-size: 13px; color: var(--ic-primary); line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+        .ic-hist-previa { font-size: 12px; color: var(--ic-muted); margin-top: 2px; white-space: pre-wrap; word-break: break-word; }
+        .ic-hist-meta { font-size: 11px; color: var(--ic-muted); margin-top: 3px; }
+        .crm-timeline-text .ic-hist-previa { margin-top: 2px; }
+
+        /* Conversa de WhatsApp (Parte 3.5) */
+        .crm-conv-body, .crm-detalhe-conv-body { background: var(--ic-bg) !important; border: 2px solid var(--ic-border) !important; border-radius: 10px !important; box-shadow: none !important; }
+        .crm-conv-bubble.lead, .crm-conv-bubble.esq { background: var(--ic-white) !important; color: var(--ic-text) !important; border: 2px solid var(--ic-border) !important; border-radius: 10px !important; }
+        .crm-conv-bubble.nos, .crm-conv-bubble.dir { background: var(--ic-accent-soft) !important; color: var(--ic-primary) !important; border: 2px solid transparent !important; border-radius: 10px !important; }
+        .crm-conv-texto { font-family: 'Inter', sans-serif; font-size: 14px; line-height: 1.6; }
+        .crm-conv-meta, .crm-conv-hora { font-family: 'Inter', sans-serif; font-size: 12px; color: var(--ic-muted); }
+        .ic-transcricao { margin-top: 6px; padding: 8px 10px; border-left: 3px solid var(--ic-accent); background: var(--ic-bg-ice); border-radius: 0 8px 8px 0; font-size: 13px; color: var(--ic-text); font-style: italic; }
+        .ic-transcricao .ic-eyebrow { font-size: 10px; letter-spacing: 1.5px; display: block; margin-bottom: 2px; font-style: normal; }
+        .ic-midia-placeholder { display: inline-flex; align-items: center; gap: 8px; color: var(--ic-muted); font-size: 13px; }
+        .ic-midia-placeholder svg { color: var(--ic-secondary); }
+        .ic-conv-espera { display: inline-flex; align-items: center; gap: 6px; background: var(--ic-danger-soft); color: var(--ic-danger); border-radius: 30px; padding: 4px 12px; font-family: 'Manrope', sans-serif; font-weight: 700; font-size: 12px; margin-bottom: 8px; }
+        .ic-conv-nota { font-size: 12px; color: var(--ic-muted); margin: 6px 0 0; display: flex; align-items: center; gap: 6px; }
+        .crm-conv-enviar { border-top: 2px solid var(--ic-border); background: var(--ic-white); }
+        .crm-conv-icon-btn { color: var(--ic-secondary); background: transparent; border: none; }
+        .crm-conv-icon-btn:hover { color: var(--ic-accent); background: var(--ic-accent-soft); }
+        .ic-autor-ia { font-family: 'Manrope', sans-serif; font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--ic-accent-dark); margin-bottom: 2px; }
+
+        /* Toasts */
+        .toast { border-radius: 10px; font-family: 'Inter', sans-serif; box-shadow: var(--ic-sombra-modal) !important; }
+        .toast-success { background: var(--ic-accent) !important; }
+        .toast-error { background: var(--ic-danger) !important; }
+        .toast-info { background: var(--ic-secondary) !important; }
+        .toast-warning { background: var(--ic-primary) !important; }
+
+        /* Tabelas densas (Histórico, Usuários, Leads) */
+        .fin-table th, .users-table th, table th { font-family: 'Manrope', sans-serif; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--ic-secondary); background: var(--ic-bg-ice); border-bottom: 2px solid var(--ic-border); }
+        .fin-table td, .users-table td, table td { border-bottom: 1px solid var(--ic-border-strong); color: var(--ic-text); font-size: 13px; }
+        .fin-table tr:hover td { background: var(--ic-bg-card); }
+
+        /* Leads (Parte 3.7) */
+        .leads-vazio { background: var(--ic-bg-ice); border: 2px dashed var(--ic-border-strong); border-radius: 10px; color: var(--ic-muted); font-size: 13px; padding: 18px; }
+        .leads-secao-cab, .leads-secao-cabecalho { border-bottom: 2px solid var(--ic-border); }
+        .leads-tab, .leads-aba { font-family: 'Manrope', sans-serif; font-weight: 600; border-radius: 30px; }
+        .leads-tab.ativa, .leads-aba.ativa { background: var(--ic-accent); color: var(--ic-white); }
+        .ic-vazio-grande { text-align: center; padding: 48px 24px; border: 2px dashed var(--ic-border-strong); border-radius: 10px; background: var(--ic-bg-ice); }
+        .ic-vazio-grande h3 { color: var(--ic-primary); margin-bottom: 6px; }
+        .ic-vazio-grande p { color: var(--ic-muted); font-size: 13px; }
+        .ic-vazio-grande svg { color: var(--ic-secondary); margin-bottom: 10px; }
+
+        /* Agendamentos (Parte 7) */
+        .ic-agenda-filtros { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; margin-bottom: 20px; }
+        .ic-agenda-filtros .form-group { margin: 0; min-width: 160px; }
+        .ic-agenda-dia { margin-bottom: 20px; }
+        .ic-agenda-dia h3 { font-size: 14px; color: var(--ic-secondary); text-transform: uppercase; letter-spacing: 1px; font-weight: 700; margin-bottom: 8px; }
+        .ic-agenda-item { display: grid; grid-template-columns: 90px 1fr auto; gap: 14px; align-items: center; background: var(--ic-white); border: 2px solid var(--ic-border); border-radius: 10px; padding: 12px 16px; margin-bottom: 8px; }
+        .ic-agenda-hora { font-family: 'Inter', sans-serif; font-weight: 600; font-size: 16px; color: var(--ic-secondary); }
+        .ic-agenda-nome { font-family: 'Manrope', sans-serif; font-weight: 600; color: var(--ic-primary); }
+        .ic-agenda-sub { font-size: 12px; color: var(--ic-muted); }
+        .ic-agenda-acoes { display: flex; gap: 6px; flex-wrap: wrap; justify-content: end; }
+        .ic-status-pendente { background: var(--ic-star-soft); color: var(--ic-primary); }
+        .ic-status-confirmado { background: var(--ic-accent-soft); color: var(--ic-accent-dark); }
+        .ic-status-cancelado { background: var(--ic-danger-soft); color: var(--ic-danger); }
+        .ic-status-realizado { background: var(--ic-green-soft); color: var(--ic-primary); }
+        .ic-status-faltou { background: var(--ic-bg-ice); color: var(--ic-muted); border: 1px solid var(--ic-border-strong); }
+        @media (max-width: 768px) { .ic-agenda-item { grid-template-columns: 1fr; } .sidebar { width: 100%; min-width: 0; } }
+
+        /* Permissões: destaque do interruptor de dinheiro */
+        .ic-permissao-dinheiro { border: 2px solid var(--ic-accent); background: var(--ic-accent-soft); border-radius: 10px; padding: 14px 16px; margin: 16px 0; display: flex; align-items: center; gap: 14px; }
+        .ic-permissao-dinheiro label { font-family: 'Manrope', sans-serif; font-weight: 700; color: var(--ic-primary); }
+        .ic-permissao-dinheiro small { display: block; color: var(--ic-text); font-weight: 400; font-size: 12px; }
+
+        /* Handoffs da IA (Ações do Dia) */
+        .ic-handoff { border-left: 4px solid var(--ic-accent); }
+        .ic-handoff-motivo { font-family: 'Manrope', sans-serif; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--ic-accent-dark); }
+
+        /* =====================================================================
+           SUPERFÍCIES SOBREPOSTAS (modal, painel lateral, gaveta, popover,
+           dropdown, toast). Regra única do tema:
+             - a superfície é SEMPRE opaca (--ic-white; cabeçalhos internos em --ic-bg-ice);
+             - o overlay atrás dela é --ic-overlay (derivado de --ic-primary);
+             - --ic-border, --ic-border-strong e --ic-overlay nunca são fundo de superfície
+               (aplicar-tema-ic.mjs reprova a execução se isso acontecer).
+           Fica no fim do bloco do tema para ganhar das regras anteriores.
+           ===================================================================== */
+        .modal-overlay, .crm-conv-modal, .ic-drawer-overlay, .doc-preview-overlay { background: var(--ic-overlay); }
+        .modal-overlay { position: fixed; inset: 0; z-index: var(--z-modal-overlay); }
+        .doc-preview-overlay { z-index: var(--z-modal-overlay); }
+        .modal-card, .crm-conv-card { background: var(--ic-white); border: 2px solid var(--ic-border-strong); box-shadow: var(--ic-sombra-modal) !important; opacity: 1; }
+        .modal-card { border-radius: 10px; position: relative; z-index: var(--z-modal); }
+        /* Painel lateral do lead: gaveta à direita, opaca, cabeçalho em gelo. */
+        .crm-conv-card { border-radius: 0; border-top: none; border-bottom: none; border-right: none; }
+        #icp-conteudo { background: var(--ic-white); }
+        .crm-conv-card .icp-cab, .crm-conv-card .icp-topo, .crm-conv-card .crm-conv-head, .crm-conv-card .crm-conv-header { background: var(--ic-bg-ice); }
+        /* Dropdowns e popovers */
+        .month-picker-dropdown, .inad-multi-dropdown, .gl-dropdown, .crm-dropdown, .crm-obs-tooltip {
+            background: var(--ic-white); border: 2px solid var(--ic-border-strong); border-radius: 10px; box-shadow: var(--ic-sombra-modal);
+        }
+        .month-picker-dropdown, .inad-multi-dropdown { z-index: var(--z-dropdown); }
+        /* Toast: sempre sólido */
+        .toast { background: var(--ic-primary); color: var(--ic-white); }
+        .toast-container { z-index: var(--z-toast); }
+
+        /* Crachá da fila (popover fixo no canto). Branco, borda forte, sombra suave,
+           texto sem encostar no número de destaque; z-index acima dos cards. */
+        .crm-fila {
+            background: var(--ic-white); color: var(--ic-text);
+            border: 2px solid var(--ic-border-strong); border-radius: 10px;
+            box-shadow: var(--ic-sombra-modal);
+            padding: 14px 30px 14px 16px; gap: 14px; align-items: flex-start;
+            max-width: min(380px, calc(100vw - 36px));
+            /* Selo fixo do canto, não popover de gatilho: fica ACIMA dos cards e ABAIXO do painel lateral, de modal e de toast. */
+            z-index: var(--z-dropdown);
+        }
+        .crm-fila:hover, .crm-fila.ativo { border-color: var(--ic-accent); background: var(--ic-white); }
+        .crm-fila.ic-alerta { border-color: var(--ic-danger); background: var(--ic-white); }
+        .crm-fila-num { flex: 0 0 auto; min-width: 34px; text-align: center; color: var(--ic-danger); }
+        .crm-fila.zerada .crm-fila-num { color: var(--ic-accent); }
+        .crm-fila-txt { flex: 1 1 auto; min-width: 0; color: var(--ic-text); overflow-wrap: anywhere; }
+        .crm-fila-txt strong { color: var(--ic-primary); }
+        .crm-fila-txt b { color: var(--ic-secondary); }
+        .crm-fila-alvo { color: var(--ic-text); border-bottom: 1px dashed var(--ic-border-strong); }
+        .crm-fila-alvo:hover, .crm-fila-alvo.ligado { color: var(--ic-primary); border-bottom-color: var(--ic-accent); }
+        .crm-fila-nota { color: var(--ic-muted); }
+        .crm-fila-limpar { color: var(--ic-muted); border-bottom: 1px dashed var(--ic-border-strong); }
+        .crm-fila-limpar:hover { color: var(--ic-primary); border-bottom-color: var(--ic-accent); }
+        .crm-fila-fechar { color: var(--ic-muted); }
+        .crm-fila-fechar:hover { color: var(--ic-primary); }
+        .ic-cracha { background: var(--ic-white); border: 2px solid var(--ic-border-strong); }
+
+        /* Bolhas claras: a bolha era escura com texto branco; metadados precisam de cor escura. */
+        .crm-conv-bubble.lead .crm-conv-meta, .crm-conv-bubble.nos .crm-conv-meta { color: var(--ic-muted); }
+        .crm-conv-bubble.lead .crm-conv-meta-tag, .crm-conv-bubble.nos .crm-conv-meta-tag { background: var(--ic-bg-ice); color: var(--ic-secondary); border: 1px solid var(--ic-border-strong); }
+        .vd-dado .value.empty { color: var(--ic-muted); }
+
+        /* Card completo (Parte 3.4): coluna principal larga + coluna lateral (conversa, placeholder, dados cadastrais).
+           Em tablet e mobile as colunas empilham, principal primeiro. */
+        .crm-detalhe-layout.ic-card-layout { grid-template-columns: minmax(0, 1.55fr) minmax(320px, 1fr); }
+        .crm-detalhe-layout.ic-card-layout > * { min-width: 0; }
+        @media (max-width: 1024px) { .crm-detalhe-layout.ic-card-layout { grid-template-columns: minmax(0, 1fr); } }
+        .back-link { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; text-decoration: none; margin-bottom: 14px; }
+        .back-link:hover { color: var(--ic-accent); text-decoration: none; }
+        .ic-vazio-grande { width: 100%; box-sizing: border-box; }
+        /* Cabeçalho do card: o nome ocupa a linha inteira; telefone/selos e ações vêm abaixo. */
+        .crm-detalhe-header #crm-detalhe-nome { flex: 1 1 100% !important; }
+        .crm-detalhe-header-actions { flex-wrap: wrap; }
+
+        /* =====================================================================
+           LAYOUT: largura da sidebar e gutter do conteúdo (tokens no :root)
+           Defeito: o tema deixou a sidebar com 270px e o .main-content ficou com margin-left de 240px (valor antigo), então o conteúdo entrava 30px por baixo da sidebar e o título colava nela. A largura agora é um
+           token só, usado pelos dois lados. O gutter vale para o container de TODAS as telas.
+           ===================================================================== */
+        @media (max-width: 1023px) { :root { --ic-content-gutter: 24px; } }
+        @media (max-width: 767px)  { :root { --ic-content-gutter: 16px; } }
+        .main-content { margin-left: var(--ic-sidebar-w); padding: 32px var(--ic-content-gutter) 32px; }
+        @media (max-width: 768px) { .main-content { margin-left: 0; padding: 72px var(--ic-content-gutter) 20px; } }
+
+        /* Sidebar: o menu rola sozinho e o rodapé (usuário + sair) fica fixo embaixo, sem cobrir itens.
+           A barra de rolagem era branca a 15% (invisível no fundo claro): quem tem o menu inteiro numa
+           janela baixa não percebia que dava para rolar e via o último item "cortado". */
+        .sidebar { display: flex; flex-direction: column; }
+        .sidebar-logo, .sidebar-footer { flex: 0 0 auto; }
+        .sidebar-nav { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-bottom: 24px;
+            scrollbar-width: thin; scrollbar-color: var(--ic-muted) transparent; }
+        .sidebar-nav::-webkit-scrollbar { width: 8px; }
+        .sidebar-nav::-webkit-scrollbar-track { background: transparent; }
+        .sidebar-nav::-webkit-scrollbar-thumb { background: var(--ic-muted); border-radius: 8px; border: 2px solid var(--ic-bg-ice); }
+        .sidebar-nav > *, .sidebar-group, .sidebar-item { flex-shrink: 0; }
+        .sidebar-footer { position: relative; background: var(--ic-bg-ice); }
+        .sidebar-logo { padding: 16px 20px 10px; }
+        /* O .main-content é item flex: sem min-width:0 ele cresce até a largura do conteúdo e a PÁGINA inteira rola na
+           horizontal (Kanban, Leads, Usuários). Com min-width:0 a largura é a da janela menos a sidebar, e a rolagem
+           horizontal fica dentro do quadro de colunas e das tabelas, que têm overflow próprio. */
+        .main-content { min-width: 0; }
+        /* ===== TOOLBAR ÚNICA (.ic-toolbar): a mesma régua no Pipeline, Leads, Ações do Dia, Agendamentos, Histórico e Usuários =====
+           Causa do desalinhamento no Pipeline: os selects tinham height:40px fixo com padding 10px 16px; o tema trocou a borda
+           para 2px e a fonte para 14px Manrope, e o conteúdo (40 - 20 - 4 = 16px) ficou menor que a linha de texto, cortando o
+           texto. Além disso cada campo tinha rótulo visível e a busca ficava numa segunda linha por falta de largura.
+           Aqui: altura única de 40px, padding vertical zero (o texto do select se centraliza sozinho), seta própria,
+           rótulo só para leitor de tela e quebra em linhas iguais. */
+        .ic-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 0 0 20px; min-width: 0; }
+        .ic-toolbar [hidden] { display: none !important; }
+        .ic-toolbar .ic-tb-item { position: relative; flex: 0 1 auto; min-width: 0; margin: 0; display: flex; align-items: center; gap: 8px; }
+        .ic-toolbar .ic-tb-label, .ic-toolbar .crm-filtro-label, .ic-toolbar .form-group > label {
+            position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+        .ic-toolbar .ic-tb-prefixo { font-family: 'Manrope', sans-serif; font-size: 13px; font-weight: 600; color: var(--ic-muted); white-space: nowrap; }
+        .ic-toolbar select, .ic-toolbar :where(input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"])) {
+            box-sizing: border-box; height: 40px; margin: 0; min-width: 0; padding: 0 12px; line-height: 1.2;
+            font-family: 'Manrope', sans-serif; font-size: 13px; font-weight: 600; color: var(--ic-primary);
+            border: 2px solid var(--ic-border) !important; border-radius: 10px !important; background-color: var(--ic-white); }
+        .ic-toolbar select {
+            width: 100%; padding-right: 34px; -webkit-appearance: none; -moz-appearance: none; appearance: none; cursor: pointer;
+            text-overflow: ellipsis; white-space: nowrap;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%23727586' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat; background-position: right 12px center; background-size: 12px; }
+        .ic-toolbar > select { flex: 0 1 190px; width: auto; min-width: 176px; }
+        .ic-toolbar select:focus, .ic-toolbar input:focus { border-color: var(--ic-accent) !important; box-shadow: 0 0 0 3px var(--ic-accent-soft) !important; outline: none; }
+        .ic-toolbar select:disabled { opacity: .6; cursor: not-allowed; }
+        .ic-toolbar .ic-tb-funil { flex: 0 1 200px; min-width: 150px; }
+        .ic-toolbar .ic-tb-resp { flex: 0 1 190px; min-width: 150px; }
+        .ic-toolbar .ic-tb-periodo { flex: 0 1 170px; min-width: 140px; }
+        .ic-toolbar .ic-tb-espera { flex: 0 1 160px; min-width: 140px; }
+        .ic-toolbar .ic-tb-datas { flex: 0 1 270px; gap: 6px; }
+        .ic-toolbar .ic-tb-datas input { flex: 1 1 0; padding: 0 8px; }
+        .ic-toolbar .ic-tb-horas { flex: 0 1 100px; }
+        .ic-toolbar .ic-tb-horas input { width: 100%; }
+        .ic-toolbar .ic-tb-data { flex: 0 1 190px; min-width: 150px; }
+        .ic-toolbar .ic-tb-data input { flex: 1 1 0; width: 100%; padding: 0 8px; }
+        /* Busca: largura flexível, lupa interna e × quando há texto */
+        .ic-toolbar .ic-tb-busca { flex: 1 1 260px; min-width: 220px; }
+        .ic-toolbar #crm-search-container { position: relative; width: 100%; }
+        .ic-toolbar input[type="search"] { width: 100%; padding: 0 36px 0 38px; font-family: 'Inter', sans-serif; font-weight: 500;
+            background-position: 14px center; background-repeat: no-repeat; }
+        .ic-toolbar input[type="search"]::placeholder { color: var(--ic-muted); font-weight: 400; }
+        .ic-tb-busca-limpar { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%;
+            background: transparent; color: var(--ic-muted); font-size: 18px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+        .ic-tb-busca-limpar:hover { background: var(--ic-bg-ice); color: var(--ic-primary); }
+        .ic-tb-busca-limpar[hidden] { display: none; }
+        /* Botões da toolbar: mesma altura, borda e raio dos campos */
+        .ic-toolbar .crm-btn-mais-filtros, .ic-toolbar .crm-btn-limpar-tudo, .ic-toolbar .ic-tb-btn {
+            box-sizing: border-box; height: 40px; margin: 0; padding: 0 14px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: auto; flex: 0 0 auto;
+            border: 2px solid var(--ic-border) !important; border-radius: 10px !important; background: var(--ic-white); color: var(--ic-primary);
+            font-family: 'Manrope', sans-serif; font-size: 13px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+        .ic-toolbar .crm-btn-mais-filtros:hover, .ic-toolbar .crm-btn-limpar-tudo:hover, .ic-toolbar .ic-tb-btn:hover { border-color: var(--ic-accent) !important; color: var(--ic-accent); }
+        .ic-toolbar .ic-tb-novo { margin-left: auto; flex: 0 0 auto; height: 40px; padding: 0 20px; }
+        .crm-toolbar-pro .crm-toolbar-btn { height: 40px; box-sizing: border-box; }
+        /* Abas de Usuários na mesma régua */
+        .ic-toolbar .users-tab-btn { height: 40px; box-sizing: border-box; padding: 0 18px; }
+        /* Espaçamento vertical único: 20px acima (título, crachá) e 20px abaixo (cabeçalho das colunas) */
+        .crm-toolbar-pro { margin-bottom: 20px; }
+        .ic-toolbar + #crm-filtros-chips, .ic-toolbar ~ .crm-chips-linha { margin-top: -8px; }
+        @media (max-width: 600px) {
+            .ic-toolbar { gap: 10px; }
+            .ic-toolbar .ic-tb-busca { order: -1; flex: 1 1 100%; min-width: 0; }
+            .ic-toolbar .ic-tb-funil { flex: 1 1 100%; }
+            .ic-toolbar .ic-tb-item:not(.ic-tb-busca):not(.ic-tb-funil):not(.ic-tb-datas):not(.ic-tb-horas) { flex: 1 1 calc(50% - 5px); min-width: 0; }
+            .ic-toolbar .ic-tb-datas { flex: 1 1 100%; }
+            .ic-toolbar > select { flex: 1 1 calc(50% - 5px); min-width: 0; }
+            .ic-toolbar .crm-btn-mais-filtros, .ic-toolbar .crm-btn-limpar-tudo { flex: 1 1 calc(50% - 5px); }
+            .ic-toolbar .ic-tb-novo { margin-left: 0; flex: 1 1 100%; }
+        }
+        /* Toque: o alvo mínimo no celular é 44px; a toolbar inteira (campos e botões) sobe junto, para continuar uniforme */
+        @media (max-width: 768px) {
+            .ic-toolbar select, .ic-toolbar :where(input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"])), .ic-toolbar .crm-btn-mais-filtros,
+            .ic-toolbar .crm-btn-limpar-tudo, .ic-toolbar .ic-tb-btn, .ic-toolbar .ic-tb-novo, .ic-toolbar .users-tab-btn { height: 44px; min-height: 44px; }
+        }
+        /* Telas muito estreitas: um filtro por linha, sem texto cortado (os botões ficam lado a lado) */
+        @media (max-width: 420px) {
+            .ic-toolbar .ic-tb-item:not(.ic-tb-horas), .ic-toolbar > select { flex: 1 1 100% !important; }
+            .ic-toolbar .ic-tb-horas { flex: 1 1 100%; }
+        }

@@ -1,0 +1,21 @@
+# Segredos e configuração local: nunca versionar
+.env
+.env.*
+!.env.example
+config.js
+
+# Supabase CLI (estado local)
+supabase/.temp/
+supabase/.branches/
+
+# Dependências, build e hospedagem
+node_modules/
+.vercel/
+
+# Sistema e editores
+.DS_Store
+Thumbs.db
+*.log
+
+# Ferramentas locais do Claude Code
+.claude/
