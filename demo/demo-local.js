@@ -22,7 +22,7 @@
 
     var PGLITE_VER = '0.5.8';
     var CDN = 'https://cdn.jsdelivr.net/npm/@electric-sql/pglite@' + PGLITE_VER + '/dist/';
-    var ARQUIVOS_SQL = ['00_extensoes', '01_funcoes_base', '02_tabelas', '03_encaixe_vendas', '04_chaves_estrangeiras', '05_indices', '06_funcoes', '07_views', '08_gatilhos', '09_rls_e_politicas', '10_realtime', '13_ic_perfis_e_parametros', '14_ic_permissao_dinheiro', '15_ic_rls', '16_ic_jobs', '17_ic_ia', '18_ic_agendamentos', '19_ic_reserva_vendas', '20_ic_apoio_front', '21_ic_funis', '22_ic_historico_realtime', '23_ic_cadastro_padrao', '24_ic_limites_de_texto'];
+    var ARQUIVOS_SQL = ['00_extensoes', '01_funcoes_base', '02_tabelas', '03_encaixe_vendas', '04_chaves_estrangeiras', '05_indices', '06_funcoes', '07_views', '08_gatilhos', '09_rls_e_politicas', '10_realtime', '13_ic_perfis_e_parametros', '14_ic_permissao_dinheiro', '15_ic_rls', '16_ic_jobs', '17_ic_ia', '18_ic_agendamentos', '19_ic_reserva_vendas', '20_ic_apoio_front', '21_ic_funis', '22_ic_historico_realtime', '23_ic_cadastro_padrao', '24_ic_limites_de_texto', '25_ic_usuarios_auth'];
     var SESSAO_KEY = 'ic_demo_session';
 
     // ---------- aviso visual de que é demo ----------
@@ -253,6 +253,23 @@
         invoke: async function (nome, opt) {
             var b = (opt && opt.body) || {};
             if (nome === 'ic-whatsapp-send') return { data: { ok: false, erro: 'envio_desligado' }, error: null };
+            if (nome === 'ic-usuarios' && b.acao === 'criar') {
+                // Sem Supabase Auth na demonstração: só a linha em users (o login de teste continua sendo o do config.js).
+                var email = String(b.email || '').trim().toLowerCase();
+                var dup = await new QB('users').select('id').eq('email', email).maybeSingle();
+                if (dup.data) return { data: { ok: false, erro: 'email_ja_cadastrado' }, error: null };
+                var ins = await new QB('users').insert({
+                    name: String(b.name || '').trim(), email: email, pw: 'supabase_auth',
+                    role: String(b.perfil || '').toUpperCase() === 'ADMIN' ? 'admin' : 'operador',
+                    perfil: b.perfil, perfil_id: b.perfil_id || null, status: 'ativo',
+                    vendedor_responsavel_id: b.vendedor_responsavel_id || null,
+                    vendedor_responsavel_nome: b.vendedor_responsavel_nome || null,
+                    vendedores_responsaveis_ids: b.vendedores_responsaveis_ids || null,
+                    telas_permitidas: b.telas_permitidas || null
+                }).select('id').single();
+                if (ins.error) return { data: null, error: ins.error };
+                return { data: { ok: true, id: ins.data.id }, error: null };
+            }
             if (nome === 'ic-agendamento') {
                 if (b.acao === 'criar') {
                     var r = await rpc('ic_agendamento_criar', { p_cliente: b.cliente_crm_id, p_inicio: b.inicio, p_fim: b.fim, p_responsavel: b.responsavel_id, p_titulo: b.titulo, p_tipo: b.tipo || 'consulta', p_obs: b.observacoes || null });

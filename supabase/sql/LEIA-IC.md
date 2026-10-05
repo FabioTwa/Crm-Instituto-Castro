@@ -1,10 +1,10 @@
 # IC CRM: banco de dados
 
 O banco do IC CRM e Postgres no Supabase, montado por 25 arquivos SQL numerados
-(`00_` a `24_`) que se aplicam em ordem. Os arquivos `00_` a `12_` sao o esquema
+(`00_` a `25_`) que se aplicam em ordem. Os arquivos `00_` a `12_` sao o esquema
 base: extensoes, tabelas, funcoes do nucleo do CRM, views, gatilhos, politicas
 iniciais, realtime, o varredor do webhook e parametros de exemplo. Os arquivos
-`13_` a `24_` sao as camadas do IC CRM (perfis, dinheiro, RLS, jobs, IA, agenda,
+`13_` a `25_` sao as camadas do IC CRM (perfis, dinheiro, RLS, jobs, IA, agenda,
 funis, cadastro), cada um com cabecalho e, quando altera algo existente, um bloco
 `-- ROLLBACK:` no fim. O `11_agendamentos.sql` agenda o varredor do webhook
 (`ic-meta-webhook`); troque `<SEU-PROJETO>` antes de rodar.
@@ -30,6 +30,7 @@ No Supabase, SQL Editor, um arquivo por vez:
 | `22_ic_historico_realtime.sql` | publica `crm_historico` no Realtime (anotacao de outro usuario aparece sem recarregar); idempotente, com rollback no rodape | 02 |
 | `23_ic_cadastro_padrao.sql` | CPF (`ic_cpf_valido`), e-mail e origem (lista oficial, chave estavel) validados no banco; cópia em `ic_bkp23_cadastro`, pendencias em `ic_cadastro_pendencias`; rollback no rodape | 02, 08 |
 | `24_ic_limites_de_texto.sql` | limites de tamanho (nome 200, profissao 100, observacoes 5000, funil 100) como CHECK NOT VALID; rollback no rodape | 02 |
+| `25_ic_usuarios_auth.sql` | `users.pw` so aceita `'supabase_auth'` (senha mora so no Supabase Auth, criada pela function `ic-usuarios`); trigger `ic_users_protege_campos`: quem nao e Admin so altera nome, foto e iniciais da propria linha; rollback no rodape | 14, 15 |
 
 Depois do 13, inserir o primeiro usuario (criado antes no Supabase Auth, mesmo
 e-mail) e o numero de WhatsApp: o bloco comentado no fim do 13 mostra como.
@@ -147,7 +148,7 @@ apareceriam como leads para quem nao e Admin).
 ## Rollback
 
 Cada arquivo tem o bloco `-- ROLLBACK:` com os comandos. Ordem inversa de
-dependencia: 24 -> 23 -> 22 -> 21 -> 18 -> 17 -> 16 -> 15 -> 14 -> 13. O 19 so tem um
+dependencia: 25 -> 24 -> 23 -> 22 -> 21 -> 18 -> 17 -> 16 -> 15 -> 14 -> 13. O 19 so tem um
 `comment on table`. Tabelas de dado (agendamentos, ia_*, ic_jobs_log) sao apagadas pelo
 rollback: exporte antes se tiver dado real.
 

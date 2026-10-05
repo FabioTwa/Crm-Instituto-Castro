@@ -345,6 +345,18 @@ x = await r(`select ic_anuncios_resumo(${ini}, ${fim}, null, null, 'anuncio', tr
 check('ic_anuncios_resumo (Vendedor, pediu dinheiro) dinheiro_omitido=true e valor nulo', ok(x) && x[0].j.dinheiro_omitido === true && x[0].j.total.valor_atribuidos === null && (x[0].j.linhas || []).every(l => l.valor === null && l.gasto === null), ok(x) ? x[0].j.total : x);
 x = await r(`select * from ic_origem_conversao(null, null, null, null)`);
 check('ic_origem_conversao (Vendedor) valor_total nulo, contagens presentes', ok(x) && x.length > 0 && x.every(l => l.valor_total === null && l.recebidos !== null), x);
+// 25: quem nao e Admin so muda nome/foto/iniciais da propria linha; pw nunca guarda senha.
+x = await r(`update users set perfil = 'Admin', role = 'admin' where id = 'vend-teste-0001'`);
+check('25: Vendedor NAO vira Admin sozinho', typeof x === 'string' && x.includes('so Admin altera'), x);
+x = await r(`update users set name = 'Vendedor Teste 2' where id = 'vend-teste-0001' returning name`);
+check('25: Vendedor muda o proprio nome', ok(x) && x[0]?.name === 'Vendedor Teste 2', x);
+await r(`update users set name = 'Vendedor Teste' where id = 'vend-teste-0001'`);
+await setJwt('admin@teste.local');
+x = await r(`update users set pw = 'senha123' where id = 'vend-teste-0001'`);
+check('25: users.pw recusa senha mesmo de Admin (so supabase_auth)', typeof x === 'string' && x.includes('users_pw_sem_senha'), x);
+x = await r(`update users set status = 'inativo' where id = 'vend-teste-0001' returning status`);
+check('25: Admin altera status de outro usuario', ok(x) && x[0]?.status === 'inativo', x);
+await r(`update users set status = 'ativo' where id = 'vend-teste-0001'`);
 await setJwt('ninguem@teste.local');
 check('ic_pode_ver_dinheiro() false (e-mail sem linha em users)', (await r(`select ic_pode_ver_dinheiro() v`))[0]?.v === false);
 await db.exec(`create or replace function auth.jwt() returns jsonb language sql stable as $$ select null::jsonb $$;`);
