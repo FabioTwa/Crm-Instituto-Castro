@@ -186,3 +186,9 @@ Os 4 erros de tipo que `deno check` aponta em `ic-meta-webhook/index.ts`
 client nas chamadas) são conhecidos e não afetam o deploy (o bundler do
 Supabase não roda o type-check); ficaram como estão para não mexer em regra de
 negócio.
+
+## Atribuição de anúncios do Google Ads
+
+O link de WhatsApp dos anúncios do Google leva, no fim do texto pré-preenchido (`?text=`), a marca
+`[ic:{campaignid}:{gclid}]` (macros do ValueTrack). O `ic-meta-webhook` lê a marca, grava
+`google_campanha_id` e `google_gclid` no card e tira o código do texto antes de gravar a conversa.

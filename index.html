@@ -11,11 +11,11 @@
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
 
     <!-- Supabase via CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js"></script>
     <!-- SheetJS para ler arquivos XLSX/XLS de extratos bancários -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- Lucide icons (visual profissional, mesma lib do Vercel/Linear/GitHub) -->
-    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <script src="https://unpkg.com/lucide@1.52.0/dist/umd/lucide.js"></script>
 
     <style>
         /* ===== RESET E BASE ===== */
@@ -6991,7 +6991,7 @@ var IC_ROTAS_ANTIGAS = {
 
 function showView(viewId) {
     if (IC_ROTAS_ANTIGAS[viewId]) {
-        window._jxAncoraPendente = IC_ROTAS_ANTIGAS[viewId].ancora;
+        window._icAncoraPendente = IC_ROTAS_ANTIGAS[viewId].ancora;
         viewId = IC_ROTAS_ANTIGAS[viewId].view;
     }
     document.querySelectorAll('.main-content .view').forEach(function(v) { v.classList.remove('active'); });
@@ -7417,7 +7417,7 @@ async function checkSession() {
     }
     // Tinha token guardado e mesmo assim nao ha sessao: expirou. Merece
     // mensagem propria, senao a pessoa acha que perdeu o acesso.
-    if (window._jxTinhaToken) {
+    if (window._icTinhaToken) {
         var exp = new Error('sessão expirada');
         exp.icTipo = 'sessao-expirada';
         throw exp;
@@ -10355,7 +10355,7 @@ function crmHandleConversaInsert(row) {
             // #crm-conv-body, na aba Conversa do painel e #icp-corpo. Sem a
             // segunda linha a mensagem nova so aparecia no F5.
             var mb = document.getElementById('crm-conv-body')
-                  || ((window._jxPainelAba || '') === 'conversa' ? document.getElementById('icp-corpo') : null);
+                  || ((window._icPainelAba || '') === 'conversa' ? document.getElementById('icp-corpo') : null);
             if (mb) crmAppendBalao(mb, row);
         }
         var vd = document.getElementById('view-crm-detalhe');
@@ -10476,17 +10476,17 @@ function crmAgendarReconexaoRealtime() {
 function crmRegistrarQueda(status) {
     try {
         var hoje = new Date().toISOString().slice(0, 10);
-        var reg = JSON.parse(localStorage.getItem('jx_rt_quedas') || '{}');
+        var reg = JSON.parse(localStorage.getItem('ic_rt_quedas') || '{}');
         Object.keys(reg).forEach(function (d) {
             if ((Date.now() - new Date(d).getTime()) > 7 * 864e5) delete reg[d];
         });
         if (!reg[hoje]) reg[hoje] = [];
         reg[hoje].push({ h: new Date().getHours(), s: status, vis: document.visibilityState });
-        localStorage.setItem('jx_rt_quedas', JSON.stringify(reg));
+        localStorage.setItem('ic_rt_quedas', JSON.stringify(reg));
     } catch (e) {}
 }
 window.icRtDiario = function () {
-    var reg = JSON.parse(localStorage.getItem('jx_rt_quedas') || '{}');
+    var reg = JSON.parse(localStorage.getItem('ic_rt_quedas') || '{}');
     Object.keys(reg).sort().forEach(function (d) {
         var porHora = {}, escondida = 0;
         reg[d].forEach(function (q) { porHora[q.h] = (porHora[q.h] || 0) + 1; if (q.vis === 'hidden') escondida++; });
@@ -10949,11 +10949,11 @@ function icAbrirConversaDoLead(clienteId, ev) {
     if (ev && ev.stopPropagation) ev.stopPropagation();
     // Guarda quem esta realmente rolando: as vezes e o .ic-scroll da tabela,
     // as vezes e o corpo do modal. Guarda os dois que tiverem rolagem.
-    window._jxListaScroll = [];
+    window._icListaScroll = [];
     var cont = document.getElementById('modal-lista-vendas-content');
     var modalLista = document.getElementById('modal-lista-vendas');
     [cont, cont && cont.querySelector('.ic-scroll'), modalLista && modalLista.querySelector('.modal-content, .modal-card, .modal-body')].forEach(function (el) {
-        if (el && el.scrollTop > 0) window._jxListaScroll.push({ el: el, top: el.scrollTop });
+        if (el && el.scrollTop > 0) window._icListaScroll.push({ el: el, top: el.scrollTop });
     });
     abrirModalConversaCRM(clienteId);
 }
@@ -10985,7 +10985,7 @@ var ICP_ABAS = [['anotacoes', 'Anotações'], ['atividades', 'Atividades'], ['co
 // escritas dariam duas regras diferentes com o tempo.
 function crmRefrescarDetalhe(id, mexeuNaEtapa) {
     var alvo = id || crmCurrentClienteId;
-    if (!window._jxPainelId) return loadCRMDetalhe(alvo);
+    if (!window._icPainelId) return loadCRMDetalhe(alvo);
     // Com o painel aberto o pipeline continua atras. Se a etapa mudou, o card
     // precisa trocar de coluna la tambem, senao a tela mente ate o proximo F5.
     if (mexeuNaEtapa) {
@@ -11011,10 +11011,10 @@ function icPainelAberto() {
 async function icAbrirPainelLead(clienteId, modo) {
     if (!clienteId) return;
     var jaAberto = icPainelAberto();
-    window._jxPainelModo = (modo === 'conversa') ? 'conversa' : 'painel';
+    window._icPainelModo = (modo === 'conversa') ? 'conversa' : 'painel';
     // Entrada nova pela lista ou pelo card: o caminho de volta comeca limpo.
-    window._jxVeioDaConversa = false;
-    window._jxPainelId = clienteId;
+    window._icVeioDaConversa = false;
+    window._icPainelId = clienteId;
     window._crmConversaModalId = clienteId;
     // As funcoes de gravar leem daqui. Sem isto, salvar no painel nao faz nada.
     crmCurrentClienteId = clienteId;
@@ -11043,22 +11043,22 @@ async function abrirModalConversaCRM(clienteId) { return icAbrirPainelLead(clien
 // De dentro da conversa para o painel, sem fechar e clicar de novo no card.
 // Troca o conteudo da mesma gaveta e marca o caminho de volta.
 function icPainelAbrirDaConversa() {
-    var id = window._jxPainelId || window._crmConversaModalId;
+    var id = window._icPainelId || window._crmConversaModalId;
     if (!id) return;
-    window._jxVeioDaConversa = true;
-    window._jxPainelModo = 'painel';
+    window._icVeioDaConversa = true;
+    window._icPainelModo = 'painel';
     icPainelRecarregar(id);
 }
 
 // O caminho de volta, num lugar so: o botao "Conversa" do cabecalho, o X, o Esc
 // e o gesto de voltar do celular passam todos por aqui.
 function icPainelVoltarParaConversa(veioDoGesto) {
-    window._jxVeioDaConversa = false;
-    window._jxPainelModo = 'conversa';
+    window._icVeioDaConversa = false;
+    window._icPainelModo = 'conversa';
     // Veio do gesto de voltar do celular: a entrada de historico ja foi
     // consumida. Sem repor, o proximo fechar sairia da tela.
     if (veioDoGesto) { try { history.pushState({ icPainel: 1 }, ''); } catch (e) {} }
-    return icPainelRecarregar(window._jxPainelId);
+    return icPainelRecarregar(window._icPainelId);
 }
 
 function icPainelEsc(e) { if (e.key === 'Escape' && icPainelAberto()) fecharModalConversaCRM(); }
@@ -11068,43 +11068,43 @@ function fecharModalConversaCRM(veioDoGesto) {
     // Quem chegou ao painel pela conversa volta para a conversa. Fechar nao
     // pode desfazer dois passos de uma vez: o vendedor abriu a conversa, subiu
     // para o painel, e esperar cair no pipeline seria perder o lugar.
-    if (window._jxVeioDaConversa && window._jxPainelModo === 'painel' && icPainelAberto()) {
+    if (window._icVeioDaConversa && window._icPainelModo === 'painel' && icPainelAberto()) {
         icPainelVoltarParaConversa(veioDoGesto);
         return;
     }
     var modal = document.getElementById('modal-conversa-crm');
     if (modal) modal.remove();
     window._crmConversaModalId = null;
-    window._jxPainelId = null;
-    window._jxPainelModo = null;
-    window._jxVeioDaConversa = false;
+    window._icPainelId = null;
+    window._icPainelModo = null;
+    window._icVeioDaConversa = false;
     document.removeEventListener('keydown', icPainelEsc);
     window.removeEventListener('popstate', icPainelPop);
     if (!veioDoGesto) { try { if (history.state && history.state.icPainel) history.back(); } catch (e) {} }
     // Devolve a lista - ou as colunas do pipeline - na mesma posicao de rolagem.
     // O board rola na horizontal, entao o left tambem volta.
-    (window._jxListaScroll || []).forEach(function (st) {
+    (window._icListaScroll || []).forEach(function (st) {
         if (!st.el || !st.el.isConnected) return;
         try {
             st.el.scrollTop = st.top;
             if (st.left != null) st.el.scrollLeft = st.left;
         } catch (e) {}
     });
-    window._jxListaScroll = null;
+    window._icListaScroll = null;
 }
 
 function icAbrirCardDaConversa() {
-    var id = window._jxPainelId || window._crmConversaModalId;
+    var id = window._icPainelId || window._crmConversaModalId;
     // Sair para a tela cheia fecha a gaveta de verdade: sem zerar a marca, o
     // fechar cairia no caminho de volta e a gaveta ficaria por cima do card.
-    window._jxVeioDaConversa = false;
+    window._icVeioDaConversa = false;
     fecharModalConversaCRM();
     closeModal('modal-lista-vendas');
     if (id) openCRMDetalhe(id);
 }
 
 function icPainelTrocarAba(aba) {
-    window._jxPainelAba = aba;
+    window._icPainelAba = aba;
     document.querySelectorAll('#icp-conteudo .icp-aba').forEach(function (b) {
         b.classList.toggle('ativa', b.getAttribute('data-aba') === aba);
     });
@@ -11183,10 +11183,10 @@ function icPainelIrmaosHtml(lista) {
 async function icPainelRecarregar(clienteId) {
     var alvo = document.getElementById('icp-conteudo');
     if (!alvo) return;
-    window._jxPainelId = clienteId;
+    window._icPainelId = clienteId;
     crmCurrentClienteId = clienteId;
 
-    if (window._jxPainelModo === 'conversa') return icPainelRenderConversaSo(clienteId, alvo);
+    if (window._icPainelModo === 'conversa') return icPainelRenderConversaSo(clienteId, alvo);
 
     // As MESMAS quatro consultas do card completo, menos as extras: o painel
     // nao mostra Pagamentos nem Dados preenchidos, entao nao paga por eles.
@@ -11214,11 +11214,11 @@ async function icPainelRecarregar(clienteId) {
             crmVendedoresList = vRes.data || [];
         } catch (e) { console.warn('[painel] vendedores não carregaram:', e); }
     }
-    window._jxPainelHist = (r[1] && r[1].data) || [];
-    window._jxPainelLead = cl;
-    window._jxPainelIrmaos = (r[2] && !r[2].error && Array.isArray(r[2].data)) ? r[2].data : [];
+    window._icPainelHist = (r[1] && r[1].data) || [];
+    window._icPainelLead = cl;
+    window._icPainelIrmaos = (r[2] && !r[2].error && Array.isArray(r[2].data)) ? r[2].data : [];
     if (r[2] && r[2].error) console.warn('[painel] irmãos não carregaram:', r[2].error.message);
-    window._jxPainelMescla = (r[3] && !r[3].error && r[3].data && typeof r[3].data === 'object') ? r[3].data : null;
+    window._icPainelMescla = (r[3] && !r[3].error && r[3].data && typeof r[3].data === 'object') ? r[3].data : null;
     if (r[3] && r[3].error) console.warn('[painel] resumo da mescla não carregou:', r[3].error.message);
 
     var etapas = CRM_ETAPAS;
@@ -11228,7 +11228,7 @@ async function icPainelRecarregar(clienteId) {
             if (et.data && et.data.length) etapas = et.data.map(function (e) { return { key: e.nome, label: e.label || e.nome, color: e.cor || 'var(--ic-secondary)' }; });
         } catch (e) {}
     }
-    window._jxPainelEtapas = etapas;
+    window._icPainelEtapas = etapas;
 
     var idx = -1;
     for (var i = 0; i < etapas.length; i++) if (etapas[i].key === cl.etapa) { idx = i; break; }
@@ -11254,7 +11254,7 @@ async function icPainelRecarregar(clienteId) {
        // Chegou aqui pela conversa: o caminho de volta aparece escrito, e nao
        // so no X. Fechar tambem volta para a conversa - o botao e a versao
        // visivel do mesmo gesto.
-       + (window._jxVeioDaConversa
+       + (window._icVeioDaConversa
             ? '<button type="button" class="crm-conv-abrir-card" onclick="icPainelVoltarParaConversa()"'
               + ' title="Voltar para a conversa deste lead">\u2190 Conversa</button>' : '')
        + '<button type="button" class="crm-conv-abrir-card" onclick="icAbrirCardDaConversa()">Abrir card completo</button>'
@@ -11267,10 +11267,10 @@ async function icPainelRecarregar(clienteId) {
     // Medido em 24/09/2026: 71 grupos, 163 cards. A linha aparece nos DOIS
     // lados, porque quem esta com a conversa aberta tambem precisa saber.
     // Sem irmao, nao aparece nada: linha dizendo "nenhum" e ruido.
-    h += icPainelIrmaosHtml(window._jxPainelIrmaos);
+    h += icPainelIrmaosHtml(window._icPainelIrmaos);
 
     // --- O QUE ESTE CARD ABSORVEU ---
-    h += icPainelMesclaHtml(window._jxPainelMescla);
+    h += icPainelMesclaHtml(window._icPainelMescla);
 
     // --- ACOES RAPIDAS: nao precisar entrar no card e o objetivo ---
     h += '<div class="icp-acoes">';
@@ -11331,7 +11331,7 @@ async function icPainelRecarregar(clienteId) {
 
     // --- ABAS ---
     h += '<div class="icp-abas">';
-    var abaAtual = window._jxPainelAba || 'anotacoes';
+    var abaAtual = window._icPainelAba || 'anotacoes';
     for (var a = 0; a < ICP_ABAS.length; a++) {
         h += '<button type="button" class="icp-aba' + (ICP_ABAS[a][0] === abaAtual ? ' ativa' : '') + '"'
            + ' data-aba="' + ICP_ABAS[a][0] + '" onclick="icPainelTrocarAba(\'' + ICP_ABAS[a][0] + '\')">' + ICP_ABAS[a][1] + '</button>';
@@ -11390,9 +11390,9 @@ async function icPainelRenderConversaSo(clienteId, alvo) {
 function icPainelRenderAba() {
     var box = document.getElementById('icp-corpo');
     if (!box) return;
-    var aba = window._jxPainelAba || 'anotacoes';
-    var id = window._jxPainelId;
-    var hist = window._jxPainelHist || [];
+    var aba = window._icPainelAba || 'anotacoes';
+    var id = window._icPainelId;
+    var hist = window._icPainelHist || [];
 
     if (aba === 'conversa') {
         // O espelhamento do WhatsApp, o mesmo componente do card completo.
@@ -11435,12 +11435,12 @@ function icPainelLinhaHist(x) { return icPainelLinhaHtml(x); } // [ic] renderiza
 function icAbrirCardDoPipeline(id) {
     if (window._crmLastDragTime && (Date.now() - window._crmLastDragTime) < 300) return;
     // Guarda a rolagem do pipeline para devolver na mesma posicao ao fechar.
-    window._jxListaScroll = [];
+    window._icListaScroll = [];
     document.querySelectorAll('.crm-col-body').forEach(function (el) {
-        if (el && el.scrollTop > 0) window._jxListaScroll.push({ el: el, top: el.scrollTop });
+        if (el && el.scrollTop > 0) window._icListaScroll.push({ el: el, top: el.scrollTop });
     });
     var board = document.querySelector('.crm-board, #crm-board');
-    if (board && board.scrollLeft > 0) window._jxListaScroll.push({ el: board, top: board.scrollTop, left: board.scrollLeft });
+    if (board && board.scrollLeft > 0) window._icListaScroll.push({ el: board, top: board.scrollTop, left: board.scrollLeft });
     icAbrirPainelLead(id);
 }
 
@@ -12471,50 +12471,6 @@ async function loadPipelines() {
 
 function openModalNovoPipeline() {
     criarNovoPipelineInline(); // Usa o modal moderno
-}
-
-function _openModalNovoPipeline_old() {
-    var nome = prompt('Nome do novo pipeline:');
-    if (!nome) return;
-
-    var etapasStr = prompt('Etapas separadas por vírgula (ex: Novo, Contato, Negociação, Fechado):');
-    if (!etapasStr) return;
-
-    var cores = ['var(--ic-secondary)', 'var(--ic-muted)', 'var(--ic-star)', 'var(--ic-accent)', 'var(--ic-secondary)', 'var(--ic-accent)', 'var(--ic-danger)', 'var(--ic-secondary)'];
-    var etapas = etapasStr.split(',').map(function(e, idx) {
-        var label = e.trim();
-        var key = label.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-        return { key: key, label: label, color: cores[idx % cores.length] };
-    });
-
-    criarPipeline(nome, etapas);
-}
-
-async function criarPipeline(nome, etapas) {
-    var maxOrdem = 0;
-    for (var i = 0; i < crmPipelines.length; i++) {
-        if (crmPipelines[i].ordem > maxOrdem) maxOrdem = crmPipelines[i].ordem;
-    }
-
-    var funilResult = await supabaseClient.from('crm_funis').insert({
-        nome: nome,
-        ativo: true,
-        ordem: maxOrdem + 1,
-        criado_por: currentUser ? currentUser.email : null,
-        usuarios_permitidos: '[]'
-    }).select();
-
-    if (funilResult.error) { showToast('Erro: ' + funilResult.error.message, 'error'); return; }
-
-    var novoFunilId = funilResult.data[0].id;
-    var etapasInsert = etapas.map(function(e, idx) {
-        return { funil_id: novoFunilId, nome: e.key, label: e.label, cor: e.color, ordem: idx + 1 };
-    });
-    await supabaseClient.from('crm_funil_etapas').insert(etapasInsert);
-
-    showToast('Funil "' + nome + '" criado!', 'success');
-    crmPipelines = []; // Force reload
-    loadPipelines();
 }
 
 async function editarPipeline(id) {
@@ -16038,7 +15994,7 @@ async function _loadLeadsImpl(container, filtrosPreservados) {
 
     container.innerHTML = html;
     leadsObservarSecoes();
-    if (window._jxAncoraPendente) { var anc = window._jxAncoraPendente; window._jxAncoraPendente = null; leadsIrParaSecao(anc); }
+    if (window._icAncoraPendente) { var anc = window._icAncoraPendente; window._icAncoraPendente = null; leadsIrParaSecao(anc); }
 
     // Popular dropdown de funis
     var funilSelect = document.getElementById('leads-filtro-funil');
@@ -16295,7 +16251,7 @@ document.addEventListener('DOMContentLoaded', function() {
     window._bootStart = Date.now();
     // Havia token guardado? Decide se a ausencia de sessao e primeiro acesso
     // (vai pro login) ou sessao vencida (mensagem propria).
-    try { window._jxTinhaToken = Object.keys(localStorage).some(function (k) { return /^sb-.*-auth-token$/.test(k); }); } catch (e) { window._jxTinhaToken = false; }
+    try { window._icTinhaToken = Object.keys(localStorage).some(function (k) { return /^sb-.*-auth-token$/.test(k); }); } catch (e) { window._icTinhaToken = false; }
     var _bootLogo = document.getElementById('boot-logo');
     var _loginImg = document.querySelector('.login-logo img');
     if (_bootLogo && _loginImg) _bootLogo.src = _loginImg.src;

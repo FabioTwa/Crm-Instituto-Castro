@@ -11,6 +11,7 @@ supabase/.branches/
 # Dependências, build e hospedagem
 node_modules/
 .vercel/
+site/
 
 # Sistema e editores
 .DS_Store

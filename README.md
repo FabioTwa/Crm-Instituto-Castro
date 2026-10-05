@@ -14,7 +14,7 @@ Supabase, com a lógica de negócio no banco (funções SQL, gatilhos e RLS).
 | Front | `index.html` único, vanilla, sem build. CSS e JS dentro dele + `encaixes.js`, `encaixes-depois.js`, `ic-extensoes.js` |
 | Banco | Postgres no Supabase: `supabase/sql/00`–`24`, aplicados em ordem |
 | Servidor | Supabase Edge Functions (Deno/TS): `supabase/functions/` |
-| Hospedagem | Vercel (site estático, `vercel.json` com CSP) |
+| Hospedagem | Vercel (site estático montado por `ferramentas/montar-site.mjs`, `vercel.json` com CSP) |
 
 ## Estrutura
 
@@ -39,7 +39,11 @@ docs/                      validações e documentos do projeto (prints e relat�
 2. Crie o primeiro usuário em Authentication → Users e a linha em `public.users` com `pw = 'supabase_auth'`
    (bloco comentado no fim do `13_ic_perfis_e_parametros.sql`).
 3. Publique as Edge Functions e cadastre os segredos (lista e comandos em `supabase/functions/LEIA-IC.md`).
-4. `cp config.example.js config.js`, preencha URL e chave anon, publique a pasta na Vercel.
+4. Vercel: importe este repositório e cadastre as variáveis `SUPABASE_URL` e `SUPABASE_ANON_KEY` (chave **anon**).
+   O build (`ferramentas/montar-site.mjs`, chamado pelo `vercel.json`) gera o `config.js` a partir delas e publica
+   só o front na pasta `site/`. SQL, Edge Functions, docs, testes e demonstração não vão para o site.
+   O build aborta se faltar variável ou se a chave não for a anon.
+   Para rodar local sem a Vercel: `cp config.example.js config.js` e preencha.
 5. WhatsApp: siga o checklist da Meta em `supabase/functions/LEIA-IC.md` (número em coexistência por QR code,
    webhook em `/functions/v1/ic-meta-webhook`, WABA inscrita no app, `meta_phone_id` em `vendedores_whatsapp`).
 

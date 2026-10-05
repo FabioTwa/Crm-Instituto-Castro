@@ -695,8 +695,8 @@
     // "Abrir card completo" na gaveta: fecha a gaveta SEM history.back() (que corria contra o
     // pushState do card e devolvia ao Kanban) e abre a rota do card.
     window.icAbrirCardDaConversa = function () {
-        var id = window._jxPainelId || window._crmConversaModalId;
-        window._jxVeioDaConversa = false;
+        var id = window._icPainelId || window._crmConversaModalId;
+        window._icVeioDaConversa = false;
         fecharModalConversaCRM(true);
         if (id) window.openCRMDetalhe(id);
     };
@@ -858,7 +858,7 @@
             _roteando = true;
             try {
                 if (p.view === 'view-crm') icAplicarQueryPipeline(p.q);
-                if (p.view === 'view-leads') window._jxAncoraPendente = sub;
+                if (p.view === 'view-leads') window._icAncoraPendente = sub;
                 showView(p.view);
             } finally { _roteando = false; }
             return;
@@ -1097,8 +1097,8 @@
     // e o recarregamento do banco confirma em seguida.
     window.icAtualizarHistorico = async function (clienteId, novaLinha) {
         var lista = null;
-        var painelAberto = window._jxPainelId === clienteId && typeof icPainelAberto === 'function' && icPainelAberto();
-        var base = painelAberto ? (window._jxPainelHist || []) : null;
+        var painelAberto = window._icPainelId === clienteId && typeof icPainelAberto === 'function' && icPainelAberto();
+        var base = painelAberto ? (window._icPainelHist || []) : null;
         var tl = document.getElementById('ic-timeline');
         if (!base && tl && tl.dataset.cliente === clienteId) base = tl._hist || [];
         if (novaLinha) {
@@ -1110,8 +1110,8 @@
         icMontarHistorico(clienteId, lista);
     };
     function icMontarHistorico(clienteId, lista) {
-        if (window._jxPainelId === clienteId && typeof icPainelAberto === 'function' && icPainelAberto()) {
-            window._jxPainelHist = lista;
+        if (window._icPainelId === clienteId && typeof icPainelAberto === 'function' && icPainelAberto()) {
+            window._icPainelHist = lista;
             var tinhaFoco = document.activeElement && document.activeElement.id === 'icp-anotacao-input';
             if (typeof icPainelRenderAba === 'function') icPainelRenderAba();
             if (tinhaFoco) { var ni = document.getElementById('icp-anotacao-input'); if (ni) ni.focus(); }
@@ -1135,7 +1135,7 @@
         if (_enviandoNota) return;
         var input = document.getElementById(origem === 'painel' ? 'icp-anotacao-input' : 'crm-anotacao-input');
         if (!input) return;
-        var clienteId = origem === 'painel' ? window._jxPainelId : crmCurrentClienteId;
+        var clienteId = origem === 'painel' ? window._icPainelId : crmCurrentClienteId;
         if (!clienteId) return;
         var texto = input.value.trim();
         if (!texto) { input.value = ''; icErroCampo(input, 'Escreva a anotação antes de adicionar.'); input.focus(); return; }
@@ -1205,10 +1205,10 @@
     var _canalHist = null;
     window.icOnHistoricoInsert = function (payload) {
         var novo = payload && payload.new; if (!novo || !novo.cliente_id) return;
-        var aberto = (window._jxPainelId === novo.cliente_id) || (document.getElementById('ic-timeline') && document.getElementById('ic-timeline').dataset.cliente === novo.cliente_id);
+        var aberto = (window._icPainelId === novo.cliente_id) || (document.getElementById('ic-timeline') && document.getElementById('ic-timeline').dataset.cliente === novo.cliente_id);
         if (!aberto) return;
         var tl = document.getElementById('ic-timeline');
-        var atual = (window._jxPainelId === novo.cliente_id ? window._jxPainelHist : (tl && tl._hist)) || [];
+        var atual = (window._icPainelId === novo.cliente_id ? window._icPainelHist : (tl && tl._hist)) || [];
         if (atual.some(function (x) { return x.id === novo.id; })) return;   // é a nossa própria gravação
         icAtualizarHistorico(novo.cliente_id);
     };
