@@ -1,10 +1,10 @@
 # IC CRM: banco de dados
 
-O banco do IC CRM e Postgres no Supabase, montado por 27 arquivos SQL numerados
-(`00_` a `26_`) que se aplicam em ordem. Os arquivos `00_` a `12_` sao o esquema
+O banco do IC CRM e Postgres no Supabase, montado por 28 arquivos SQL numerados
+(`00_` a `27_`) que se aplicam em ordem. Os arquivos `00_` a `12_` sao o esquema
 base: extensoes, tabelas, funcoes do nucleo do CRM, views, gatilhos, politicas
 iniciais, realtime, o varredor do webhook e parametros de exemplo. Os arquivos
-`13_` a `26_` sao as camadas do IC CRM (perfis, dinheiro, RLS, jobs, IA, agenda,
+`13_` a `27_` sao as camadas do IC CRM (perfis, dinheiro, RLS, jobs, IA, agenda,
 funis, cadastro), cada um com cabecalho e, quando altera algo existente, um bloco
 `-- ROLLBACK:` no fim. O `11_agendamentos.sql` agenda o varredor do webhook
 (`ic-meta-webhook`); troque `<SEU-PROJETO>` antes de rodar.
@@ -32,6 +32,7 @@ No Supabase, SQL Editor, um arquivo por vez:
 | `24_ic_limites_de_texto.sql` | limites de tamanho (nome 200, profissao 100, observacoes 5000, funil 100) como CHECK NOT VALID; rollback no rodape | 02 |
 | `25_ic_usuarios_auth.sql` | `users.pw` so aceita `'supabase_auth'` (senha mora so no Supabase Auth, criada pela function `ic-usuarios`); trigger `ic_users_protege_campos`: quem nao e Admin so altera nome, foto e iniciais da propria linha; rollback no rodape | 14, 15 |
 | `26_ic_funcoes_sem_anon.sql` | `crm_cards_irmaos` e `crm_mescla_resumo` (SECURITY DEFINER) so para authenticated/service_role; `ic_agendamento_confirmado` (gatilho) fora da API; rollback no rodape | 06, 18 |
+| `27_ic_admin_protegido.sql` | gatilho `ic_users_protege_admin`: ninguem altera o proprio perfil/papel/status pelo app, e nenhuma alteracao ou exclusao deixa o sistema sem Admin ativo (sem JWT, SQL Editor, passa: caminho de recuperacao); rollback no rodape | 14, 25 |
 
 Depois do 13, inserir o primeiro usuario (criado antes no Supabase Auth, mesmo
 e-mail) e o numero de WhatsApp: o bloco comentado no fim do 13 mostra como.
@@ -149,7 +150,7 @@ apareceriam como leads para quem nao e Admin).
 ## Rollback
 
 Cada arquivo tem o bloco `-- ROLLBACK:` com os comandos. Ordem inversa de
-dependencia: 26 -> 25 -> 24 -> 23 -> 22 -> 21 -> 18 -> 17 -> 16 -> 15 -> 14 -> 13. O 19 so tem um
+dependencia: 27 -> 26 -> 25 -> 24 -> 23 -> 22 -> 21 -> 18 -> 17 -> 16 -> 15 -> 14 -> 13. O 19 so tem um
 `comment on table`. Tabelas de dado (agendamentos, ia_*, ic_jobs_log) sao apagadas pelo
 rollback: exporte antes se tiver dado real.
 

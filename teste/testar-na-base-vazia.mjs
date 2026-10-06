@@ -347,7 +347,9 @@ x = await r(`select * from ic_origem_conversao(null, null, null, null)`);
 check('ic_origem_conversao (Vendedor) valor_total nulo, contagens presentes', ok(x) && x.length > 0 && x.every(l => l.valor_total === null && l.recebidos !== null), x);
 // 25: quem nao e Admin so muda nome/foto/iniciais da propria linha; pw nunca guarda senha.
 x = await r(`update users set perfil = 'Admin', role = 'admin' where id = 'vend-teste-0001'`);
-check('25: Vendedor NAO vira Admin sozinho', typeof x === 'string' && x.includes('so Admin altera'), x);
+check('25/27: Vendedor NAO vira Admin sozinho', typeof x === 'string' && (x.includes('so Admin altera') || x.includes('proprio perfil')), x);
+x = await r(`update users set vendedores_responsaveis_ids = array['outro'] where id = 'vend-teste-0001'`);
+check('25: Vendedor NAO amplia o proprio escopo de atendentes', typeof x === 'string' && x.includes('so Admin altera'), x);
 x = await r(`update users set name = 'Vendedor Teste 2' where id = 'vend-teste-0001' returning name`);
 check('25: Vendedor muda o proprio nome', ok(x) && x[0]?.name === 'Vendedor Teste 2', x);
 await r(`update users set name = 'Vendedor Teste' where id = 'vend-teste-0001'`);
@@ -357,6 +359,23 @@ check('25: users.pw recusa senha mesmo de Admin (so supabase_auth)', typeof x ==
 x = await r(`update users set status = 'inativo' where id = 'vend-teste-0001' returning status`);
 check('25: Admin altera status de outro usuario', ok(x) && x[0]?.status === 'inativo', x);
 await r(`update users set status = 'ativo' where id = 'vend-teste-0001'`);
+// 27: ninguem muda o proprio perfil/status; o sistema nunca fica sem Admin ativo.
+x = await r(`update users set perfil = 'Vendedor', perfil_id = (select id from perfis_acesso where nome='Vendedor') where email = 'admin@teste.local'`);
+check('27: Admin NAO rebaixa o proprio perfil', typeof x === 'string' && x.includes('proprio perfil'), x);
+x = await r(`update users set status = 'inativo' where email = 'admin@teste.local'`);
+check('27: Admin NAO se desativa', typeof x === 'string' && x.includes('proprio perfil'), x);
+x = await r(`update users set perfil = 'Admin', perfil_id = (select id from perfis_acesso where nome='Admin') where id = 'vend-teste-0001' returning perfil`);
+check('27: Admin promove outro usuario a Admin', ok(x) && x[0]?.perfil === 'Admin', x);
+x = await r(`update users set perfil = 'Vendedor', perfil_id = (select id from perfis_acesso where nome='Vendedor') where id = 'vend-teste-0001' returning perfil`);
+check('27: Admin rebaixa outro Admin quando sobra Admin ativo', ok(x) && x[0]?.perfil === 'Vendedor', x);
+await db.exec(`create or replace function auth.jwt() returns jsonb language sql stable as $$ select '{"role":"service_role"}'::jsonb $$;`);
+x = await r(`update users set status = 'inativo' where email = 'admin@teste.local'`);
+check('27: service_role NAO desativa o ultimo Admin', typeof x === 'string' && x.includes('ultimo Admin'), x);
+x = await r(`delete from users where email = 'admin@teste.local'`);
+check('27: service_role NAO apaga o ultimo Admin', typeof x === 'string' && x.includes('ultimo Admin'), x);
+await db.exec(`create or replace function auth.jwt() returns jsonb language sql stable as $$ select null::jsonb $$;`);
+x = await r(`update users set perfil = 'Admin' where email = 'admin@teste.local' returning perfil`);
+check('27: sem JWT (SQL Editor) passa, caminho de recuperacao', ok(x) && x[0]?.perfil === 'Admin', x);
 await setJwt('ninguem@teste.local');
 check('ic_pode_ver_dinheiro() false (e-mail sem linha em users)', (await r(`select ic_pode_ver_dinheiro() v`))[0]?.v === false);
 await db.exec(`create or replace function auth.jwt() returns jsonb language sql stable as $$ select null::jsonb $$;`);

@@ -13816,20 +13816,27 @@ async function loadUsuariosAtivos(container) {
         + '<th style="text-align:center">Status</th>'
         + '<th style="text-align:center">Ações</th>'
         + '</tr></thead><tbody>';
+    var meuEmail = String((currentUser && currentUser.email) || '').toLowerCase();
     for (var i = 0; i < users.length; i++) {
         var u = users[i];
         var isAtivo = u.status !== 'inativo';
+        // A propria linha nao muda perfil nem status (o banco tambem recusa, 27):
+        // um Admin que se rebaixava por engano perdia o acesso na hora.
+        var ehEu = meuEmail && String(u.email || '').toLowerCase() === meuEmail;
         var statusHtml = isAtivo
             ? '<span class="users-status-ativo">Ativo</span>'
             : '<span class="users-status-inativo">Inativo</span>';
-        var actionHtml = isAtivo
+        var actionHtml = ehEu
+            ? '<span style="color:var(--texto-secundario);font-size:12px">Você</span>'
+            : isAtivo
             ? '<button class="users-btn-desativar" onclick="toggleUserStatus(\'' + u.id + '\', \'inativo\')">Desativar</button>'
             : '<button class="users-btn-ativar" onclick="toggleUserStatus(\'' + u.id + '\', \'ativo\')">Ativar</button>';
 
         html += '<tr data-user-row="' + u.id + '">'
             + '<td style="font-weight:600">' + escapeHtml(u.name || '') + '</td>'
             + '<td style="color:var(--texto-secundario)">' + escapeHtml(u.email || '') + '</td>'
-            + '<td><select class="users-perfil-select select-perfil-usuario" data-user-id="' + u.id + '" onchange="changeUserPerfil(\'' + u.id + '\', this)"></select></td>'
+            + '<td><select class="users-perfil-select select-perfil-usuario" data-user-id="' + u.id + '" onchange="changeUserPerfil(\'' + u.id + '\', this)"'
+            + (ehEu ? ' disabled title="Você não pode alterar o próprio perfil. Peça a outro Admin."' : '') + '></select></td>'
             + '<td class="td-vendedor-resp" data-user-id="' + u.id + '"></td>'
             + '<td style="text-align:center">' + statusHtml + '</td>'
             + '<td style="text-align:center">' + actionHtml + '</td>'
@@ -13869,6 +13876,7 @@ async function popularSelectPerfis(selectEl, perfilSelecionadoId, perfilSelecion
         html += '<option value="' + p.id + '" data-nome="' + escapeHtml(p.nome) + '"' + sel + '>' + escapeHtml(icRotuloPerfil(p.nome)) + '</option>';
     });
     el.innerHTML = html;
+    el.setAttribute('data-atual', el.value || '');
 }
 
 // =============================================================
@@ -14041,14 +14049,33 @@ async function changeUserPerfil(userId, selectElOrNome) {
         var rP = await supabaseClient.from('perfis_acesso').select('id, nome').eq('nome', perfilNome).maybeSingle();
         if (rP.data) perfilId = rP.data.id;
     } else if (selectElOrNome && selectElOrNome.options) {
-        perfilId = selectElOrNome.value || null;
-        var optSel = selectElOrNome.options[selectElOrNome.selectedIndex];
+        var selEl = selectElOrNome;
+        perfilId = selEl.value || null;
+        var optSel = selEl.options[selEl.selectedIndex];
         perfilNome = optSel ? optSel.getAttribute('data-nome') : null;
+        // Volta o select ao valor salvo; so muda de verdade depois de confirmar.
+        var anterior = selEl.getAttribute('data-atual') || '';
+        selEl.value = anterior;
+        if (!perfilId || !perfilNome) {
+            showToast('Selecione um perfil válido', 'warning');
+            return;
+        }
+        var linha = selEl.closest ? selEl.closest('tr') : null;
+        var nomeUsuario = linha && linha.cells[0] ? linha.cells[0].textContent : 'este usuário';
+        icConfirmar('Alterar o perfil de ' + nomeUsuario + ' para ' + icRotuloPerfil(perfilNome) + '?\nAs permissões dele mudam na hora.', 'Alterar perfil', async function () {
+            var ok = await salvarPerfilUsuario(userId, perfilId, perfilNome);
+            if (ok) { selEl.value = perfilId; selEl.setAttribute('data-atual', perfilId); }
+        }, false);
+        return;
     }
     if (!perfilId || !perfilNome) {
         showToast('Selecione um perfil válido', 'warning');
         return;
     }
+    await salvarPerfilUsuario(userId, perfilId, perfilNome);
+}
+
+async function salvarPerfilUsuario(userId, perfilId, perfilNome) {
     var updateData = { perfil_id: perfilId, perfil: perfilNome };
     var perfilUpper = perfilNome.toUpperCase();
     // Admin/Financeiro/Jurídico: limpar vendedor responsável
@@ -14059,13 +14086,21 @@ async function changeUserPerfil(userId, selectElOrNome) {
     }
     var result = await supabaseClient.from('users').update(updateData).eq('id', userId);
     if (result.error) {
-        showToast('Erro ao atualizar perfil: ' + result.error.message, 'error');
-        return;
+        showToast('Erro ao atualizar perfil: ' + mensagemErroUsuario(result.error), 'error');
+        return false;
     }
-    showToast('Perfil atualizado para ' + perfilNome, 'success');
+    showToast('Perfil atualizado para ' + icRotuloPerfil(perfilNome), 'success');
     // Re-renderiza só a coluna Vendedor Resp. dessa linha (sem refresh global)
     await renderColunaVendedorResp(userId);
     crmVendedoresLoaded = false;
+    return true;
+}
+
+// Erros das travas do banco (25 e 27) chegam como 42501 com texto em portugues.
+function mensagemErroUsuario(err) {
+    var m = String((err && err.message) || '');
+    var i = m.indexOf('IC: ');
+    return i >= 0 ? m.slice(i + 4) : m;
 }
 
 async function toggleUserStatus(userId, novoStatus) {
@@ -14073,7 +14108,7 @@ async function toggleUserStatus(userId, novoStatus) {
     icConfirmar('Tem certeza que deseja ' + label + ' este usuário?', "Confirmar", async function () {
     var result = await supabaseClient.from('users').update({ status: novoStatus }).eq('id', userId);
     if (result.error) {
-        showToast('Erro ao atualizar status: ' + result.error.message, 'error');
+        showToast('Erro ao atualizar status: ' + mensagemErroUsuario(result.error), 'error');
         return;
     }
     showToast(novoStatus === 'ativo' ? 'Usuário ativado!' : 'Usuário desativado.', 'success');
