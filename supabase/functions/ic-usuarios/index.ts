@@ -64,7 +64,16 @@ Deno.serve(async (req: Request) => {
     if (!v.ok) return json({ ok: false, erro: v.erro }, 400);
     const d = v.dados;
 
-    // 3) Perfil existe (quando informado por id).
+    // 3) Perfil existe. Sem perfil_id, acha pelo nome: linha sem perfil_id
+    //    some dos filtros por perfil e confunde a tela de Usuarios.
+    if (!d.perfil_id) {
+      const { data: pn, error: errN } = await sb.from("perfis_acesso").select("id").eq("nome", d.perfil).maybeSingle();
+      if (errN) {
+        console.error(LOG, "consulta perfis_acesso por nome falhou:", errN.message);
+        return json({ ok: false, erro: "erro_interno" }, 500);
+      }
+      if (pn) d.perfil_id = (pn as { id: string }).id;
+    }
     if (d.perfil_id) {
       const { data: p, error: errP } = await sb.from("perfis_acesso").select("id").eq("id", d.perfil_id).maybeSingle();
       if (errP) {
