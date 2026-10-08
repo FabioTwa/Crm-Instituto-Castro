@@ -27,7 +27,27 @@
 //   GROQ_API_KEY        transcricao de audio (Whisper)
 //   IC_INTERNAL_SECRET  header x-ic-internal ao chamar ic-ia-pre-atendimento
 //
+//   GUPSHUP_WEBHOOK_TOKEN  segredo na URL do webhook do Gupshup (?token=...)
+//   GUPSHUP_API_KEY     baixar midia (audio) pelo Gupshup
+//
 // Publicar: supabase functions deploy ic-meta-webhook --no-verify-jwt
+//
+// GUPSHUP (BSP, modo coexistencia) - 08/10/2026:
+// A mesma funcao recebe o webhook do Gupshup em
+//   .../functions/v1/ic-meta-webhook?provedor=gupshup&token=<GUPSHUP_WEBHOOK_TOKEN>
+// - O Gupshup nao documenta assinatura de webhook. A autenticidade e o token da
+//   URL, comparado em tempo constante. Sem o segredo configurado, tudo e recusado.
+// - Formato Gupshup (v2): convertido para o envelope da Meta em
+//   _shared/gupshup.ts (envelopeGupshup) e processado pelo MESMO caminho abaixo.
+//   O numero e achado por vendedores_whatsapp.gupshup_app (campo "app" do evento).
+// - Formato Meta (v3) e eventos de coexistencia (smb_message_echoes etc.): o
+//   Gupshup repassa o envelope da Meta como veio; o numero e achado por
+//   gupshup_app_id (gs_app_id), meta_phone_id ou gupshup_app.
+// - Midia: v2 traz link (baixado direto); v3 traz so o id (baixado em
+//   api.gupshup.io/sm/api/wamedia/{app}/{id} com GUPSHUP_API_KEY).
+// - O envelope gravado em crm_entrada_bruta (origem 'gupshup') ja e o
+//   convertido, com _ic_provedor e o evento original em _ic_original: o
+//   varredor reprocessa sem saber de Gupshup.
 //
 // ---------------------------------------------------------------------------
 // Recebe os eventos da Cloud API da Meta e acha o vendedor por meta_phone_id
@@ -83,6 +103,9 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 type Supa = SupabaseClient<any, "public", any>;
 import { canonicoTelefone, soDigitos, telefoneBrPlausivel, variacoesTelefone } from "../_shared/telefone.ts";
 import { icFlag } from "../_shared/flags.ts";
+import { baixarMidiaGupshup, envelopeGupshup, tokenWebhookValido } from "../_shared/gupshup.ts";
+
+type Provedor = "meta" | "gupshup";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -150,7 +173,7 @@ async function registrarFalhaEntrada(
   },
 ): Promise<void> {
   const linha = {
-    origem: ORIGEM_FALHA,
+    origem: (dados.payload as any)?.fonte === "gupshup" ? "gupshup" : ORIGEM_FALHA,
     etapa: dados.etapa,
     telefone: dados.telefone || null,
     funil_id: dados.funil_id || null,
@@ -475,6 +498,26 @@ async function baixarMidiaMeta(
   }
 }
 
+// Escolhe de onde baixar o audio. Meta: pelo id na Graph API. Gupshup: pelo
+// link (formato v2) ou pelo id na API do Gupshup (formato v3/coexistencia).
+async function baixarAudio(
+  provedor: Provedor,
+  vendedor: VendedorWa,
+  audio: any,
+): Promise<{ bytes: ArrayBuffer; mimeType: string } | null> {
+  if (provedor === "gupshup") {
+    return await baixarMidiaGupshup({
+      url: audio && audio.url ? String(audio.url) : "",
+      mediaId: audio && audio.id ? String(audio.id) : "",
+      app: vendedor.gupshup_app || "",
+      mimeType: audio && audio.mime_type ? String(audio.mime_type) : "",
+      apiKey: Deno.env.get("GUPSHUP_API_KEY") || "",
+      prefixoLog: "[ic-meta-webhook][gupshup]",
+    });
+  }
+  return audio && audio.id ? await baixarMidiaMeta(String(audio.id)) : null;
+}
+
 // Transcricao de audio via Groq Whisper (mesmo padrao do webhook Z-API).
 // Diferenca: aqui recebe os BYTES ja baixados da Meta, porque a Meta nao entrega
 // URL publica. Chave via secret GROQ_API_KEY (nunca hardcoded). Se o secret faltar
@@ -687,7 +730,13 @@ const SEL_CARD =
 
 // (d) Vendedor pelo phone_number_id da Meta, na coluna nova meta_phone_id.
 // Nao existe mais instanceId. zapi_instancia continua intacta para o webhook antigo.
-type VendedorWa = { vendedor_id: string; vendedor_nome: string | null; numero_whatsapp: string; funil_id: string | null };
+type VendedorWa = {
+  vendedor_id: string;
+  vendedor_nome: string | null;
+  numero_whatsapp: string;
+  funil_id: string | null;
+  gupshup_app?: string | null;
+};
 
 // CACHE EM ESCOPO DE MODULO. vendedores_whatsapp tem 3 linhas e muda quando se
 // cadastra vendedor, nao a cada mensagem. O isolate sobrevive entre invocacoes,
@@ -695,6 +744,9 @@ type VendedorWa = { vendedor_id: string; vendedor_nome: string | null; numero_wh
 // estiver quente. TTL curto para cadastro novo aparecer sozinho.
 const VENDEDOR_TTL_MS = 5 * 60 * 1000;
 let vendedorCache = new Map<string, VendedorWa>();
+// Gupshup: por nome do app (minusculo) e por id do app (gs_app_id).
+let vendedorPorGupshupApp = new Map<string, VendedorWa>();
+let vendedorPorGupshupAppId = new Map<string, VendedorWa>();
 let vendedorCacheEm = 0;
 // Numeros dos proprios vendedores. Numero que esta em vendedores_whatsapp nunca
 // pode virar card de lead: eram os vendedores conversando entre si que criaram
@@ -702,25 +754,34 @@ let vendedorCacheEm = 0;
 let numerosDaCasa = new Set<string>();
 
 async function carregarVendedores(supabase: Supa): Promise<string | null> {
+  // select("*") de proposito: funciona antes e depois do SQL 28 (colunas
+  // provedor, gupshup_app, gupshup_app_id). Sao poucas linhas.
   const { data, error } = await supabase
     .from("vendedores_whatsapp")
-    .select("vendedor_id, vendedor_nome, numero_whatsapp, funil_id, meta_phone_id, ativo");
+    .select("*");
   if (error) return error.message || "erro desconhecido";
   const mapa = new Map<string, VendedorWa>();
+  const porApp = new Map<string, VendedorWa>();
+  const porAppId = new Map<string, VendedorWa>();
   const numeros = new Set<string>();
   for (const r of ((data as any[]) || [])) {
     const canon = canonicoTelefone(String(r.numero_whatsapp || ""));
     if (canon) numeros.add(canon);
-    if (r.ativo && r.meta_phone_id) {
-      mapa.set(String(r.meta_phone_id), {
-        vendedor_id: r.vendedor_id,
-        vendedor_nome: r.vendedor_nome ?? null,
-        numero_whatsapp: r.numero_whatsapp,
-        funil_id: r.funil_id ?? null,
-      });
-    }
+    if (!r.ativo) continue;
+    const v: VendedorWa = {
+      vendedor_id: r.vendedor_id,
+      vendedor_nome: r.vendedor_nome ?? null,
+      numero_whatsapp: r.numero_whatsapp,
+      funil_id: r.funil_id ?? null,
+      gupshup_app: r.gupshup_app ?? null,
+    };
+    if (r.meta_phone_id) mapa.set(String(r.meta_phone_id), v);
+    if (r.gupshup_app) porApp.set(String(r.gupshup_app).trim().toLowerCase(), v);
+    if (r.gupshup_app_id) porAppId.set(String(r.gupshup_app_id).trim(), v);
   }
   vendedorCache = mapa;
+  vendedorPorGupshupApp = porApp;
+  vendedorPorGupshupAppId = porAppId;
   numerosDaCasa = numeros;
   vendedorCacheEm = Date.now();
   return null;
@@ -740,6 +801,25 @@ async function acharVendedorPorPhoneId(
     if (erro && vendedorCache.size === 0) return { vendedor: null, erro };
   }
   return { vendedor: vendedorCache.get(phoneNumberId) || null, erro: null };
+}
+
+// Gupshup: tenta gs_app_id, depois phone_number_id da Meta (v3), depois o nome
+// do app (v2 so tem o nome).
+async function acharVendedorGupshup(
+  supabase: Supa,
+  ids: { appId: string; phoneNumberId: string; appName: string },
+): Promise<{ vendedor: VendedorWa | null; erro: string | null }> {
+  const vazio = vendedorPorGupshupApp.size === 0 && vendedorPorGupshupAppId.size === 0 && vendedorCache.size === 0;
+  if (Date.now() - vendedorCacheEm > VENDEDOR_TTL_MS || vazio) {
+    const erro = await carregarVendedores(supabase);
+    const aindaVazio = vendedorPorGupshupApp.size === 0 && vendedorPorGupshupAppId.size === 0 && vendedorCache.size === 0;
+    if (erro && aindaVazio) return { vendedor: null, erro };
+  }
+  const v = (ids.appId && vendedorPorGupshupAppId.get(ids.appId)) ||
+    (ids.phoneNumberId && vendedorCache.get(ids.phoneNumberId)) ||
+    (ids.appName && vendedorPorGupshupApp.get(ids.appName.trim().toLowerCase())) ||
+    null;
+  return { vendedor: v, erro: null };
 }
 
 // CAMINHO RAPIDO: cards criados pelo bot ja tem numero_whatsapp no formato canonico.
@@ -901,12 +981,15 @@ function nomeDoContato(value: any, waId: string): string {
 // celular. E o equivalente do fromMe do Z-API.
 async function processarMensagem(
   supabase: Supa,
-  vendedor: { vendedor_id: string; vendedor_nome: string | null; numero_whatsapp: string; funil_id: string | null },
+  vendedor: VendedorWa,
   m: any,
   value: any,
   ehEco: boolean,
+  provedor: Provedor = "meta",
 ): Promise<Record<string, unknown>> {
   const fromMe = ehEco;
+  // Vai em payload_raw.fonte e decide a origem em crm_entrada_falhas.
+  const fonte: string = provedor;
   // (f) DIFERENCA CRITICA: no messages[] normal o "from" e o LEAD. No eco, "from" e
   // a empresa e o lead esta em "to". Tratar os dois iguais criaria card com o
   // proprio numero do vendedor.
@@ -939,7 +1022,7 @@ async function processarMensagem(
     if (!transcreverLigado) {
       console.log("[ic-meta-webhook] transcricao desligada por flag; audio gravado com placeholder");
     }
-    const arq = transcreverLigado && conteudo.mediaId ? await baixarMidiaMeta(conteudo.mediaId) : null;
+    const arq = transcreverLigado ? await baixarAudio(provedor, vendedor, m.audio || {}) : null;
     const transcricao = arq ? await transcreverAudioGroq(arq.bytes, arq.mimeType) : null;
     if (transcricao) {
       mensagemFinal = transcricao;
@@ -1153,7 +1236,7 @@ async function processarMensagem(
           vendedor_id: vendedor.vendedor_id,
           motivo: "insert de clientes_crm falhou",
           erro: errIns,
-          payload: { fonte: "meta", message: m, metadata: value && value.metadata },
+          payload: { fonte, message: m, metadata: value && value.metadata },
         });
         console.error("[ic-meta-webhook] insert clientes_crm falhou:", errIns);
         return { error: errIns.message };
@@ -1175,7 +1258,7 @@ async function processarMensagem(
           vendedor_id: vendedor.vendedor_id,
           motivo: "colisao de unicidade sem card visivel na releitura",
           erro: errIns,
-          payload: { fonte: "meta", message: m, metadata: value && value.metadata },
+          payload: { fonte, message: m, metadata: value && value.metadata },
         });
         console.error("[ic-meta-webhook] colisao sem card na releitura:", errIns);
         return { error: errIns.message };
@@ -1204,7 +1287,7 @@ async function processarMensagem(
           motivo: "card vivo deste telefone no funil pertence ao vendedor " +
             String((cardDono as any).vendedor_id),
           erro: errIns,
-          payload: { fonte: "meta", message: m, metadata: value && value.metadata },
+          payload: { fonte, message: m, metadata: value && value.metadata },
         });
         clienteId = null;
         numeroLeadConversa = canonico;
@@ -1233,7 +1316,7 @@ async function processarMensagem(
             vendedor_id: vendedor.vendedor_id,
             motivo: "bump do card apos colisao falhou",
             erro: errBump,
-            payload: { fonte: "meta", message: m, metadata: value && value.metadata },
+            payload: { fonte, message: m, metadata: value && value.metadata },
           });
         }
         console.log("[ic-meta-webhook] colisao tratada, segue no card existente:", clienteId);
@@ -1279,7 +1362,7 @@ async function processarMensagem(
         clienteId,
         tipo,
         mensagem: mensagemGravar,
-        payloadRaw: { fonte: "meta", eco: ehEco, metadata: value && value.metadata, message: m },
+        payloadRaw: { fonte, eco: ehEco, metadata: value && value.metadata, message: m },
       });
       return {
         cliente_id: clienteId,
@@ -1305,7 +1388,7 @@ async function processarMensagem(
     tipo: tipo,
     zapi_message_id: messageId,
     // Diagnostico: guarda a mensagem crua da Meta e o contexto minimo. Nao vai pra tela.
-    payload_raw: { fonte: "meta", eco: ehEco, metadata: value && value.metadata, message: m },
+    payload_raw: { fonte, eco: ehEco, metadata: value && value.metadata, message: m },
   }).select("id").maybeSingle();
   let conversaGravada = false;
   if (errConv && ehColisaoUnicidade(errConv)) {
@@ -1317,7 +1400,7 @@ async function processarMensagem(
       clienteId,
       tipo,
       mensagem: mensagemGravar,
-      payloadRaw: { fonte: "meta", eco: ehEco, metadata: value && value.metadata, message: m },
+      payloadRaw: { fonte, eco: ehEco, metadata: value && value.metadata, message: m },
     });
   } else if (errConv) {
     console.error("[ic-meta-webhook] insert crm_conversas falhou:", errConv);
@@ -1330,7 +1413,7 @@ async function processarMensagem(
       vendedor_id: vendedor.vendedor_id,
       motivo: "insert de crm_conversas falhou" + (clienteId ? " (card " + clienteId + ")" : " (sem card)"),
       erro: errConv,
-      payload: { fonte: "meta", message: m, metadata: value && value.metadata },
+      payload: { fonte, message: m, metadata: value && value.metadata },
     });
   } else {
     conversaGravada = true;
@@ -1479,6 +1562,9 @@ async function marcarEntrada(
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  // Gupshup tem porta propria (token na URL em vez da assinatura da Meta).
+  const urlReq = new URL(req.url);
+  if (urlReq.searchParams.get("provedor") === "gupshup") return await entradaGupshup(req, urlReq);
   // (a) Verificacao de posse do endereco.
   if (req.method === "GET") return verificarWebhook(req);
   if (req.method !== "POST") return json({ ok: true, ignored: "method" });
@@ -1595,10 +1681,85 @@ Deno.serve(async (req: Request) => {
   return json({ ok: true, ack: true, entrada: entradaId });
 });
 
+// -------------------------------------------------------------------
+// ENTRADA DO GUPSHUP
+//
+// Mesmas garantias da porta da Meta: envelope gravado em crm_entrada_bruta
+// ANTES do ack, ack imediato, processamento em segundo plano pelo mesmo
+// processarPayload, falha visivel para o varredor.
+//
+// Autenticidade: o Gupshup nao documenta assinatura de webhook. O que segura
+// e o segredo GUPSHUP_WEBHOOK_TOKEN na URL cadastrada no painel, comparado em
+// tempo constante. Token errado ou segredo ausente: 200 sem processar (nao
+// gravamos nada vindo de quem nao provou ser o Gupshup).
+// GET e POST vazio respondem 200: o painel testa a URL ao cadastrar.
+// -------------------------------------------------------------------
+async function entradaGupshup(req: Request, url: URL): Promise<Response> {
+  const LOGG = "[ic-meta-webhook][gupshup]";
+  const segredo = Deno.env.get("GUPSHUP_WEBHOOK_TOKEN") || "";
+  if (!segredo) {
+    console.error(LOGG, "GUPSHUP_WEBHOOK_TOKEN ausente; chamada recusada");
+    return json({ ok: true, ignored: "token nao configurado" });
+  }
+  if (!tokenWebhookValido(url.searchParams.get("token") || "", segredo)) {
+    console.warn(LOGG, "token invalido, payload descartado");
+    return json({ ok: true, ignored: "token invalido" });
+  }
+  if (req.method !== "POST") return json({ ok: true });
+
+  const URL_SB = Deno.env.get("SUPABASE_URL") || "";
+  const SR = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+  if (!URL_SB || !SR) {
+    console.error(LOGG, "SUPABASE_URL/SERVICE_ROLE ausentes");
+    return json({ ok: true, error: "env missing" });
+  }
+
+  const texto = await req.text();
+  if (!texto.trim()) return json({ ok: true, ignored: "corpo vazio" });
+  let bruto: any = null;
+  try {
+    bruto = JSON.parse(texto);
+  } catch (_e) {
+    return json({ ok: true, ignored: "payload nao-json" });
+  }
+  const { envelope, tipo } = envelopeGupshup(bruto);
+  console.log(LOGG, "evento:", tipo, JSON.stringify(bruto).slice(0, 400));
+
+  const sbEntrada = createClient(URL_SB, SR, { auth: { persistSession: false } });
+  let entradaId: number | null = null;
+  try {
+    const { data: ent, error: errEnt } = await sbEntrada
+      .from("crm_entrada_bruta")
+      .insert({ origem: "gupshup", envelope })
+      .select("id")
+      .single();
+    if (errEnt) throw new Error(errEnt.message);
+    entradaId = ent && typeof ent.id === "number" ? ent.id : null;
+  } catch (e) {
+    // Mesmo desfecho da Meta: sem envelope gravado, erro para o provedor reenviar.
+    console.error(LOGG, "envelope cru NAO gravado:", e && (e as Error).message);
+    return json({ ok: false, error: "entrada nao gravada" }, 500);
+  }
+
+  const trabalho = processarPayload(URL_SB, SR, envelope)
+    .then(() => marcarEntrada(sbEntrada, entradaId, "processada", null))
+    .catch(async (e) => {
+      await marcarEntrada(sbEntrada, entradaId, "falhou", (e && (e as Error).message) || String(e));
+      console.error(LOGG, "erro pos-ack:", e);
+    });
+  const espera = (globalThis as any).EdgeRuntime?.waitUntil;
+  if (typeof espera === "function") {
+    espera.call((globalThis as any).EdgeRuntime, trabalho);
+  }
+  return json({ ok: true, ack: true, entrada: entradaId });
+}
+
 // Todo o processamento vive aqui, fora do caminho da resposta. Nada do que
 // acontece daqui para baixo pode atrasar o ack da Meta.
+// O envelope e sempre o da Meta; quando veio do Gupshup, traz _ic_provedor.
 async function processarPayload(URL_SB: string, SR: string, payload: any): Promise<void> {
   const resultados: unknown[] = [];
+  const provedor: Provedor = payload && payload._ic_provedor === "gupshup" ? "gupshup" : "meta";
   try {
     const supabase = createClient(URL_SB, SR, { auth: { persistSession: false } });
     const entries = Array.isArray(payload.entry) ? payload.entry : [];
@@ -1623,6 +1784,16 @@ async function processarPayload(URL_SB: string, SR: string, payload: any): Promi
             "[ic-meta-webhook] statuses ignorados:",
             JSON.stringify(value.statuses.map((s: any) => s && s.status)),
           );
+          // Gupshup: o envio e assincrono, entao a recusa (ex.: 470 = fora da
+          // janela de 24 h) so aparece aqui. Fica no log de erro com o id.
+          for (const st of value.statuses) {
+            if (provedor === "gupshup" && st && st.status === "failed") {
+              console.error(
+                "[ic-meta-webhook][gupshup] envio falhou:",
+                JSON.stringify({ id: st.id, gs_id: st.gs_id, codigo: st.codigo, motivo: st.motivo, errors: st.errors }).slice(0, 500),
+              );
+            }
+          }
           resultados.push({ field, ignored: "statuses" });
           continue;
         }
@@ -1635,7 +1806,13 @@ async function processarPayload(URL_SB: string, SR: string, payload: any): Promi
         }
 
         const phoneNumberId = String((value.metadata && value.metadata.phone_number_id) || "");
-        const { vendedor, erro: erroVendedor } = await acharVendedorPorPhoneId(supabase, phoneNumberId);
+        const { vendedor, erro: erroVendedor } = provedor === "gupshup"
+          ? await acharVendedorGupshup(supabase, {
+            appId: String(payload.gs_app_id || ""),
+            phoneNumberId,
+            appName: String(payload.gs_app_name || (value.metadata && value.metadata.gs_app_name) || ""),
+          })
+          : await acharVendedorPorPhoneId(supabase, phoneNumberId);
         if (erroVendedor) {
           // Nao e "sem vendedor": e a consulta que falhou. Sai como erro para
           // aparecer no log de erro e nao se disfarcar de cadastro faltando.
@@ -1644,7 +1821,7 @@ async function processarPayload(URL_SB: string, SR: string, payload: any): Promi
           continue;
         }
         if (!vendedor) {
-          console.log("[ic-meta-webhook] phone_number_id sem vendedor ativo:", phoneNumberId);
+          console.log("[ic-meta-webhook] numero sem vendedor ativo:", provedor, phoneNumberId || payload.gs_app_id || payload.gs_app_name || "");
           resultados.push({ field, ignored: "no vendor", phone_number_id: phoneNumberId });
           continue;
         }
@@ -1662,7 +1839,7 @@ async function processarPayload(URL_SB: string, SR: string, payload: any): Promi
         for (const m of lista) {
           // Uma mensagem com problema nao pode derrubar as outras do mesmo lote.
           try {
-            resultados.push(await processarMensagem(supabase, vendedor, m, value, ehEco));
+            resultados.push(await processarMensagem(supabase, vendedor, m, value, ehEco, provedor));
           } catch (e) {
             console.error("[ic-meta-webhook] erro na mensagem:", m && m.id, e);
             // Excecao no meio do caminho tambem e mensagem perdida.
@@ -1673,7 +1850,7 @@ async function processarPayload(URL_SB: string, SR: string, payload: any): Promi
               vendedor_id: vendedor.vendedor_id,
               motivo: "excecao ao processar a mensagem " + String((m && m.id) || "sem wamid"),
               erro: e,
-              payload: { fonte: "meta", message: m, metadata: value && value.metadata },
+              payload: { fonte: provedor, message: m, metadata: value && value.metadata },
             });
             resultados.push({ wamid: m && m.id, error: (e as Error).message || "unknown" });
           }
