@@ -744,9 +744,11 @@ type VendedorWa = {
 // estiver quente. TTL curto para cadastro novo aparecer sozinho.
 const VENDEDOR_TTL_MS = 5 * 60 * 1000;
 let vendedorCache = new Map<string, VendedorWa>();
-// Gupshup: por nome do app (minusculo) e por id do app (gs_app_id).
+// Gupshup: por nome do app (minusculo), por id do app (gs_app_id) e pelo
+// numero da casa (canonico) dos numeros com provedor 'gupshup'.
 let vendedorPorGupshupApp = new Map<string, VendedorWa>();
 let vendedorPorGupshupAppId = new Map<string, VendedorWa>();
+let vendedorPorGupshupNumero = new Map<string, VendedorWa>();
 let vendedorCacheEm = 0;
 // Numeros dos proprios vendedores. Numero que esta em vendedores_whatsapp nunca
 // pode virar card de lead: eram os vendedores conversando entre si que criaram
@@ -763,6 +765,7 @@ async function carregarVendedores(supabase: Supa): Promise<string | null> {
   const mapa = new Map<string, VendedorWa>();
   const porApp = new Map<string, VendedorWa>();
   const porAppId = new Map<string, VendedorWa>();
+  const porNumero = new Map<string, VendedorWa>();
   const numeros = new Set<string>();
   for (const r of ((data as any[]) || [])) {
     const canon = canonicoTelefone(String(r.numero_whatsapp || ""));
@@ -778,10 +781,12 @@ async function carregarVendedores(supabase: Supa): Promise<string | null> {
     if (r.meta_phone_id) mapa.set(String(r.meta_phone_id), v);
     if (r.gupshup_app) porApp.set(String(r.gupshup_app).trim().toLowerCase(), v);
     if (r.gupshup_app_id) porAppId.set(String(r.gupshup_app_id).trim(), v);
+    if (String(r.provedor || "") === "gupshup" && canon) porNumero.set(canon, v);
   }
   vendedorCache = mapa;
   vendedorPorGupshupApp = porApp;
   vendedorPorGupshupAppId = porAppId;
+  vendedorPorGupshupNumero = porNumero;
   numerosDaCasa = numeros;
   vendedorCacheEm = Date.now();
   return null;
@@ -804,10 +809,13 @@ async function acharVendedorPorPhoneId(
 }
 
 // Gupshup: tenta gs_app_id, depois phone_number_id da Meta (v3), depois o nome
-// do app (v2 so tem o nome).
+// do app (v2 so tem o nome), depois o numero da casa (display_phone_number do
+// v3), que ja esta em vendedores_whatsapp.numero_whatsapp. O formato Meta (v3)
+// NAO traz o nome do app: sem este ultimo passo, o numero so seria achado com
+// gupshup_app_id ou meta_phone_id preenchidos a mao.
 async function acharVendedorGupshup(
   supabase: Supa,
-  ids: { appId: string; phoneNumberId: string; appName: string },
+  ids: { appId: string; phoneNumberId: string; appName: string; numeroCasa: string },
 ): Promise<{ vendedor: VendedorWa | null; erro: string | null }> {
   const vazio = vendedorPorGupshupApp.size === 0 && vendedorPorGupshupAppId.size === 0 && vendedorCache.size === 0;
   if (Date.now() - vendedorCacheEm > VENDEDOR_TTL_MS || vazio) {
@@ -818,6 +826,7 @@ async function acharVendedorGupshup(
   const v = (ids.appId && vendedorPorGupshupAppId.get(ids.appId)) ||
     (ids.phoneNumberId && vendedorCache.get(ids.phoneNumberId)) ||
     (ids.appName && vendedorPorGupshupApp.get(ids.appName.trim().toLowerCase())) ||
+    (ids.numeroCasa && vendedorPorGupshupNumero.get(canonicoTelefone(ids.numeroCasa))) ||
     null;
   return { vendedor: v, erro: null };
 }
@@ -1811,6 +1820,7 @@ async function processarPayload(URL_SB: string, SR: string, payload: any): Promi
             appId: String(payload.gs_app_id || ""),
             phoneNumberId,
             appName: String(payload.gs_app_name || (value.metadata && value.metadata.gs_app_name) || ""),
+            numeroCasa: String((value.metadata && value.metadata.display_phone_number) || ""),
           })
           : await acharVendedorPorPhoneId(supabase, phoneNumberId);
         if (erroVendedor) {

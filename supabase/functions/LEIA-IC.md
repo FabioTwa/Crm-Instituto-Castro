@@ -169,7 +169,9 @@ set provedor = 'gupshup', gupshup_app = '<NOME_DO_APP_NO_GUPSHUP>', numero_whats
 where vendedor_id = '<ID_DO_VENDEDOR>';
 ```
 
-   `gupshup_app_id` (o `gs_app_id` que aparece nos eventos formato Meta) é opcional.
+   `gupshup_app_id` (o `gs_app_id` que aparece nos eventos formato Meta) é opcional: no formato
+   Meta (v3) o evento não traz o nome do app, e o webhook acha o número por `gs_app_id`,
+   `meta_phone_id` ou, na falta deles, pelo próprio `numero_whatsapp` (`display_phone_number`).
 6. Teste: mandar uma mensagem de outro celular para o número → card novo no
    Kanban; conferir `crm_entrada_bruta` (origem `gupshup`) e o log da função.
 
