@@ -10,10 +10,10 @@ de infraestrutura (CORS/JSON, auth, flags, Cloud API, prompt da IA) moram em
 
 | função | quem chama | verify_jwt | segredos que usa (para quê) | deploy |
 |---|---|---|---|---|
-| `ic-meta-webhook` | Meta (webhook `messages` + `smb_message_echoes`), pg_cron (varredor `{"varredor":true}`) | **não** (assinatura `X-Hub-Signature-256`) | `META_VERIFY_TOKEN` (GET de verificação), `META_APP_SECRET` (assinatura), `META_ACCESS_TOKEN` (baixar áudio), `GROQ_API_KEY` (transcrição), `IC_INTERNAL_SECRET` (chamar a IA) | `supabase functions deploy ic-meta-webhook --no-verify-jwt` |
-| `ic-whatsapp-send` | front (`supabaseClient.functions.invoke`) | **sim** + `public.users` ativo | `META_ACCESS_TOKEN` (envio pela Cloud API) | `supabase functions deploy ic-whatsapp-send` |
+| `ic-meta-webhook` | Meta (webhook `messages` + `smb_message_echoes`), Gupshup (`?provedor=gupshup&token=...`), pg_cron (varredor `{"varredor":true}`) | **não** (Meta: assinatura `X-Hub-Signature-256`; Gupshup: token na URL) | `META_VERIFY_TOKEN` (GET de verificação), `META_APP_SECRET` (assinatura), `META_ACCESS_TOKEN` (baixar áudio da Meta), `GUPSHUP_WEBHOOK_TOKEN` (porta do Gupshup), `GUPSHUP_API_KEY` (baixar áudio do Gupshup), `GROQ_API_KEY` (transcrição), `IC_INTERNAL_SECRET` (chamar a IA) | `supabase functions deploy ic-meta-webhook --no-verify-jwt` |
+| `ic-whatsapp-send` | front (`supabaseClient.functions.invoke`) | **sim** + `public.users` ativo | `META_ACCESS_TOKEN` ou `GUPSHUP_API_KEY` (conforme o provedor do número) | `supabase functions deploy ic-whatsapp-send` |
 | `ic-usuarios` | front (tela Usuários → Novo Usuário) | **sim** + `public.users` ativo + Admin | nenhum além dos injetados (usa a service role para `auth.admin.createUser`) | `supabase functions deploy ic-usuarios` |
-| `ic-ia-pre-atendimento` | só `ic-meta-webhook` (segundo plano) | **não** (`x-ic-internal`) | `IC_INTERNAL_SECRET` (autoriza e chama `ic-agendamento`), `ANTHROPIC_API_KEY` (modelo), `META_ACCESS_TOKEN` (envio; ausente = modo sombra), `IC_POLITICA_PRIVACIDADE_URL` (link no consentimento) | `supabase functions deploy ic-ia-pre-atendimento --no-verify-jwt` |
+| `ic-ia-pre-atendimento` | só `ic-meta-webhook` (segundo plano) | **não** (`x-ic-internal`) | `IC_INTERNAL_SECRET` (autoriza e chama `ic-agendamento`), `ANTHROPIC_API_KEY` (modelo), `META_ACCESS_TOKEN` ou `GUPSHUP_API_KEY` (envio, conforme o provedor do número; ausente = modo sombra), `IC_POLITICA_PRIVACIDADE_URL` (link no consentimento) | `supabase functions deploy ic-ia-pre-atendimento --no-verify-jwt` |
 | `ic-agendamento` | front (JWT validado em código), `ic-ia-pre-atendimento` (`x-ic-internal`), Google (redirect OAuth, GET) | **não** no gateway, **sim em código** (`auth.getUser` + `public.users` ativo) — ver motivo abaixo | `IC_INTERNAL_SECRET` (interno + assinatura do `state`), `IC_CRYPTO_KEY` (AES-GCM do refresh token), `IC_APP_URL` (link do card, redirect pós-OAuth), `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` | `supabase functions deploy ic-agendamento --no-verify-jwt` |
 
 `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY` são injetados pelo Supabase em todas.
@@ -33,9 +33,17 @@ callback é protegido por um `state` assinado (HS256 com `IC_INTERNAL_SECRET`,
 ```jsonc
 // texto livre (janela de 24 h aberta)
 { "cliente_crm_id": "<uuid>", "texto": "Olá! ..." }
-// modelo aprovado (fora da janela de 24 h)
+// modelo aprovado (fora da janela de 24 h), número na Meta
 { "cliente_crm_id": "<uuid>", "template": { "name": "nome_do_modelo", "language": "pt_BR", "components": [] } }
+// modelo aprovado, número no Gupshup (ID do modelo no painel do Gupshup)
+{ "cliente_crm_id": "<uuid>", "template": { "id": "<uuid-do-modelo>", "params": ["Maria"] } }
 ```
+
+O provedor sai de `vendedores_whatsapp.provedor` do número do vendedor do card
+(`_shared/whatsapp-envio.ts`). No Gupshup o envio é **assíncrono**: 200 quer
+dizer que o Gupshup aceitou; recusa posterior (ex.: código 470, fora da janela
+de 24 h) chega no webhook como `message-event` `failed` e fica no log de erro
+de `ic-meta-webhook`. O id gravado em `zapi_message_id` é o `messageId` do Gupshup.
 
 | HTTP | corpo | quando |
 |---|---|---|
@@ -44,10 +52,10 @@ callback é protegido por um `state` assinado (HS256 com `IC_INTERNAL_SECRET`,
 | 400 | `{ok:false, erro:'payload_invalido'\|'texto_invalido'\|'template_invalido'\|'card_sem_numero'\|'card_sem_vendedor'}` | |
 | 401/403 | `{ok:false, erro:'sem_token'\|'token_invalido'\|'usuario_nao_cadastrado'\|'usuario_inativo'}` | |
 | 403 | `{ok:false, erro:'envio_desligado'}` | flag `envio_whatsapp_cloud_api` desligada |
-| 404 | `{ok:false, erro:'card_nao_encontrado'\|'vendedor_sem_cloud_api'}` | vendedor do card sem `meta_phone_id` |
-| 409 | `{ok:false, erro:'fora_da_janela_24h'}` | Meta 131047: use `template` |
-| 502 | `{ok:false, erro:'meta_recusou'}` | outro erro da Meta (detalhe só no log) |
-| 503 | `{ok:false, erro:'envio_nao_configurado'}` | sem `META_ACCESS_TOKEN` |
+| 404 | `{ok:false, erro:'card_nao_encontrado'\|'vendedor_sem_cloud_api'}` | número do vendedor sem `meta_phone_id` (Meta) ou sem `gupshup_app` (Gupshup) |
+| 409 | `{ok:false, erro:'fora_da_janela_24h'}` | Meta 131047: use `template` (no Gupshup a recusa vem depois, pelo webhook) |
+| 502 | `{ok:false, erro:'meta_recusou'\|'gupshup_recusou'}` | o provedor recusou (detalhe só no log) |
+| 503 | `{ok:false, erro:'envio_nao_configurado'}` | sem `META_ACCESS_TOKEN` / `GUPSHUP_API_KEY` |
 
 Dedup com o eco: a Meta devolve a mensagem enviada em `smb_message_echoes`
 com o **mesmo wamid**; como gravamos o wamid em `crm_conversas.zapi_message_id`,
@@ -81,12 +89,13 @@ Cada etapa grava uma linha em `ia_decisoes_log` (`etapa_pipeline`, `decisao`).
 8. **claude** — `POST https://api.anthropic.com/v1/messages` (`anthropic-version: 2023-06-01`), modelo `crm_ia_config.modelo` (padrão `claude-sonnet-5-5`), `max_tokens` = `crm_ia_config.max_tokens` (padrão 1024), `output_config.effort='low'`, tools `propor_agendamento` e `encaminhar_humano` (`strict:true`, `tool_choice auto`), `AbortController` 25 s. Mensagens do contexto mapeadas lead→user, vendedor/ia→assistant com mesclagem de consecutivas.
 9. **pos_validacao** — `respostaProibida` (medicamentos, mg, dose, garantias, "você tem"/"você está com" afirmativos, diagnóstico, receita): bateu → `bloqueada_pos_validacao`, handoff `erro_ia`, resposta fixa neutra.
 10. **tools** — `encaminhar_humano` → handoff com o motivo; `propor_agendamento` → `ic-agendamento` `{acao:'propor'}`; se voltar `confirmado:true` grava handoff `agendamento_confirmado` (verificando pendente para não duplicar com o gatilho do banco).
-11. **envio** — `_shared/whatsapp-cloud.ts → enviarTexto`; grava `crm_conversas` `autor='ia'`, `direcao='enviada'`, `zapi_message_id`=wamid, `payload_raw={ia:true, modelo, decisao_log_id}`.
+11. **envio** — `_shared/whatsapp-envio.ts → enviarTextoCanal` (Meta ou Gupshup, pelo provedor do número); grava `crm_conversas` `autor='ia'`, `direcao='enviada'`, `zapi_message_id`=wamid, `payload_raw={ia:true, modelo, decisao_log_id}`.
 
 ### Modo sombra
 
-Se `ic_flag('envio_whatsapp_cloud_api')` for `false`, ou `META_ACCESS_TOKEN`
-faltar, ou o vendedor do card não tiver `meta_phone_id`, a IA roda **tudo**
+Se `ic_flag('envio_whatsapp_cloud_api')` for `false`, ou faltar a credencial
+do provedor (`META_ACCESS_TOKEN` / `GUPSHUP_API_KEY`), ou o número do vendedor
+do card não estiver configurado (`meta_phone_id` / `gupshup_app`), a IA roda **tudo**
 (inclusive a chamada ao modelo) mas não envia nada: a linha de log recebe
 `decisao='simulada_envio_desligado'` e a resposta que teria saído fica em
 `ia_decisoes_log.detalhe.resposta`. Serve para o time validar as respostas
@@ -136,6 +145,45 @@ f) para **enviar** (equipe e IA): o token do usuário do sistema precisa de `wha
 
 Se pular (a): o webhook ignora tudo. Se pular (e): nada chega nem em `crm_entrada_bruta`. Se pular `smb_message_echoes`: só o lado do lead entra, e a IA nunca percebe que um humano assumiu.
 
+## 4b. Checklist Gupshup (coexistência)
+
+Caminho recomendado para o número real: o Gupshup faz a conexão por QR code e
+o número continua no WhatsApp Business App do celular.
+
+1. **SQL 28** aplicado (`supabase/sql/28_ic_whatsapp_gupshup.sql`) **antes** de publicar as funções.
+2. Segredos (painel do Supabase → Edge Functions → Secrets, ou `supabase secrets set`):
+   - `GUPSHUP_API_KEY` = chave da conta no Gupshup;
+   - `GUPSHUP_WEBHOOK_TOKEN` = texto longo e aleatório criado por você (`openssl rand -hex 32`).
+3. Publicar `ic-meta-webhook` (`--no-verify-jwt`), `ic-whatsapp-send` e `ic-ia-pre-atendimento`.
+4. No painel do Gupshup → app → **Webhooks**: URL
+   `https://<SEU-PROJETO>.supabase.co/functions/v1/ic-meta-webhook?provedor=gupshup&token=<GUPSHUP_WEBHOOK_TOKEN>`.
+   Os dois formatos funcionam (Gupshup v2 e Meta v3). Escolha **um só** para as
+   mensagens: com os dois ligados, a mesma mensagem pode chegar duas vezes.
+   Ligue também os eventos de coexistência (eco das mensagens enviadas pelo
+   celular): sem eles a IA não percebe que um humano assumiu.
+5. Ligar o número no CRM (SQL Editor, trocando os `< >`):
+
+```sql
+update public.vendedores_whatsapp
+set provedor = 'gupshup', gupshup_app = '<NOME_DO_APP_NO_GUPSHUP>', numero_whatsapp = '<5511900000000>'
+where vendedor_id = '<ID_DO_VENDEDOR>';
+```
+
+   `gupshup_app_id` (o `gs_app_id` que aparece nos eventos formato Meta) é opcional.
+6. Teste: mandar uma mensagem de outro celular para o número → card novo no
+   Kanban; conferir `crm_entrada_bruta` (origem `gupshup`) e o log da função.
+
+Segurança: o Gupshup **não documenta assinatura** de webhook. A porta só aceita
+chamadas com o `token` certo na URL (comparação em tempo constante); sem
+`GUPSHUP_WEBHOOK_TOKEN` configurado, tudo é recusado. Quem tiver a URL completa
+consegue mandar eventos falsos: trate a URL como senha e troque o token se ela
+vazar (novo valor no segredo + nova URL no painel).
+
+Mídia: no formato v2 o áudio vem com link (baixado direto; a API key só é
+mandada para `*.gupshup.io`); no formato Meta/coexistência vem só o id, baixado
+em `https://api.gupshup.io/sm/api/wamedia/{app}/{id}` (endpoint do artigo de
+suporte do Gupshup: conferir em homologação).
+
 ## 5. Checklist Google OAuth (Calendar)
 
 1. Google Cloud Console → projeto → **APIs e serviços → Biblioteca**: ativar **Google Calendar API**.
@@ -157,7 +205,9 @@ No Google vai só: nome do lead, telefone, funil/etapa, horário e link do card.
 | `SUPABASE_SERVICE_ROLE_KEY` | todas | gravar passando pela RLS (injetada) |
 | `META_VERIFY_TOKEN` | ic-meta-webhook | GET de verificação do webhook |
 | `META_APP_SECRET` | ic-meta-webhook | conferir `X-Hub-Signature-256` |
-| `META_ACCESS_TOKEN` | ic-meta-webhook, ic-whatsapp-send, ic-ia-pre-atendimento | baixar mídia e enviar mensagens pela Graph API |
+| `META_ACCESS_TOKEN` | ic-meta-webhook, ic-whatsapp-send, ic-ia-pre-atendimento | baixar mídia e enviar mensagens pela Graph API (números `meta`) |
+| `GUPSHUP_API_KEY` | ic-meta-webhook, ic-whatsapp-send, ic-ia-pre-atendimento | baixar mídia e enviar mensagens pelo Gupshup (números `gupshup`) |
+| `GUPSHUP_WEBHOOK_TOKEN` | ic-meta-webhook | segredo na URL do webhook do Gupshup |
 | `GROQ_API_KEY` | ic-meta-webhook | transcrição de áudio (Whisper) |
 | `ANTHROPIC_API_KEY` | ic-ia-pre-atendimento | Messages API da Anthropic |
 | `IC_INTERNAL_SECRET` | todas | header `x-ic-internal` entre funções; assinatura do `state` OAuth |
@@ -171,7 +221,8 @@ No Google vai só: nome do lead, telefone, funil/etapa, horário e link do card.
 ## 7. Testes
 
 Módulos puros em `_shared/*_test.ts` (`Deno.test` + `jsr:@std/assert`): telefone,
-handoff-regras, pos-validacao, consentimento, horario, crypto. Rodar:
+handoff-regras, pos-validacao, consentimento, horario, crypto, gupshup (conversão
+do webhook, corpo do envio, mídia) e whatsapp-envio (escolha do provedor). Rodar:
 
 ```bash
 deno test --allow-env --allow-read supabase/functions/_shared/

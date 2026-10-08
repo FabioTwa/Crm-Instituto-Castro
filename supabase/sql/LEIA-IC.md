@@ -1,10 +1,10 @@
 # IC CRM: banco de dados
 
-O banco do IC CRM e Postgres no Supabase, montado por 28 arquivos SQL numerados
-(`00_` a `27_`) que se aplicam em ordem. Os arquivos `00_` a `12_` sao o esquema
+O banco do IC CRM e Postgres no Supabase, montado por 29 arquivos SQL numerados
+(`00_` a `28_`) que se aplicam em ordem. Os arquivos `00_` a `12_` sao o esquema
 base: extensoes, tabelas, funcoes do nucleo do CRM, views, gatilhos, politicas
 iniciais, realtime, o varredor do webhook e parametros de exemplo. Os arquivos
-`13_` a `27_` sao as camadas do IC CRM (perfis, dinheiro, RLS, jobs, IA, agenda,
+`13_` a `28_` sao as camadas do IC CRM (perfis, dinheiro, RLS, jobs, IA, agenda,
 funis, cadastro), cada um com cabecalho e, quando altera algo existente, um bloco
 `-- ROLLBACK:` no fim. O `11_agendamentos.sql` agenda o varredor do webhook
 (`ic-meta-webhook`); troque `<SEU-PROJETO>` antes de rodar.
@@ -33,6 +33,7 @@ No Supabase, SQL Editor, um arquivo por vez:
 | `25_ic_usuarios_auth.sql` | `users.pw` so aceita `'supabase_auth'` (senha mora so no Supabase Auth, criada pela function `ic-usuarios`); trigger `ic_users_protege_campos`: quem nao e Admin so altera nome, foto e iniciais da propria linha; rollback no rodape | 14, 15 |
 | `26_ic_funcoes_sem_anon.sql` | `crm_cards_irmaos` e `crm_mescla_resumo` (SECURITY DEFINER) so para authenticated/service_role; `ic_agendamento_confirmado` (gatilho) fora da API; rollback no rodape | 06, 18 |
 | `27_ic_admin_protegido.sql` | gatilho `ic_users_protege_admin`: ninguem altera o proprio perfil/papel/status pelo app, e nenhuma alteracao ou exclusao deixa o sistema sem Admin ativo (sem JWT, SQL Editor, passa: caminho de recuperacao); rollback no rodape | 14, 25 |
+| `28_ic_whatsapp_gupshup.sql` | `vendedores_whatsapp.provedor` (`meta`/`gupshup`, padrao `meta`), `gupshup_app`, `gupshup_app_id` (app unico por numero ativo); `crm_entrada_bruta` aceita origem `gupshup`; aditivo, rollback no rodape | 02 |
 
 Depois do 13, inserir o primeiro usuario (criado antes no Supabase Auth, mesmo
 e-mail) e o numero de WhatsApp: o bloco comentado no fim do 13 mostra como.
@@ -54,7 +55,8 @@ e-mail) e o numero de WhatsApp: o bloco comentado no fim do 13 mostra como.
 
 ### Colunas novas em tabelas existentes
 `perfis_acesso.rotulo text`, `perfis_acesso.ve_dinheiro boolean` (13).
-`crm_funis.excluido_em timestamptz`, `crm_funis.excluido_por text` (21). Funil excluido tem `ativo = false` e `excluido_em` preenchido; as telas filtram por `excluido_em is null`.
+`crm_funis.excluido_em timestamptz`, `crm_funis.excluido_por text` (21).
+`vendedores_whatsapp.provedor text` (`meta`/`gupshup`), `.gupshup_app text`, `.gupshup_app_id text` (28). Funil excluido tem `ativo = false` e `excluido_em` preenchido; as telas filtram por `excluido_em is null`.
 
 ### Funcoes
 | funcao | retorno | quem chama | arquivo |

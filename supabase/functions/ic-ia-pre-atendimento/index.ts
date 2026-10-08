@@ -17,10 +17,10 @@
 //   8  claude           Messages API (fetch), tools propor_agendamento / encaminhar_humano
 //   9  pos_validacao    filtro regex CFM na resposta do modelo
 //   10 tools            executa as ferramentas (ic-agendamento 'propor', handoffs)
-//   11 envio            Cloud API (_shared/whatsapp-cloud.ts) + crm_conversas autor 'ia'
+//   11 envio            provedor do numero (_shared/whatsapp-envio.ts: Meta ou Gupshup) + crm_conversas autor 'ia'
 //
-// MODO SOMBRA: se ic_flag('envio_whatsapp_cloud_api') for false ou META_ACCESS_TOKEN
-// faltar, TUDO roda igual, mas nada e enviado: decisao='simulada_envio_desligado'
+// MODO SOMBRA: se ic_flag('envio_whatsapp_cloud_api') for false, ou o numero do
+// vendedor nao tiver provedor configurado, ou faltar a credencial dele, TUDO roda igual, mas nada e enviado: decisao='simulada_envio_desligado'
 // e a resposta que teria saido fica em ia_decisoes_log.detalhe.resposta.
 //
 // LGPD / MINIMIZACAO: para a Anthropic vai so o system prompt (_shared/ia-prompt.ts),
@@ -34,7 +34,8 @@
 //   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY   (o Supabase injeta)
 //   IC_INTERNAL_SECRET            autoriza a chamada do webhook e as chamadas a ic-agendamento
 //   ANTHROPIC_API_KEY             Messages API da Anthropic
-//   META_ACCESS_TOKEN             envio pela Cloud API (ausente = modo sombra)
+//   META_ACCESS_TOKEN             envio pela Cloud API, provedor 'meta' (ausente = modo sombra)
+//   GUPSHUP_API_KEY               envio pelo Gupshup, provedor 'gupshup' (ausente = modo sombra)
 //   IC_POLITICA_PRIVACIDADE_URL   link no pedido de consentimento (opcional)
 //
 // OBSERVACAO SOBRE A API DA ANTHROPIC (conferido na skill claude-api em 03/10/2026):
@@ -53,7 +54,7 @@ import { corsHeaders, erroGenerico, json } from "../_shared/http.ts";
 import { chamadaInternaValida, headersInternos } from "../_shared/auth.ts";
 import { iaConfig, icFlag } from "../_shared/flags.ts";
 import { canonicoTelefone, telefoneBrPlausivel } from "../_shared/telefone.ts";
-import { enviarTexto } from "../_shared/whatsapp-cloud.ts";
+import { canalDoVendedor, type CanalEnvio, enviarTextoCanal } from "../_shared/whatsapp-envio.ts";
 import { detectarHandoff } from "../_shared/handoff-regras.ts";
 import { respostaProibida } from "../_shared/pos-validacao.ts";
 import { interpretarConsentimento } from "../_shared/consentimento.ts";
@@ -100,8 +101,7 @@ class Pipeline {
   card: any = null;
   modelo = "claude-sonnet-5-5";
   envioLigado = false;
-  phoneId = "";
-  token = "";
+  canal: CanalEnvio | null = null;
   para = "";
   constructor(sb: SupabaseClient, body: Body) {
     this.sb = sb;
@@ -195,7 +195,7 @@ class Pipeline {
     extra: Record<string, unknown> = {},
     marcadores: Record<string, unknown> = {},
   ): Promise<{ enviado: boolean; log_id: string | null }> {
-    if (!this.envioLigado || !this.token || !this.phoneId) {
+    if (!this.envioLigado || !this.canal) {
       const log_id = await this.log(etapa, "simulada_envio_desligado", {
         modelo: this.modelo,
         resposta_enviada: false,
@@ -204,12 +204,12 @@ class Pipeline {
       console.log(LOG, "MODO SOMBRA (nao enviado):", texto.slice(0, 120));
       return { enviado: false, log_id };
     }
-    const envio = await enviarTexto({ phoneId: this.phoneId, token: this.token, para: this.para, texto, prefixoLog: LOG });
+    const envio = await enviarTextoCanal(this.canal, this.para, texto, LOG);
     if (!envio.ok) {
       const log_id = await this.log(etapa, "erro_envio", {
         modelo: this.modelo,
         resposta_enviada: false,
-        detalhe: { resposta: texto, codigo_meta: envio.codigoMeta, status: envio.status, ...extra },
+        detalhe: { resposta: texto, provedor: this.canal.provedor, codigo_meta: envio.codigoMeta, status: envio.status, ...extra },
       });
       return { enviado: false, log_id };
     }
@@ -225,7 +225,7 @@ class Pipeline {
       tipo: "texto",
       zapi_message_id: envio.wamid,
       criada_em: agoraIso,
-      payload_raw: { ia: true, modelo: this.modelo, decisao_log_id: log_id, ...marcadores },
+      payload_raw: { ia: true, modelo: this.modelo, provedor: this.canal.provedor, decisao_log_id: log_id, ...marcadores },
     });
     if (error) console.error(LOG, "crm_conversas (ia) recusou:", error.message);
     const { error: errUpd } = await this.sb
@@ -387,23 +387,18 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
   }
   await p.log("humano_assumiu", "ia_pode_responder");
 
-  // Envio: flag + token + phone_id do vendedor do card. Sem isso = modo sombra.
+  // Envio: flag + canal (provedor, numero e credencial) do vendedor do card.
+  // Sem isso = modo sombra.
   p.envioLigado = await icFlag(sb, "envio_whatsapp_cloud_api");
-  p.token = Deno.env.get("META_ACCESS_TOKEN") || "";
   const vendedorId = String((card as any).vendedor_id || body.vendedor_id || "");
+  let motivoSemCanal = "card_sem_vendedor";
   if (vendedorId) {
-    const { data: vend } = await sb
-      .from("vendedores_whatsapp")
-      .select("meta_phone_id")
-      .eq("vendedor_id", vendedorId)
-      .eq("ativo", true)
-      .not("meta_phone_id", "is", null)
-      .limit(1)
-      .maybeSingle();
-    p.phoneId = vend && (vend as any).meta_phone_id ? String((vend as any).meta_phone_id) : "";
+    const res = await canalDoVendedor(sb, vendedorId);
+    if (res.ok) p.canal = res.canal;
+    else motivoSemCanal = res.erroBanco ? "erro_banco" : res.motivo;
   }
-  if (!p.envioLigado || !p.token || !p.phoneId) {
-    console.log(LOG, "modo sombra:", { flag: p.envioLigado, token: !!p.token, phoneId: !!p.phoneId });
+  if (!p.envioLigado || !p.canal) {
+    console.log(LOG, "modo sombra:", { flag: p.envioLigado, provedor: p.canal?.provedor ?? null, motivo: p.canal ? null : motivoSemCanal });
   }
 
   // 3) limites

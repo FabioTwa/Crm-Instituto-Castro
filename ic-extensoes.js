@@ -118,7 +118,7 @@
     };
 
     // Mensagens legíveis para os códigos de erro de ic-whatsapp-send
-    var IC_ERROS_ENVIO = { envio_desligado: 'O envio pelo CRM está desligado (em configuração).', fora_da_janela_24h: 'Fora da janela de 24h da Meta: use um modelo aprovado.', card_sem_numero: 'O card não tem número de WhatsApp.', card_sem_vendedor: 'O card não tem atendente responsável.', vendedor_sem_cloud_api: 'O número do atendente não está conectado à Cloud API.', usuario_inativo: 'Seu usuário está inativo.', usuario_nao_cadastrado: 'Seu usuário não está cadastrado no CRM.', meta_recusou: 'A Meta recusou o envio. Tente novamente.', envio_nao_configurado: 'Credenciais da Meta ainda não configuradas.', texto_invalido: 'Texto inválido (1 a 4096 caracteres).' };
+    var IC_ERROS_ENVIO = { envio_desligado: 'O envio pelo CRM está desligado (em configuração).', fora_da_janela_24h: 'Fora da janela de 24h da Meta: use um modelo aprovado.', card_sem_numero: 'O card não tem número de WhatsApp.', card_sem_vendedor: 'O card não tem atendente responsável.', vendedor_sem_cloud_api: 'O número do atendente não está conectado ao WhatsApp do CRM.', usuario_inativo: 'Seu usuário está inativo.', usuario_nao_cadastrado: 'Seu usuário não está cadastrado no CRM.', meta_recusou: 'A Meta recusou o envio. Tente novamente.', gupshup_recusou: 'O Gupshup recusou o envio. Tente novamente.', envio_nao_configurado: 'Credenciais do WhatsApp ainda não configuradas.', texto_invalido: 'Texto inválido (1 a 4096 caracteres).' };
     window.icErroEnvioLegivel = function (codigo) { return codigo ? (IC_ERROS_ENVIO[codigo] || String(codigo)) : null; };
 
     // =====================================================================

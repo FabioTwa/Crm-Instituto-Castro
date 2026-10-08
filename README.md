@@ -1,7 +1,7 @@
 # IC CRM — Instituto Castro de Medicina
 
 CRM de atendimento e pipeline de vendas da clínica, com WhatsApp Business API
-(Coexistence) espelhado nos cards, assistente virtual de pré-atendimento
+(Coexistence, pela Cloud API da Meta ou pelo Gupshup) espelhado nos cards, assistente virtual de pré-atendimento
 (Claude) e agendamento integrado ao Google Agenda.
 
 O sistema é uma página única (HTML, CSS e JS vanilla, sem build) sobre Postgres no
@@ -12,7 +12,7 @@ Supabase, com a lógica de negócio no banco (funções SQL, gatilhos e RLS).
 | camada | o que é |
 |---|---|
 | Front | `index.html` único, vanilla, sem build. CSS e JS dentro dele + `encaixes.js`, `encaixes-depois.js`, `ic-extensoes.js` |
-| Banco | Postgres no Supabase: `supabase/sql/00`–`27`, aplicados em ordem |
+| Banco | Postgres no Supabase: `supabase/sql/00`–`28`, aplicados em ordem |
 | Servidor | Supabase Edge Functions (Deno/TS): `supabase/functions/` |
 | Hospedagem | Vercel (site estático montado por `ferramentas/montar-site.mjs`, `vercel.json` com CSP) |
 
@@ -26,15 +26,15 @@ encaixes-depois.js         rotas de telas que não existem -> Kanban
 assets/logo-instituto-castro.svg
 config.example.js          copiar para config.js (URL + chave anon). config.js NÃO vai para o git
 ferramentas/               aplicar-tema-ic.mjs + tema-ic.css: identidade visual (tokens e verificações); auditar-xss.mjs e auditar-textos.mjs
-supabase/sql/              00–12 esquema base · 13 perfis/funis/telas · 14 dinheiro+flags · 15 RLS · 16 jobs · 17 IA · 18 agendamentos · 19 reserva vendas · 20 apoio front · 21 funis · 22 realtime do histórico · 23 cadastro padronizado · 24 limites de texto · 25 usuários só no Auth · 26 funções fora do anon · 27 Admin protegido · LEIA-IC.md
+supabase/sql/              00–12 esquema base · 13 perfis/funis/telas · 14 dinheiro+flags · 15 RLS · 16 jobs · 17 IA · 18 agendamentos · 19 reserva vendas · 20 apoio front · 21 funis · 22 realtime do histórico · 23 cadastro padronizado · 24 limites de texto · 25 usuários só no Auth · 26 funções fora do anon · 27 Admin protegido · 28 WhatsApp pelo Gupshup · LEIA-IC.md
 supabase/functions/        ic-meta-webhook · ic-whatsapp-send · ic-ia-pre-atendimento · ic-agendamento · ic-usuarios · _shared/ · LEIA-IC.md
-teste/testar-na-base-vazia.mjs   sobe 00–27 num Postgres local (PGlite) e testa funções, RLS por papel e jobs
+teste/testar-na-base-vazia.mjs   sobe 00–28 num Postgres local (PGlite) e testa funções, RLS por papel e jobs
 docs/                      validações e documentos do projeto (prints e relatórios por correção)
 ```
 
 ## Subir do zero
 
-1. Projeto Supabase novo. Em **SQL Editor**, rode `supabase/sql/00` a `27`, um por vez, na ordem
+1. Projeto Supabase novo. Em **SQL Editor**, rode `supabase/sql/00` a `28`, um por vez, na ordem
    (no `11`, troque `<SEU-PROJETO>`; no `12`, os valores `< >`). Leia `supabase/sql/LEIA-IC.md`.
 2. Crie o primeiro usuário em Authentication → Users e a linha em `public.users` com `pw = 'supabase_auth'`
    (bloco comentado no fim do `13_ic_perfis_e_parametros.sql`).
@@ -44,15 +44,18 @@ docs/                      validações e documentos do projeto (prints e relat�
    só o front na pasta `site/`. SQL, Edge Functions, docs, testes e demonstração não vão para o site.
    O build aborta se faltar variável ou se a chave não for a anon.
    Para rodar local sem a Vercel: `cp config.example.js config.js` e preencha.
-5. WhatsApp: siga o checklist da Meta em `supabase/functions/LEIA-IC.md` (número em coexistência por QR code,
-   webhook em `/functions/v1/ic-meta-webhook`, WABA inscrita no app, `meta_phone_id` em `vendedores_whatsapp`).
+5. WhatsApp: cada número em `vendedores_whatsapp` escolhe o provedor (`provedor`):
+   - `gupshup` (recomendado para coexistência): checklist do Gupshup em `supabase/functions/LEIA-IC.md`
+     (app conectado por QR code, webhook em `/functions/v1/ic-meta-webhook?provedor=gupshup&token=...`, `gupshup_app`);
+   - `meta`: checklist da Meta no mesmo arquivo (webhook em `/functions/v1/ic-meta-webhook`, WABA inscrita no app,
+     `meta_phone_id`).
 
 ## Variáveis de ambiente (só os nomes; modelo em `.env.example`)
 
 Cadastradas nas Edge Functions com `supabase secrets set NOME=valor`. Nunca vão para o git nem para o front.
 
 `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (injetadas pelo Supabase) · `META_VERIFY_TOKEN`, `META_APP_SECRET`,
-`META_ACCESS_TOKEN` · `GROQ_API_KEY` · `ANTHROPIC_API_KEY`, `IC_POLITICA_PRIVACIDADE_URL` · `IC_INTERNAL_SECRET`,
+`META_ACCESS_TOKEN` · `GUPSHUP_API_KEY`, `GUPSHUP_WEBHOOK_TOKEN` · `GROQ_API_KEY` · `ANTHROPIC_API_KEY`, `IC_POLITICA_PRIVACIDADE_URL` · `IC_INTERNAL_SECRET`,
 `IC_CRYPTO_KEY`, `IC_APP_URL` · `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`.
 
 O front lê só `config.js` (URL do projeto e chave **anon**, que é pública por desenho). A `service_role` nunca entra ali.
@@ -62,7 +65,7 @@ O front lê só `config.js` (URL do projeto e chave **anon**, que é pública po
 | chave | padrão | liga |
 |---|---|---|
 | `ia_transcricao_audio` | true | transcrição de áudio no webhook (Groq Whisper) |
-| `envio_whatsapp_cloud_api` | false | envio de mensagem pela tela do CRM (Cloud API) |
+| `envio_whatsapp_cloud_api` | false | envio de mensagem pela tela do CRM e pela IA (Meta ou Gupshup, conforme o número) |
 | `ia_pre_atendimento` | false | assistente virtual (roda em modo sombra enquanto o envio estiver desligado) |
 | `agendamento_google` | false | sincronização com o Google Agenda |
 
@@ -89,7 +92,7 @@ cd supabase/functions && deno test --allow-env --allow-read _shared/
 ## Modo demonstração local (só para teste)
 
 Sem Supabase, dá para validar o front inteiro com dados fictícios. O banco real do projeto
-(`supabase/sql/00`–`27`) roda dentro do navegador via PGlite; só o login e a camada REST são simulados
+(`supabase/sql/00`–`28`) roda dentro do navegador via PGlite; só o login e a camada REST são simulados
 (`demo/demo-local.js`). Liga apenas em `localhost` e apenas se o `config.js` local tiver o bloco
 `DEMO_LOCAL` (o `config.js` não vai para o git e `demo/` não vai para a Vercel, ver `.vercelignore`).
 
