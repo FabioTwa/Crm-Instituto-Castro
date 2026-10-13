@@ -69,6 +69,7 @@ import {
   montarSystemPrompt,
   TEXTO_CONSENTIMENTO_NEGADO,
   TEXTO_HANDOFF_GENERICO,
+  TEXTO_LEMBRETE_CONSENTIMENTO,
   TEXTO_RESPOSTA_BLOQUEADA,
   textoForaDoHorario,
   textoPedidoConsentimento,
@@ -510,6 +511,19 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
       return { ok: true, decisao: "consentimento_negado" };
     }
     if (resp === "ambiguo") {
+      // Lead nao respondeu SIM/NAO (ex.: mandou "oi" de novo, ou o pedido nao
+      // chegou). Reforca o pedido UMA vez por card; depois disso fica calada.
+      const { data: lembretes } = await sb
+        .from("ia_decisoes_log")
+        .select("id")
+        .eq("cliente_crm_id", body.cliente_crm_id)
+        .eq("etapa_pipeline", "consentimento")
+        .eq("decisao", "lembrete_enviado")
+        .limit(1);
+      if (!lembretes || !lembretes.length) {
+        await p.enviar(TEXTO_LEMBRETE_CONSENTIMENTO, "consentimento", "lembrete_enviado");
+        return { ok: true, decisao: "consentimento_lembrete" };
+      }
       await p.log("consentimento", "ambiguo");
       return { ok: true, decisao: "consentimento_ambiguo" };
     }

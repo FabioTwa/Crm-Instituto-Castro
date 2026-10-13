@@ -155,6 +155,9 @@ export function textoPedidoConsentimento(linkPolitica: string): string {
   );
 }
 
+export const TEXTO_LEMBRETE_CONSENTIMENTO =
+  "Para eu continuar o seu atendimento por aqui, preciso só da sua autorização para tratar as informações desta conversa. Responda SIM para continuar ou NÃO se preferir falar direto com a nossa equipe. 😊";
+
 export const TEXTO_CONSENTIMENTO_NEGADO =
   "Tudo bem, sem problemas! Não vou continuar o atendimento automático. Já avisei a nossa equipe, que vai falar com você por aqui no horário de atendimento. Obrigada! 😊";
 
