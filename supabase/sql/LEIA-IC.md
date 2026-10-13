@@ -34,6 +34,8 @@ No Supabase, SQL Editor, um arquivo por vez:
 | `26_ic_funcoes_sem_anon.sql` | `crm_cards_irmaos` e `crm_mescla_resumo` (SECURITY DEFINER) so para authenticated/service_role; `ic_agendamento_confirmado` (gatilho) fora da API; rollback no rodape | 06, 18 |
 | `27_ic_admin_protegido.sql` | gatilho `ic_users_protege_admin`: ninguem altera o proprio perfil/papel/status pelo app, e nenhuma alteracao ou exclusao deixa o sistema sem Admin ativo (sem JWT, SQL Editor, passa: caminho de recuperacao); rollback no rodape | 14, 25 |
 | `28_ic_whatsapp_gupshup.sql` | `vendedores_whatsapp.provedor` (`meta`/`gupshup`, padrao `meta`), `gupshup_app`, `gupshup_app_id` (app unico por numero ativo); `crm_entrada_bruta` aceita origem `gupshup`; aditivo, rollback no rodape | 02 |
+| `29_ic_ia_fase_teste.sql` | `crm_ia_config`: chaves `modo_sombra` (padrao `true`, a IA nao envia) e `numeros_teste` (preenchida = a IA so atende esses telefones); aditivo, rollback no rodape | 17 |
+| `30_ic_ia_exemplos_iniciais.sql` | 16 exemplos anonimizados de atendimentos reais em `ia_exemplos_conversa` (tags por funil); nao duplica pelo titulo; rollback no rodape | 17 |
 
 Depois do 13, inserir o primeiro usuario (criado antes no Supabase Auth, mesmo
 e-mail) e o numero de WhatsApp: o bloco comentado no fim do 13 mostra como.

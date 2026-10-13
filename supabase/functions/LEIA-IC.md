@@ -85,7 +85,7 @@ Cada etapa grava uma linha em `ia_decisoes_log` (`etapa_pipeline`, `decisao`).
 4. **contexto** — RPC `ic_ia_contexto(card, 12)`.
 5. **consentimento** — `ia_consentimentos`: pendente e nunca pedido → envia o texto de consentimento (constante em `_shared/ia-prompt.ts`, com `IC_POLITICA_PRIVACIDADE_URL`) e grava `texto_apresentado`; pendente e já pedido → `interpretarConsentimento` (SIM/NÃO/ambíguo): NÃO → `negado` + handoff `consentimento_negado` + despedida; SIM → `concedido`, segue; ambíguo → não responde.
 6. **handoff_regras** — `detectarHandoff` (código, antes da IA): urgência (resposta fixa orientando PS/192), dúvida clínica, reclamação, pedido de humano. Grava `ia_handoffs`.
-7. **exemplos** — até 8 `ia_exemplos_conversa` ativos, preferindo os cujas `tags` casam com o nome do funil.
+7. **exemplos** — até 12 `ia_exemplos_conversa` ativos, preferindo os cujas `tags` casam com o nome do funil.
 8. **claude** — `POST https://api.anthropic.com/v1/messages` (`anthropic-version: 2023-06-01`), modelo `crm_ia_config.modelo` (padrão `claude-sonnet-5-5`), `max_tokens` = `crm_ia_config.max_tokens` (padrão 1024), `output_config.effort='low'`, tools `propor_agendamento` e `encaminhar_humano` (`strict:true`, `tool_choice auto`), `AbortController` 25 s. Mensagens do contexto mapeadas lead→user, vendedor/ia→assistant com mesclagem de consecutivas.
 9. **pos_validacao** — `respostaProibida` (medicamentos, mg, dose, garantias, "você tem"/"você está com" afirmativos, diagnóstico, receita): bateu → `bloqueada_pos_validacao`, handoff `erro_ia`, resposta fixa neutra.
 10. **tools** — `encaminhar_humano` → handoff com o motivo; `propor_agendamento` → `ic-agendamento` `{acao:'propor'}`; se voltar `confirmado:true` grava handoff `agendamento_confirmado` (verificando pendente para não duplicar com o gatilho do banco).
@@ -93,7 +93,8 @@ Cada etapa grava uma linha em `ia_decisoes_log` (`etapa_pipeline`, `decisao`).
 
 ### Modo sombra
 
-Se `ic_flag('envio_whatsapp_cloud_api')` for `false`, ou faltar a credencial
+Se `crm_ia_config.modo_sombra` não for `'false'` (padrão `'true'`), ou
+`ic_flag('envio_whatsapp_cloud_api')` for `false`, ou faltar a credencial
 do provedor (`META_ACCESS_TOKEN` / `GUPSHUP_API_KEY`), ou o número do vendedor
 do card não estiver configurado (`meta_phone_id` / `gupshup_app`), a IA roda **tudo**
 (inclusive a chamada ao modelo) mas não envia nada: a linha de log recebe
@@ -124,6 +125,33 @@ Ordem recomendada: `ia_transcricao_audio` → `ia_pre_atendimento` + `ligada`
 
 Outras chaves de `crm_ia_config`: `horario_inicio` ('08:00'), `horario_fim`
 ('19:00'), `max_respostas_por_conversa` ('6'), `modelo`, `max_tokens`.
+
+### Fase de teste no número real (SQL 29)
+
+`modo_sombra` ('true' = a IA não envia nada; só `'false'` libera) e
+`numeros_teste` (telefones separados por vírgula; preenchida = a IA só atende
+esses números, os demais leads ficam com `decisao='fora_dos_numeros_teste'`).
+A equipe continua enviando normalmente. Roteiro para treinar no número de
+coexistência sem a IA falar com paciente:
+
+```sql
+update crm_ia_config set valor = '11999990000, 11988880000' where chave = 'numeros_teste'; -- celulares da equipe
+update crm_ia_config set valor = 'false' where chave = 'modo_sombra';  -- a IA responde, mas só a esses números
+update ic_feature_flags set ligada = true where chave = 'ia_pre_atendimento';
+update crm_ia_config set valor = 'true' where chave = 'ligada';
+```
+
+Para conversar de novo com o mesmo número depois de um handoff, marque o
+handoff como atendido (Ações do Dia) e lembre que resposta da equipe nas
+últimas 24 h faz a IA ficar calada nesse card.
+
+Revisar o que a IA decidiu e respondeu:
+
+```sql
+select criado_em, etapa_pipeline, decisao, motivo, tokens_entrada, tokens_saida,
+       detalhe->>'resposta' as resposta
+from ia_decisoes_log order by criado_em desc limit 50;
+```
 
 ## 4. Checklist Meta (WhatsApp Cloud API)
 
