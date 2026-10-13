@@ -13,7 +13,7 @@
 //   4  contexto         RPC ic_ia_contexto(card, 12)
 //   5  consentimento    LGPD: pede, interpreta SIM/NAO, nega -> handoff + despedida
 //   6  handoff_regras   regex por CODIGO (urgencia, duvida clinica, reclamacao, humano)
-//   7  exemplos         ate 8 ia_exemplos_conversa ativos, filtrados por tag do funil
+//   7  exemplos         ate 12 ia_exemplos_conversa ativos, filtrados por tag do funil
 //   8  claude           Messages API (fetch), tools propor_agendamento / encaminhar_humano
 //   9  pos_validacao    filtro regex CFM na resposta do modelo
 //   10 tools            executa as ferramentas (ic-agendamento 'propor', handoffs)
@@ -544,7 +544,7 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
     const casam = funilNorm
       ? todos.filter((e) => Array.isArray(e.tags) && e.tags.some((t: string) => funilNorm.includes(String(t).toLowerCase()) || String(t).toLowerCase().includes(funilNorm)))
       : [];
-    exemplos = (casam.length ? casam : todos).slice(0, 8);
+    exemplos = (casam.length ? casam : todos).slice(0, 12);
   } catch (e) {
     console.warn(LOG, "ia_exemplos_conversa falhou (segue sem exemplos):", e);
   }

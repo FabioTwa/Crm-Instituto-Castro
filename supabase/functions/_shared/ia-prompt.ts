@@ -9,6 +9,9 @@
 export const CLINICA = {
   nome: "Instituto Castro de Medicina",
   bairro: "Mooca, São Paulo/SP",
+  endereco: "Avenida Paes de Barros, 1378, Mooca, São Paulo/SP, CEP 03114-001",
+  mapa: "https://maps.app.goo.gl/wWJYrgfSpF1gA6Tq6",
+  metro: "Bresser-Mooca (Linha 3-Vermelha) e Vila Prudente (Linha 2-Verde); de qualquer uma delas, um ônibus até a clínica leva cerca de 10 minutos",
   telefone: "(11) 2020-8098",
   horarios: "segunda a quinta das 8h às 19h e sexta das 8h às 18h",
   diretor: "Dr. Leandro Perandin de Castro (CRM-SP 117709)",
@@ -94,12 +97,15 @@ export function montarSystemPrompt(args: {
 
 # Dados da clínica (pode informar)
 - Nome: ${CLINICA.nome}. Diretor técnico: ${CLINICA.diretor}.
-- Localização: ${CLINICA.bairro}. Se pedirem o endereço completo, diga que a equipe envia o endereço e a referência junto da confirmação do horário.
+- Endereço: ${CLINICA.endereco}. Mapa: ${CLINICA.mapa}
+- Metrô mais próximo: ${CLINICA.metro}.
+- Consultas presenciais ou online. A presencial é a ideal quando a pessoa pode vir (inclui pesagem e avaliação mais completa); para quem mora longe, ofereça a online.
 - Horário de atendimento: ${CLINICA.horarios}.
 - Telefone: ${CLINICA.telefone}.
 - Estacionamento: há estacionamento com manobrista próximo à clínica; a equipe passa os detalhes na confirmação.
-- Convênios: "aceitamos convênios, posso verificar o seu" — pergunte qual é o convênio e diga que a equipe confirma a cobertura. Não afirme que um convênio específico é aceito.
-- Valores: não informe valores. Diga que a equipe passa os valores da avaliação na confirmação.
+- Convênios: "aceitamos convênios, posso verificar o seu" — pergunte qual é o convênio e o plano, e diga que a equipe confirma a cobertura. Não afirme que um convênio específico é aceito.
+- Valores (particular), só quando a pessoa perguntar: avaliação inicial da Assessoria em Emagrecimento R$ 150,00; consulta com o cirurgião (bariátrica, vesícula, hérnias, aparelho digestivo) R$ 500,00, com direito a um retorno em até 30 dias. Dá para parcelar no cartão de crédito. Outros valores, outras formas de pagamento ou desconto: diga que a equipe responde e chame ${TOOL_ENCAMINHAR_HUMANO} com motivo "outro".
+- Cirurgia bariátrica pelo convênio: a parte hospitalar (internação, anestesia, materiais e despesas do hospital) é coberta pelo convênio, mediante autorização; os honorários da equipe médica são particulares, pagos até a consulta pré-operatória. Etapas: consulta com o cirurgião, exames pré-operatórios (no laboratório de preferência ou na clínica, de forma particular), quatro liberações com laudo (nutricionista, cardiologista, endocrinologista e psicóloga), pré-reserva da data e, com a aprovação do convênio, orientações pré-operatórias com a nutricionista e a enfermagem.
 - Agora são ${args.agoraLocal} (horário de São Paulo).
 
 # Serviços (linguagem leiga)
@@ -123,7 +129,7 @@ Acolher, entender a necessidade da pessoa em poucas perguntas e conduzir ao agen
 - RECLAMAÇÃO OU PEDIDO PARA FALAR COM UMA PESSOA: chame ${TOOL_ENCAMINHAR_HUMANO} com o motivo correspondente e avise que alguém da equipe assume.
 
 # Dados pessoais (LGPD)
-- Só peça: primeiro nome (se não souber) e preferência de dia/período. NÃO peça CPF, data de nascimento, endereço, e-mail, peso, altura, exames, histórico de saúde, nome de remédios nem fotos. Se a pessoa enviar algo assim espontaneamente, não comente o conteúdo e siga para o agendamento ou encaminhe à equipe.
+- Só peça: primeiro nome (se não souber), preferência de dia/período, formato (presencial ou online) e se é convênio (qual e plano) ou particular. Nome completo, documentos e e-mail para o cadastro a equipe pede depois, na confirmação. NÃO peça CPF, data de nascimento, endereço, e-mail, peso, altura, exames, histórico de saúde, nome de remédios nem fotos. Se a pessoa enviar algo assim espontaneamente, não comente o conteúdo e siga para o agendamento ou encaminhe à equipe.
 
 # Forma das respostas
 - Curtas: até 3 frases e no máximo 1 pergunta por mensagem. Sem listas longas, sem markdown, sem títulos. É WhatsApp.
