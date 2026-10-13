@@ -19,7 +19,11 @@
 //   10 tools            executa as ferramentas (ic-agendamento 'propor', handoffs)
 //   11 envio            provedor do numero (_shared/whatsapp-envio.ts: Meta ou Gupshup) + crm_conversas autor 'ia'
 //
-// MODO SOMBRA: se ic_flag('envio_whatsapp_cloud_api') for false, ou o numero do
+// FASE DE TESTE: crm_ia_config.numeros_teste preenchida = so esses telefones sao
+// atendidos (os demais: decisao='fora_dos_numeros_teste'). Ver _shared/ia-teste.ts.
+//
+// MODO SOMBRA: se crm_ia_config.modo_sombra nao for 'false' (padrao 'true'),
+// ou ic_flag('envio_whatsapp_cloud_api') for false, ou o numero do
 // vendedor nao tiver provedor configurado, ou faltar a credencial dele, TUDO roda igual, mas nada e enviado: decisao='simulada_envio_desligado'
 // e a resposta que teria saido fica em ia_decisoes_log.detalhe.resposta.
 //
@@ -59,6 +63,7 @@ import { detectarHandoff } from "../_shared/handoff-regras.ts";
 import { respostaProibida } from "../_shared/pos-validacao.ts";
 import { interpretarConsentimento } from "../_shared/consentimento.ts";
 import { dentroDoHorario, partesNoFuso, TZ_PADRAO } from "../_shared/horario.ts";
+import { faseTeste } from "../_shared/ia-teste.ts";
 import {
   FERRAMENTAS,
   montarSystemPrompt,
@@ -367,6 +372,13 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
     return { ok: false, erro: "card_sem_numero" };
   }
 
+  // Fase de teste (crm_ia_config.numeros_teste / modo_sombra, _shared/ia-teste.ts).
+  const fase = faseTeste(cfg, p.para);
+  if (!fase.atende) {
+    await p.log("flags", "fora_dos_numeros_teste");
+    return { ok: true, decisao: "fora_dos_numeros_teste" };
+  }
+
   // 2) humano_assumiu
   const desde24h = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
   const { data: humano } = await sb
@@ -389,7 +401,7 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
 
   // Envio: flag + canal (provedor, numero e credencial) do vendedor do card.
   // Sem isso = modo sombra.
-  p.envioLigado = await icFlag(sb, "envio_whatsapp_cloud_api");
+  p.envioLigado = !fase.sombra && await icFlag(sb, "envio_whatsapp_cloud_api");
   const vendedorId = String((card as any).vendedor_id || body.vendedor_id || "");
   let motivoSemCanal = "card_sem_vendedor";
   if (vendedorId) {
@@ -398,7 +410,7 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
     else motivoSemCanal = res.erroBanco ? "erro_banco" : res.motivo;
   }
   if (!p.envioLigado || !p.canal) {
-    console.log(LOG, "modo sombra:", { flag: p.envioLigado, provedor: p.canal?.provedor ?? null, motivo: p.canal ? null : motivoSemCanal });
+    console.log(LOG, "modo sombra:", { config_sombra: fase.sombra, flag: p.envioLigado, provedor: p.canal?.provedor ?? null, motivo: p.canal ? null : motivoSemCanal });
   }
 
   // 3) limites

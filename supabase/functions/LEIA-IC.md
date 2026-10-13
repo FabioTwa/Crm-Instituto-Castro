@@ -93,7 +93,8 @@ Cada etapa grava uma linha em `ia_decisoes_log` (`etapa_pipeline`, `decisao`).
 
 ### Modo sombra
 
-Se `ic_flag('envio_whatsapp_cloud_api')` for `false`, ou faltar a credencial
+Se `crm_ia_config.modo_sombra` não for `'false'` (padrão `'true'`), ou
+`ic_flag('envio_whatsapp_cloud_api')` for `false`, ou faltar a credencial
 do provedor (`META_ACCESS_TOKEN` / `GUPSHUP_API_KEY`), ou o número do vendedor
 do card não estiver configurado (`meta_phone_id` / `gupshup_app`), a IA roda **tudo**
 (inclusive a chamada ao modelo) mas não envia nada: a linha de log recebe
@@ -124,6 +125,33 @@ Ordem recomendada: `ia_transcricao_audio` → `ia_pre_atendimento` + `ligada`
 
 Outras chaves de `crm_ia_config`: `horario_inicio` ('08:00'), `horario_fim`
 ('19:00'), `max_respostas_por_conversa` ('6'), `modelo`, `max_tokens`.
+
+### Fase de teste no número real (SQL 29)
+
+`modo_sombra` ('true' = a IA não envia nada; só `'false'` libera) e
+`numeros_teste` (telefones separados por vírgula; preenchida = a IA só atende
+esses números, os demais leads ficam com `decisao='fora_dos_numeros_teste'`).
+A equipe continua enviando normalmente. Roteiro para treinar no número de
+coexistência sem a IA falar com paciente:
+
+```sql
+update crm_ia_config set valor = '11999990000, 11988880000' where chave = 'numeros_teste'; -- celulares da equipe
+update crm_ia_config set valor = 'false' where chave = 'modo_sombra';  -- a IA responde, mas só a esses números
+update ic_feature_flags set ligada = true where chave = 'ia_pre_atendimento';
+update crm_ia_config set valor = 'true' where chave = 'ligada';
+```
+
+Para conversar de novo com o mesmo número depois de um handoff, marque o
+handoff como atendido (Ações do Dia) e lembre que resposta da equipe nas
+últimas 24 h faz a IA ficar calada nesse card.
+
+Revisar o que a IA decidiu e respondeu:
+
+```sql
+select criado_em, etapa_pipeline, decisao, motivo, tokens_entrada, tokens_saida,
+       detalhe->>'resposta' as resposta
+from ia_decisoes_log order by criado_em desc limit 50;
+```
 
 ## 4. Checklist Meta (WhatsApp Cloud API)
 
