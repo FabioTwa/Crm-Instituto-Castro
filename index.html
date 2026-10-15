@@ -11598,7 +11598,10 @@ async function loadCRMDetalhe(id) {
     html += '<div class="crm-detalhe-sidebar ic-card-lateral">';
     // Conversa (WhatsApp) card — Camada 1 do bot, render LAZY apos o detalhe abrir.
     // Reaproveita renderConversaCRM + CSS dos baloes (crm-conv-body). So leitura.
-    html += '<div class="card"><div class="crm-info-section"><h3 style="display:flex;justify-content:space-between;align-items:center">Conversa de WhatsApp <button type="button" class="ic-texto-icone" style="font-size:12px" onclick="abrirModalConversaCRM(\'' + id + '\')">' + icon('maximize-2', 14) + ' Tela cheia</button></h3>';
+    html += '<div class="card"><div class="crm-info-section"><h3 style="display:flex;justify-content:space-between;align-items:center">Conversa de WhatsApp <span style="display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end">'
+       // [ic] Encerra a conversa da assistente virtual e manda a despedida (ic-extensoes.js).
+       + '<button type="button" class="ic-texto-icone" style="font-size:12px" title="Encerra a conversa da assistente virtual e manda a despedida ao lead" onclick="icEncerrarConversa(\'' + escaparAtributo(String(id)) + '\')">' + icon('message-circle-x', 14) + ' Encerrar conversa</button>'
+       + '<button type="button" class="ic-texto-icone" style="font-size:12px" onclick="abrirModalConversaCRM(\'' + id + '\')">' + icon('maximize-2', 14) + ' Tela cheia</button></span></h3>';
     // [ic] indicador "aguardando resposta há X" (Parte 3.5)
     if (cl.ultima_mensagem_direcao === 'recebida' && cl.ultima_mensagem_em) {
         html += '<div class="ic-conv-espera">' + icon('clock', 12) + ' Aguardando resposta há ' + crmFormatarTempoDecorrido(Date.now() - new Date(cl.ultima_mensagem_em).getTime()) + '</div>';
