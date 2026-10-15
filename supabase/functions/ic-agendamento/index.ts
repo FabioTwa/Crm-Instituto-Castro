@@ -11,7 +11,7 @@
 //      GET ?acao=google_oauth_callback&code=&state=     (o Google redireciona para ca; redireciona ao IC_APP_URL)
 //  (b) INTERNA (header x-ic-internal = IC_INTERNAL_SECRET):
 //      {acao:'propor', cliente_crm_id, dia_preferido, periodo, horario_preferido?, servico, observacao}
-//        -> cria agendamentos status 'pendente', origem 'ia'. NAO confirma. {ok, confirmado:false, agendamento_id}
+//        -> cria agendamentos status 'pendente', origem 'ia' (ou troca o horario da proposta pendente da IA). NAO confirma. {ok, confirmado:false, agendamento_id}
 //
 // PUBLICAR: supabase functions deploy ic-agendamento --no-verify-jwt
 //   Por que --no-verify-jwt aqui? O callback OAuth chega do Google sem JWT do
@@ -411,7 +411,15 @@ async function acaoPropor(sb: SupabaseClient, body: any): Promise<Response> {
     .maybeSingle();
   if (errCard || !card) return json({ ok: false, erro: "card_nao_encontrado" }, 404);
 
-  // Ja existe proposta pendente da IA para este card? Nao duplica.
+  const periodo = body.periodo === "tarde" ? "tarde" : "manha";
+  const slot = proximoSlot(
+    String(body.dia_preferido || ""), periodo, new Date(), TZ_PADRAO, String(body.horario_preferido || "").slice(0, 10),
+  );
+  const servico = String(body.servico || "Avaliação").trim().slice(0, 120);
+  const obs = String(body.observacao || "").trim().slice(0, 300);
+
+  // Ja existe proposta pendente da IA para este card? Nao duplica: troca o
+  // horario dela (o lead mudou de ideia antes da equipe confirmar).
   const { data: jaTem } = await sb
     .from("agendamentos")
     .select("id")
@@ -419,17 +427,27 @@ async function acaoPropor(sb: SupabaseClient, body: any): Promise<Response> {
     .eq("origem", "ia")
     .eq("status", "pendente")
     .gte("inicio", new Date().toISOString())
+    .order("inicio", { ascending: true })
     .limit(1);
   if (jaTem && jaTem.length) {
-    return json({ ok: true, confirmado: false, agendamento_id: (jaTem[0] as any).id, repetido: true });
+    const idExistente = String((jaTem[0] as any).id);
+    const { error: errUpd } = await sb
+      .from("agendamentos")
+      .update({
+        inicio: slot.inicio.toISOString(),
+        fim: slot.fim.toISOString(),
+        titulo: "Avaliação — " + servico,
+        observacoes: obs ? "Proposta da IA. " + obs : "Proposta da IA.",
+        atualizado_em: new Date().toISOString(),
+      })
+      .eq("id", idExistente)
+      .eq("status", "pendente");
+    if (errUpd) {
+      console.error(LOG, "update agendamentos (propor) falhou:", errUpd.message);
+      return json({ ok: false, erro: "atualizar_falhou" }, 500);
+    }
+    return json({ ok: true, confirmado: false, agendamento_id: idExistente, atualizado: true, inicio: slot.inicio.toISOString(), fim: slot.fim.toISOString() });
   }
-
-  const periodo = body.periodo === "tarde" ? "tarde" : "manha";
-  const slot = proximoSlot(
-    String(body.dia_preferido || ""), periodo, new Date(), TZ_PADRAO, String(body.horario_preferido || "").slice(0, 10),
-  );
-  const servico = String(body.servico || "Avaliação").trim().slice(0, 120);
-  const obs = String(body.observacao || "").trim().slice(0, 300);
   const telefone = canonicoTelefone(String((card as any).numero_whatsapp || (card as any).telefone || ""));
 
   const { data: novo, error } = await sb
