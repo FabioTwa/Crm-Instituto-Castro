@@ -589,6 +589,26 @@
         if (clienteId && typeof openCRMDetalhe === 'function') openCRMDetalhe(clienteId);
     };
 
+    // Encerrar conversa (painel do lead): fecha os encaminhamentos pendentes e
+    // marca o encerramento. A próxima mensagem do lead volta para a assistente
+    // virtual como conversa nova. Nada é enviado ao lead (SQL 32).
+    window.icEncerrarConversa = function (clienteId) {
+        if (!clienteId) return;
+        icConfirmar('Encerrar a conversa deste lead?\n\nNada é enviado ao lead. Quando ele mandar uma nova mensagem, a assistente virtual volta a atender desde o começo.', 'Encerrar conversa', async function () {
+            var r;
+            try { r = await supabaseClient.rpc('ic_encerrar_conversa', { p_cliente: clienteId }); } catch (e) { r = { error: e }; }
+            if (r.error) {
+                var m = String((r.error && r.error.message) || '');
+                showToast(m.indexOf('nao_autorizado') >= 0 || m.indexOf('card_nao_encontrado') >= 0
+                    ? 'Você não tem permissão para encerrar esta conversa.' : 'Não foi possível encerrar a conversa.', 'error');
+                return;
+            }
+            showToast('Conversa encerrada. A próxima mensagem do lead volta para a assistente virtual.', 'success');
+            var bloco = document.getElementById('ic-handoffs');
+            if (bloco) { bloco.remove(); if (typeof icRenderHandoffs === 'function') icRenderHandoffs(); }
+        });
+    };
+
     // =====================================================================
     // 8. ROTEAMENTO: envolve showView e os loaders sem editá-los
     // =====================================================================
