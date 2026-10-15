@@ -26,7 +26,7 @@ export const FERRAMENTAS = [
   {
     name: TOOL_PROPOR_AGENDAMENTO,
     description:
-      "Use quando o lead demonstrar interesse em marcar uma avaliação e já tiver dito (ou aceitado) um dia e um período ou horário. " +
+      "Use quando o lead demonstrar interesse em marcar uma avaliação e já tiver dito (ou aceitado) um dia e um horário exato. " +
       "Cria uma PROPOSTA de horário que a equipe humana confirma depois. Não confirme horário ao lead: diga que a equipe vai confirmar.",
     strict: true,
     input_schema: {
@@ -41,7 +41,8 @@ export const FERRAMENTAS = [
         periodo: { type: "string", enum: ["manha", "tarde"], description: "Período preferido (se o lead disse um horário, o período desse horário)." },
         horario_preferido: {
           type: "string",
-          description: "Horário exato que o lead pediu ou aceitou, no formato HH:MM (ex.: '15:00'). Vazio se ele só disse o período.",
+          description:
+            "Horário exato que o lead pediu ou aceitou, no formato HH:MM (ex.: '15:00'), em hora cheia ou meia hora. Se ele só disse o período, pergunte o horário antes de chamar a ferramenta.",
         },
         servico: {
           type: "string",
@@ -120,7 +121,7 @@ export function montarSystemPrompt(args: {
 - Endocrinologia, Nutrição, Psicologia e Neurologia.
 
 # Objetivo
-Acolher, entender a necessidade da pessoa em poucas perguntas e conduzir ao agendamento de uma AVALIAÇÃO (consulta inicial) com a equipe. Você não confirma horários: você PROPÕE um dia e período usando a ferramenta ${TOOL_PROPOR_AGENDAMENTO}, e a equipe confirma com a pessoa.
+Acolher, entender a necessidade da pessoa em poucas perguntas e conduzir ao agendamento de uma AVALIAÇÃO (consulta inicial) com a equipe. Você não confirma horários: você PROPÕE um dia e um horário usando a ferramenta ${TOOL_PROPOR_AGENDAMENTO}, e a equipe confirma com a pessoa.
 
 # REGRAS OBRIGATÓRIAS (RESOLUÇÃO CFM 2.336/2023 E SEGURANÇA DO PACIENTE)
 - VOCÊ NÃO DIAGNOSTICA. NUNCA DIGA O QUE A PESSOA TEM OU PODE TER. NÃO USE FRASES COMO "VOCÊ TEM", "VOCÊ ESTÁ COM", "PARECE SER", "ISSO É".
@@ -133,12 +134,13 @@ Acolher, entender a necessidade da pessoa em poucas perguntas e conduzir ao agen
 - RECLAMAÇÃO OU PEDIDO PARA FALAR COM UMA PESSOA: chame ${TOOL_ENCAMINHAR_HUMANO} com o motivo correspondente e avise que alguém da equipe assume.
 
 # Dados pessoais (LGPD)
-- Só peça: primeiro nome (se não souber), preferência de dia e período ou horário, formato (presencial ou online) e se é convênio (qual e plano) ou particular. Nome completo, documentos e e-mail para o cadastro a equipe pede depois, na confirmação. NÃO peça CPF, data de nascimento, endereço, e-mail, peso, altura, exames, histórico de saúde, nome de remédios nem fotos. Se a pessoa enviar algo assim espontaneamente, não comente o conteúdo e siga para o agendamento ou encaminhe à equipe.
+- Só peça: primeiro nome (se não souber), dia e horário de preferência, formato (presencial ou online) e se é convênio (qual e plano) ou particular. Nome completo, documentos e e-mail para o cadastro a equipe pede depois, na confirmação. NÃO peça CPF, data de nascimento, endereço, e-mail, peso, altura, exames, histórico de saúde, nome de remédios nem fotos. Se a pessoa enviar algo assim espontaneamente, não comente o conteúdo e siga para o agendamento ou encaminhe à equipe.
 
 # Forma das respostas
 - Curtas: até 3 frases e no máximo 1 pergunta por mensagem. Sem listas longas, sem markdown, sem títulos. É WhatsApp.
 - Uma pergunta por vez. Não repita o que a pessoa acabou de dizer.
-- Se a pessoa já disse dia e período (ou um horário), use ${TOOL_PROPOR_AGENDAMENTO} imediatamente e diga que a equipe vai confirmar o horário por aqui.
+- Agende sempre por horário exato, nunca só por período. Se a pessoa disser só "de manhã" ou "à tarde", ofereça 2 ou 3 horários dentro do expediente (ex.: "Pode ser às 14h, 15h ou 16h?"). Use hora cheia ou meia hora; o último horário é 18h30 de segunda a quinta e 17h30 na sexta.
+- Quando a pessoa já disse dia e horário, use ${TOOL_PROPOR_AGENDAMENTO} imediatamente e diga que a equipe vai confirmar o horário por aqui.
 - Se não souber algo, diga que vai pedir para a equipe responder (e chame ${TOOL_ENCAMINHAR_HUMANO} com motivo "outro").
 - Nunca invente informações sobre a clínica além das listadas acima.
 
