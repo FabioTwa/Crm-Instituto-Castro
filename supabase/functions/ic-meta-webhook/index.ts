@@ -29,6 +29,7 @@
 //
 //   GUPSHUP_WEBHOOK_TOKEN  segredo na URL do webhook do Gupshup (?token=...)
 //   GUPSHUP_API_KEY     baixar midia (audio) pelo Gupshup
+//   ZAPI_WEBHOOK_TOKEN  segredo na URL do webhook da Z-API (?token=...)
 //
 // Publicar: supabase functions deploy ic-meta-webhook --no-verify-jwt
 //
@@ -48,6 +49,18 @@
 // - O envelope gravado em crm_entrada_bruta (origem 'gupshup') ja e o
 //   convertido, com _ic_provedor e o evento original em _ic_original: o
 //   varredor reprocessa sem saber de Gupshup.
+//
+// Z-API (fase de treino da IA, NAO oficial) - 15/10/2026:
+//   .../functions/v1/ic-meta-webhook?provedor=zapi&token=<ZAPI_WEBHOOK_TOKEN>
+// - Webhook "Ao receber" da Z-API, com "notificar as enviadas por mim" ligado.
+//   Convertido para o envelope da Meta em _shared/zapi.ts (envelopeZapi) e
+//   processado pelo MESMO caminho abaixo. fromMe vira smb_message_echoes.
+// - O numero e achado por vendedores_whatsapp.zapi_instancia (instanceId do
+//   evento) ou pelo numero da casa (connectedPhone), so em linhas com
+//   provedor 'zapi'.
+// - Um numero tem UM provedor ativo: linha com provedor 'zapi' nao e achada
+//   pelos caminhos da Meta e do Gupshup (evita mensagem duplicada e a IA
+//   respondendo duas vezes se o webhook antigo continuar ligado).
 //
 // ---------------------------------------------------------------------------
 // Recebe os eventos da Cloud API da Meta e acha o vendedor por meta_phone_id
@@ -104,8 +117,9 @@ type Supa = SupabaseClient<any, "public", any>;
 import { canonicoTelefone, soDigitos, telefoneBrPlausivel, variacoesTelefone } from "../_shared/telefone.ts";
 import { icFlag } from "../_shared/flags.ts";
 import { baixarMidiaGupshup, envelopeGupshup, tokenWebhookValido } from "../_shared/gupshup.ts";
+import { baixarMidiaZapi, envelopeZapi, tokenWebhookZapiValido } from "../_shared/zapi.ts";
 
-type Provedor = "meta" | "gupshup";
+type Provedor = "meta" | "gupshup" | "zapi";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -173,7 +187,7 @@ async function registrarFalhaEntrada(
   },
 ): Promise<void> {
   const linha = {
-    origem: (dados.payload as any)?.fonte === "gupshup" ? "gupshup" : ORIGEM_FALHA,
+    origem: ["gupshup", "zapi"].includes((dados.payload as any)?.fonte) ? (dados.payload as any).fonte : ORIGEM_FALHA,
     etapa: dados.etapa,
     telefone: dados.telefone || null,
     funil_id: dados.funil_id || null,
@@ -505,6 +519,13 @@ async function baixarAudio(
   vendedor: VendedorWa,
   audio: any,
 ): Promise<{ bytes: ArrayBuffer; mimeType: string } | null> {
+  if (provedor === "zapi") {
+    return await baixarMidiaZapi({
+      url: audio && audio.url ? String(audio.url) : "",
+      mimeType: audio && audio.mime_type ? String(audio.mime_type) : "",
+      prefixoLog: "[ic-meta-webhook][zapi]",
+    });
+  }
   if (provedor === "gupshup") {
     return await baixarMidiaGupshup({
       url: audio && audio.url ? String(audio.url) : "",
@@ -749,6 +770,9 @@ let vendedorCache = new Map<string, VendedorWa>();
 let vendedorPorGupshupApp = new Map<string, VendedorWa>();
 let vendedorPorGupshupAppId = new Map<string, VendedorWa>();
 let vendedorPorGupshupNumero = new Map<string, VendedorWa>();
+// Z-API: por instancia e pelo numero da casa, so linhas com provedor 'zapi'.
+let vendedorPorZapiInstancia = new Map<string, VendedorWa>();
+let vendedorPorZapiNumero = new Map<string, VendedorWa>();
 let vendedorCacheEm = 0;
 // Numeros dos proprios vendedores. Numero que esta em vendedores_whatsapp nunca
 // pode virar card de lead: eram os vendedores conversando entre si que criaram
@@ -766,6 +790,8 @@ async function carregarVendedores(supabase: Supa): Promise<string | null> {
   const porApp = new Map<string, VendedorWa>();
   const porAppId = new Map<string, VendedorWa>();
   const porNumero = new Map<string, VendedorWa>();
+  const porZapi = new Map<string, VendedorWa>();
+  const porZapiNumero = new Map<string, VendedorWa>();
   const numeros = new Set<string>();
   for (const r of ((data as any[]) || [])) {
     const canon = canonicoTelefone(String(r.numero_whatsapp || ""));
@@ -778,6 +804,12 @@ async function carregarVendedores(supabase: Supa): Promise<string | null> {
       funil_id: r.funil_id ?? null,
       gupshup_app: r.gupshup_app ?? null,
     };
+    // Um numero, um provedor ativo: a linha da Z-API so entra nos mapas dela.
+    if (String(r.provedor || "") === "zapi") {
+      if (r.zapi_instancia) porZapi.set(String(r.zapi_instancia).trim(), v);
+      if (canon) porZapiNumero.set(canon, v);
+      continue;
+    }
     if (r.meta_phone_id) mapa.set(String(r.meta_phone_id), v);
     if (r.gupshup_app) porApp.set(String(r.gupshup_app).trim().toLowerCase(), v);
     if (r.gupshup_app_id) porAppId.set(String(r.gupshup_app_id).trim(), v);
@@ -787,6 +819,8 @@ async function carregarVendedores(supabase: Supa): Promise<string | null> {
   vendedorPorGupshupApp = porApp;
   vendedorPorGupshupAppId = porAppId;
   vendedorPorGupshupNumero = porNumero;
+  vendedorPorZapiInstancia = porZapi;
+  vendedorPorZapiNumero = porZapiNumero;
   numerosDaCasa = numeros;
   vendedorCacheEm = Date.now();
   return null;
@@ -827,6 +861,21 @@ async function acharVendedorGupshup(
     (ids.phoneNumberId && vendedorCache.get(ids.phoneNumberId)) ||
     (ids.appName && vendedorPorGupshupApp.get(ids.appName.trim().toLowerCase())) ||
     (ids.numeroCasa && vendedorPorGupshupNumero.get(canonicoTelefone(ids.numeroCasa))) ||
+    null;
+  return { vendedor: v, erro: null };
+}
+
+// Z-API: pela instancia do evento, depois pelo numero da casa (connectedPhone).
+async function acharVendedorZapi(
+  supabase: Supa,
+  ids: { instancia: string; numeroCasa: string },
+): Promise<{ vendedor: VendedorWa | null; erro: string | null }> {
+  if (Date.now() - vendedorCacheEm > VENDEDOR_TTL_MS || vendedorPorZapiInstancia.size === 0) {
+    const erro = await carregarVendedores(supabase);
+    if (erro && vendedorPorZapiInstancia.size === 0) return { vendedor: null, erro };
+  }
+  const v = (ids.instancia && vendedorPorZapiInstancia.get(ids.instancia.trim())) ||
+    (ids.numeroCasa && vendedorPorZapiNumero.get(canonicoTelefone(ids.numeroCasa))) ||
     null;
   return { vendedor: v, erro: null };
 }
@@ -1574,6 +1623,7 @@ Deno.serve(async (req: Request) => {
   // Gupshup tem porta propria (token na URL em vez da assinatura da Meta).
   const urlReq = new URL(req.url);
   if (urlReq.searchParams.get("provedor") === "gupshup") return await entradaGupshup(req, urlReq);
+  if (urlReq.searchParams.get("provedor") === "zapi") return await entradaZapi(req, urlReq);
   // (a) Verificacao de posse do endereco.
   if (req.method === "GET") return verificarWebhook(req);
   if (req.method !== "POST") return json({ ok: true, ignored: "method" });
@@ -1763,12 +1813,85 @@ async function entradaGupshup(req: Request, url: URL): Promise<Response> {
   return json({ ok: true, ack: true, entrada: entradaId });
 }
 
+// -------------------------------------------------------------------
+// ENTRADA DA Z-API (fase de treino)
+//
+// Mesmas garantias das outras portas. Autenticidade: segredo
+// ZAPI_WEBHOOK_TOKEN na URL (a Z-API nao assina o webhook). Evento que nao e
+// mensagem de conversa (grupo, status, conexao, eco do proprio envio pela API)
+// responde 200 sem gravar nada.
+// -------------------------------------------------------------------
+async function entradaZapi(req: Request, url: URL): Promise<Response> {
+  const LOGZ = "[ic-meta-webhook][zapi]";
+  const segredo = Deno.env.get("ZAPI_WEBHOOK_TOKEN") || "";
+  if (!segredo) {
+    console.error(LOGZ, "ZAPI_WEBHOOK_TOKEN ausente; chamada recusada");
+    return json({ ok: true, ignored: "token nao configurado" });
+  }
+  if (!tokenWebhookZapiValido(url.searchParams.get("token") || "", segredo)) {
+    console.warn(LOGZ, "token invalido, payload descartado");
+    return json({ ok: true, ignored: "token invalido" });
+  }
+  if (req.method !== "POST") return json({ ok: true });
+
+  const URL_SB = Deno.env.get("SUPABASE_URL") || "";
+  const SR = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+  if (!URL_SB || !SR) {
+    console.error(LOGZ, "SUPABASE_URL/SERVICE_ROLE ausentes");
+    return json({ ok: true, error: "env missing" });
+  }
+
+  const texto = await req.text();
+  if (!texto.trim()) return json({ ok: true, ignored: "corpo vazio" });
+  let bruto: any = null;
+  try {
+    bruto = JSON.parse(texto);
+  } catch (_e) {
+    return json({ ok: true, ignored: "payload nao-json" });
+  }
+  const { envelope, tipo } = envelopeZapi(bruto);
+  if (envelope._ic_ignorado) {
+    console.log(LOGZ, "ignorado:", tipo);
+    return json({ ok: true, ignored: tipo });
+  }
+  console.log(LOGZ, "evento:", tipo, String(bruto.messageId || "").slice(0, 60));
+
+  const sbEntrada = createClient(URL_SB, SR, { auth: { persistSession: false } });
+  let entradaId: number | null = null;
+  try {
+    const { data: ent, error: errEnt } = await sbEntrada
+      .from("crm_entrada_bruta")
+      .insert({ origem: "zapi", envelope })
+      .select("id")
+      .single();
+    if (errEnt) throw new Error(errEnt.message);
+    entradaId = ent && typeof ent.id === "number" ? ent.id : null;
+  } catch (e) {
+    console.error(LOGZ, "envelope cru NAO gravado:", e && (e as Error).message);
+    return json({ ok: false, error: "entrada nao gravada" }, 500);
+  }
+
+  const trabalho = processarPayload(URL_SB, SR, envelope)
+    .then(() => marcarEntrada(sbEntrada, entradaId, "processada", null))
+    .catch(async (e) => {
+      await marcarEntrada(sbEntrada, entradaId, "falhou", (e && (e as Error).message) || String(e));
+      console.error(LOGZ, "erro pos-ack:", e);
+    });
+  const espera = (globalThis as any).EdgeRuntime?.waitUntil;
+  if (typeof espera === "function") {
+    espera.call((globalThis as any).EdgeRuntime, trabalho);
+  }
+  return json({ ok: true, ack: true, entrada: entradaId });
+}
+
 // Todo o processamento vive aqui, fora do caminho da resposta. Nada do que
 // acontece daqui para baixo pode atrasar o ack da Meta.
 // O envelope e sempre o da Meta; quando veio do Gupshup, traz _ic_provedor.
 async function processarPayload(URL_SB: string, SR: string, payload: any): Promise<void> {
   const resultados: unknown[] = [];
-  const provedor: Provedor = payload && payload._ic_provedor === "gupshup" ? "gupshup" : "meta";
+  const provedor: Provedor = payload && (payload._ic_provedor === "gupshup" || payload._ic_provedor === "zapi")
+    ? payload._ic_provedor
+    : "meta";
   try {
     const supabase = createClient(URL_SB, SR, { auth: { persistSession: false } });
     const entries = Array.isArray(payload.entry) ? payload.entry : [];
@@ -1815,7 +1938,12 @@ async function processarPayload(URL_SB: string, SR: string, payload: any): Promi
         }
 
         const phoneNumberId = String((value.metadata && value.metadata.phone_number_id) || "");
-        const { vendedor, erro: erroVendedor } = provedor === "gupshup"
+        const { vendedor, erro: erroVendedor } = provedor === "zapi"
+          ? await acharVendedorZapi(supabase, {
+            instancia: String(payload.zapi_instance_id || (value.metadata && value.metadata.zapi_instance_id) || ""),
+            numeroCasa: String((value.metadata && value.metadata.display_phone_number) || ""),
+          })
+          : provedor === "gupshup"
           ? await acharVendedorGupshup(supabase, {
             appId: String(payload.gs_app_id || ""),
             phoneNumberId,
@@ -1831,7 +1959,7 @@ async function processarPayload(URL_SB: string, SR: string, payload: any): Promi
           continue;
         }
         if (!vendedor) {
-          console.log("[ic-meta-webhook] numero sem vendedor ativo:", provedor, phoneNumberId || payload.gs_app_id || payload.gs_app_name || "");
+          console.log("[ic-meta-webhook] numero sem vendedor ativo:", provedor, phoneNumberId || payload.gs_app_id || payload.gs_app_name || payload.zapi_instance_id || "");
           resultados.push({ field, ignored: "no vendor", phone_number_id: phoneNumberId });
           continue;
         }

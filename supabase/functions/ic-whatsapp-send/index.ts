@@ -17,7 +17,7 @@
 //   403 { ok: false, erro: 'envio_desligado' }                 -> flag desligada
 //   404 { ok: false, erro: 'card_nao_encontrado' | 'vendedor_sem_cloud_api' } -> numero sem provedor configurado
 //   409 { ok: false, erro: 'fora_da_janela_24h' }              -> Meta 131047; use template
-//   502 { ok: false, erro: 'meta_recusou' | 'gupshup_recusou' } -> provedor recusou (detalhe so no log)
+//   502 { ok: false, erro: 'meta_recusou' | 'gupshup_recusou' | 'zapi_recusou' } -> provedor recusou (detalhe so no log)
 //   503 { ok: false, erro: 'envio_nao_configurado' }           -> falta META_ACCESS_TOKEN / GUPSHUP_API_KEY
 //
 // GUPSHUP: o envio e assincrono. 200 aqui quer dizer que o Gupshup ACEITOU;
@@ -147,7 +147,7 @@ Deno.serve(async (req: Request) => {
 
     if (!envio.ok) {
       if (envio.foraDaJanela24h) return json({ ok: false, erro: "fora_da_janela_24h" }, 409);
-      return json({ ok: false, erro: canal.provedor === "gupshup" ? "gupshup_recusou" : "meta_recusou" }, 502);
+      return json({ ok: false, erro: canal.provedor + "_recusou" }, 502);
     }
 
     // 5) Confirmado: grava a conversa e atualiza o card.

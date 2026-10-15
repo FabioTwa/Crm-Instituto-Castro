@@ -6,25 +6,30 @@
 //                         precisa de meta_phone_id + META_ACCESS_TOKEN
 //   provedor 'gupshup' -> Gupshup (_shared/gupshup.ts),
 //                         precisa de gupshup_app + numero_whatsapp + GUPSHUP_API_KEY
+//   provedor 'zapi'    -> Z-API (_shared/zapi.ts), so para a fase de treino,
+//                         precisa de zapi_instancia + ZAPI_INSTANCE_TOKEN + ZAPI_CLIENT_TOKEN
 //
 // Linha sem a coluna provedor (SQL 28 ainda nao aplicado) vale como 'meta':
 // o comportamento antigo continua igual.
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { enviarTemplate, enviarTexto, type ResultadoEnvio } from "./whatsapp-cloud.ts";
 import { enviarTemplateGupshup, enviarTextoGupshup } from "./gupshup.ts";
+import { enviarTextoZapi } from "./zapi.ts";
 import { canonicoTelefone } from "./telefone.ts";
 
-export type Provedor = "meta" | "gupshup";
+export type Provedor = "meta" | "gupshup" | "zapi";
 
 export type CanalEnvio =
   | { provedor: "meta"; phoneId: string; token: string }
-  | { provedor: "gupshup"; app: string; origem: string; apiKey: string };
+  | { provedor: "gupshup"; app: string; origem: string; apiKey: string }
+  | { provedor: "zapi"; instancia: string; token: string; clientToken: string };
 
 // Motivo de nao ter canal, para log e resposta ao front.
 export type SemCanal = { provedor: Provedor | null; motivo: "sem_numero" | "numero_incompleto" | "sem_credencial" };
 
 export function provedorDaLinha(linha: any): Provedor {
-  return String((linha && linha.provedor) || "meta").toLowerCase() === "gupshup" ? "gupshup" : "meta";
+  const p = String((linha && linha.provedor) || "meta").toLowerCase();
+  return p === "gupshup" || p === "zapi" ? p : "meta";
 }
 
 // Monta o canal a partir da linha de vendedores_whatsapp e dos segredos.
@@ -42,6 +47,16 @@ export function canalDaLinha(
     const apiKey = env("GUPSHUP_API_KEY") || "";
     if (!apiKey) return { ok: false, provedor, motivo: "sem_credencial" };
     return { ok: true, canal: { provedor, app, origem, apiKey } };
+  }
+  if (provedor === "zapi") {
+    const instancia = String(linha.zapi_instancia || "").trim();
+    if (!instancia) return { ok: false, provedor, motivo: "numero_incompleto" };
+    // Tokens nos segredos das funcoes, nunca no banco (a coluna antiga
+    // zapi_token nao e usada).
+    const token = env("ZAPI_INSTANCE_TOKEN") || "";
+    const clientToken = env("ZAPI_CLIENT_TOKEN") || "";
+    if (!token || !clientToken) return { ok: false, provedor, motivo: "sem_credencial" };
+    return { ok: true, canal: { provedor, instancia, token, clientToken } };
   }
   const phoneId = String(linha.meta_phone_id || "").trim();
   if (!phoneId) return { ok: false, provedor, motivo: "numero_incompleto" };
@@ -65,9 +80,12 @@ export async function canalDoVendedor(
   if (error) return { ok: false, provedor: null, motivo: "sem_numero", erroBanco: error.message };
   const linhas = (data as any[]) || [];
   // Prefere a linha que tem o identificador do proprio provedor preenchido.
-  const linha = linhas.find((l) =>
-    provedorDaLinha(l) === "gupshup" ? !!l.gupshup_app : !!l.meta_phone_id
-  ) || null;
+  const linha = linhas.find((l) => {
+    const p = provedorDaLinha(l);
+    if (p === "gupshup") return !!l.gupshup_app;
+    if (p === "zapi") return !!l.zapi_instancia;
+    return !!l.meta_phone_id;
+  }) || null;
   return canalDaLinha(linha, (n) => Deno.env.get(n));
 }
 
@@ -80,6 +98,9 @@ export async function enviarTextoCanal(
   if (canal.provedor === "gupshup") {
     return await enviarTextoGupshup({ canal, para, texto, prefixoLog });
   }
+  if (canal.provedor === "zapi") {
+    return await enviarTextoZapi({ canal, para, texto, prefixoLog });
+  }
   return await enviarTexto({ phoneId: canal.phoneId, token: canal.token, para, texto, prefixoLog });
 }
 
@@ -87,7 +108,9 @@ export async function enviarTextoCanal(
 // (o Gupshup identifica o modelo pelo ID dele, visto no painel).
 export type ModeloEnvio = { name?: string; language?: string; components?: unknown[]; id?: string; params?: unknown[] };
 
+// Z-API nao tem modelo aprovado: nunca e valido ali.
 export function modeloValido(canal: CanalEnvio, t: ModeloEnvio): boolean {
+  if (canal.provedor === "zapi") return false;
   if (canal.provedor === "gupshup") return typeof t.id === "string" && t.id.trim().length > 0;
   return typeof t.name === "string" && t.name.trim().length > 0;
 }
@@ -105,6 +128,9 @@ export async function enviarModeloCanal(
       template: { id: String(t.id), params: Array.isArray(t.params) ? t.params : [] },
       prefixoLog,
     });
+  }
+  if (canal.provedor === "zapi") {
+    return { ok: false, status: 400, codigoMeta: null, mensagemMeta: "Z-API nao envia modelo", foraDaJanela24h: false, resposta: null };
   }
   return await enviarTemplate({
     phoneId: canal.phoneId,
