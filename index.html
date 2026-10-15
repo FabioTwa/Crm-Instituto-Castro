@@ -11248,7 +11248,7 @@ async function icPainelRecarregar(clienteId) {
     }
     // [ic] Encerra a conversa da assistente virtual (ic-extensoes.js, SQL 32).
     h += '<button type="button" class="icp-acao" onclick="icEncerrarConversa(\'' + escaparAtributo(String(cl.id)) + '\')"'
-       + ' title="Libera o lead para começar uma conversa nova com a assistente virtual">' + icon('message-circle-x', 13) + 'Encerrar conversa</button>';
+       + ' title="Encerra a conversa da assistente virtual e manda a despedida ao lead">' + icon('message-circle-x', 13) + 'Encerrar conversa</button>';
     h += '</div>';
 
     // --- DADOS: cada linha grava um campo so e nao sai da tela ---
@@ -11500,6 +11500,8 @@ async function loadCRMDetalhe(id) {
     html += '<div class="crm-detalhe-header-actions">';
     html += '<button class="crm-btn-marcar-perda ic-destrutivo" onclick="crmMarcarPerda()">Marcar Perda</button>';
     html += '<button class="btn btn-secondary" onclick="icAbrirModalAgendamento(\'' + cl.id + '\', \'' + escapeHtml((cl.nome || '').replace(/'/g, '')) + '\')">' + icon('calendar', 14) + ' Agendar</button>';
+    // [ic] Encerra a conversa da assistente virtual e manda a despedida (ic-extensoes.js).
+    html += '<button class="btn btn-secondary" title="Encerra a conversa da assistente virtual e manda a despedida ao lead" onclick="icEncerrarConversa(\'' + escaparAtributo(String(cl.id)) + '\')">' + icon('message-circle-x', 14) + ' Encerrar conversa</button>';
     // Este botao NUNCA criou venda: ele so move o card para a etapa "fechado"
     // do funil. Com duas vendas no mesmo card o nome "Marcar Venda" passou a
     // mentir duas vezes - o card do Eder ja estava marcado desde julho, e a

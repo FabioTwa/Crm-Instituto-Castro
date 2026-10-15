@@ -80,7 +80,7 @@ Porta interna (header `x-ic-internal`): `{acao:'propor', cliente_crm_id, dia_pre
 Cada etapa grava uma linha em `ia_decisoes_log` (`etapa_pipeline`, `decisao`).
 
 1. **flags** — `ic_flag('ia_pre_atendimento')` e `crm_ia_config.ligada='true'`; senão `desligada`.
-2. **humano_assumiu** — há `crm_conversas` `direcao='enviada'`, `autor='vendedor'` nas últimas 24 h (equipe respondeu pelo celular: é a linha que o eco grava) ou `ia_handoffs` com `atendido_em is null` → `humano_no_controle`.
+2. **humano_assumiu** — há `crm_conversas` `direcao='enviada'`, `autor='vendedor'` nas últimas 24 h (equipe respondeu pelo celular: é a linha que o eco grava) → `humano_no_controle`. Com `ia_handoffs` `atendido_em is null` (equipe já chamada) e o lead escrevendo de novo: manda `TEXTO_AVISO_ESPERA` ("nossa equipe já foi avisada…") **uma vez por handoff** (`decisao='aviso_espera'`), depois fica em silêncio até a equipe atender ou clicar em Encerrar conversa.
 3. **limites** — fora de `horario_inicio`/`horario_fim` (America/Sao_Paulo; sexta até 18h; fim de semana sempre fora): manda o aviso fixo no máximo 1 vez por dia por card (`payload_raw.fora_horario=true`) e encerra. `max_respostas_por_conversa` atingido (conta `ia_decisoes_log.resposta_enviada=true` do card desde o último encerramento por inatividade) → handoff `manual` "limite de respostas da IA".
 4. **contexto** — RPC `ic_ia_contexto(card, 12)`.
 5. **consentimento** — `ia_consentimentos`: pendente e nunca pedido → envia o texto de consentimento (constante em `_shared/ia-prompt.ts`, com `IC_POLITICA_PRIVACIDADE_URL`) e grava `texto_apresentado`; pendente e já pedido → `interpretarConsentimento` (SIM/NÃO/ambíguo): NÃO → `negado` + handoff `consentimento_negado` + despedida; SIM → `concedido`, segue; ambíguo → não responde.
@@ -137,9 +137,15 @@ fora dele, encerra sem mensagem. Fica uma linha em `ia_decisoes_log` com
 `etapa_pipeline='encerramento'`. A próxima mensagem do lead abre conversa nova
 e o `max_respostas_por_conversa` volta a contar do zero. Não encerra card com
 handoff pendente nem quando o vendedor falou por último.
-A equipe também encerra pelo botão **Encerrar conversa** do painel do lead
-(RPC `ic_encerrar_conversa`, SQL 32): fecha os handoffs pendentes e grava
-`decisao='encerrada_pela_equipe'`, sem enviar nada. Depois de qualquer
+A equipe também encerra pelo botão **Encerrar conversa** (painel do lead e
+card completo). O front chama `ic-ia-pre-atendimento` com
+`{acao:'encerrar_conversa_equipe', cliente_crm_id}` e o JWT do usuário (única
+ação sem `x-ic-internal`; JWT validado em código por `usuarioAtivo`). A função
+roda a RPC `ic_encerrar_conversa` (SQL 32) **como o usuário** (usuário ativo e
+card no escopo), que fecha os handoffs pendentes e grava
+`decisao='encerrada_pela_equipe'`; depois, se a IA está ligada, atende o
+número e o lead escreveu nas últimas 24 h, manda `TEXTO_ENCERRAMENTO`
+(`decisao='encerrada_pela_equipe_com_mensagem'`). Depois de qualquer
 encerramento, mensagem antiga do vendedor não cala mais a IA.
 Quem dispara: o varredor do `ic-meta-webhook` (pg_cron de 30 s), 1x por minuto,
 com `{acao:'encerrar_inativas'}` e `x-ic-internal`. Lógica em

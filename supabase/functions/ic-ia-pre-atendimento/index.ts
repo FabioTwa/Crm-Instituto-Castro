@@ -11,7 +11,8 @@
 // PIPELINE (cada etapa grava uma linha em ia_decisoes_log com etapa_pipeline e decisao):
 //   1  flags            ic_flag('ia_pre_atendimento') e crm_ia_config.ligada='true'
 //   2  humano_assumiu   vendedor respondeu nas ultimas 24 h (e depois do ultimo
-//                       encerramento), ou ia_handoffs pendente -> fim
+//                       encerramento) -> fim; ia_handoffs pendente -> aviso de
+//                       espera UMA vez por handoff (TEXTO_AVISO_ESPERA), depois fim
 //   3  limites          horario (America/Sao_Paulo; fora do horario: 1 aviso/dia/card),
 //                       max_respostas_por_conversa (atingiu: handoff 'manual'),
 //                       contado desde o ultimo encerramento por inatividade
@@ -63,7 +64,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { corsHeaders, erroGenerico, json } from "../_shared/http.ts";
-import { chamadaInternaValida, headersInternos } from "../_shared/auth.ts";
+import { chamadaInternaValida, headersInternos, tokenDoHeader, usuarioAtivo } from "../_shared/auth.ts";
 import { iaConfig, icFlag } from "../_shared/flags.ts";
 import { canonicoTelefone, telefoneBrPlausivel } from "../_shared/telefone.ts";
 import { canalDoVendedor, type CanalEnvio, enviarTextoCanal } from "../_shared/whatsapp-envio.ts";
@@ -78,6 +79,7 @@ import {
   FERRAMENTAS,
   montarSystemPrompt,
   TEXTO_CONSENTIMENTO_NEGADO,
+  TEXTO_AVISO_ESPERA,
   TEXTO_ENCERRAMENTO,
   TEXTO_HANDOFF_GENERICO,
   TEXTO_RESPOSTA_BLOQUEADA,
@@ -187,6 +189,22 @@ class Pipeline {
       console.error(LOG, "excecao em ia_handoffs:", e);
       return false;
     }
+  }
+
+  // Quando foi aberto o handoff pendente mais antigo do card (ou null).
+  async handoffPendenteDesde(): Promise<string | null> {
+    const { data, error } = await this.sb
+      .from("ia_handoffs")
+      .select("criado_em")
+      .eq("cliente_crm_id", this.body.cliente_crm_id)
+      .is("atendido_em", null)
+      .order("criado_em", { ascending: true })
+      .limit(1);
+    if (error) {
+      console.warn(LOG, "ia_handoffs consulta falhou:", error.message);
+      return null;
+    }
+    return data && data.length ? String(data[0].criado_em) : null;
   }
 
   async temHandoffPendente(): Promise<boolean> {
@@ -409,8 +427,23 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
     await p.log("humano_assumiu", "humano_no_controle", { motivo: "vendedor respondeu nas ultimas 24h" });
     return { ok: true, decisao: "humano_no_controle" };
   }
-  if (await p.temHandoffPendente()) {
-    await p.log("humano_assumiu", "humano_no_controle", { motivo: "handoff pendente" });
+  const handoffDesde = await p.handoffPendenteDesde();
+  if (handoffDesde) {
+    // Equipe ja chamada e o lead escreveu de novo: avisa UMA vez por handoff
+    // que a equipe vai responder, para o lead nao ficar sem retorno.
+    const { data: avisos } = await sb
+      .from("ia_decisoes_log")
+      .select("id")
+      .eq("cliente_crm_id", body.cliente_crm_id)
+      .eq("etapa_pipeline", "humano_assumiu")
+      .eq("decisao", "aviso_espera")
+      .gte("criado_em", handoffDesde)
+      .limit(1);
+    if (!avisos || !avisos.length) {
+      const env = await p.enviar(TEXTO_AVISO_ESPERA, "humano_assumiu", "aviso_espera", { origem: "handoff_pendente" });
+      return { ok: true, decisao: env.enviado ? "aviso_espera" : "simulada_envio_desligado" };
+    }
+    await p.log("humano_assumiu", "humano_no_controle", { motivo: "handoff pendente (aviso de espera ja enviado)" });
     return { ok: true, decisao: "humano_no_controle" };
   }
   await p.log("humano_assumiu", "ia_pode_responder");
@@ -827,10 +860,75 @@ async function proporAgendamento(
   }
 }
 
+// Botao "Encerrar conversa" (painel do lead e card completo), chamado pelo FRONT
+// com o JWT do usuario. Encerra via RPC ic_encerrar_conversa COMO o usuario
+// (o banco confere usuario ativo e card no escopo, SQL 32) e, se a IA estiver
+// atendendo esse numero e o lead tiver escrito nas ultimas 24 h, manda a
+// despedida TEXTO_ENCERRAMENTO pelo numero do vendedor.
+async function encerrarPelaEquipe(req: Request, sb: SupabaseClient, body: any): Promise<Response> {
+  const auth = await usuarioAtivo(req, sb);
+  if (!auth.ok) return json({ ok: false, erro: auth.erro }, auth.status);
+  const clienteId = String(body.cliente_crm_id || "").trim();
+  if (!/^[0-9a-f-]{36}$/i.test(clienteId)) return json({ ok: false, erro: "payload_invalido" }, 400);
+
+  const ANON = Deno.env.get("SUPABASE_ANON_KEY") || "";
+  if (!ANON) {
+    console.error(LOG, "SUPABASE_ANON_KEY ausente");
+    return json({ ok: false, erro: "erro_interno" }, 500);
+  }
+  const sbUsuario = createClient(Deno.env.get("SUPABASE_URL") || "", ANON, {
+    auth: { persistSession: false },
+    global: { headers: { Authorization: `Bearer ${tokenDoHeader(req)}` } },
+  });
+  const { error: errRpc } = await sbUsuario.rpc("ic_encerrar_conversa", { p_cliente: clienteId });
+  if (errRpc) {
+    const m = String(errRpc.message || "");
+    if (m.includes("nao_autorizado") || m.includes("card_nao_encontrado")) return json({ ok: false, erro: "sem_permissao" }, 403);
+    console.error(LOG, "ic_encerrar_conversa falhou:", m);
+    return json({ ok: false, erro: "erro_banco" }, 500);
+  }
+
+  // Despedida: so se a IA esta ligada e atende esse numero, e o lead falou nas ultimas 24 h.
+  const semMensagem = (motivo: string) => json({ ok: true, encerrada: true, mensagem_enviada: false, motivo });
+  const flagIa = await icFlag(sb, "ia_pre_atendimento");
+  const cfg = await iaConfig(sb);
+  if (!flagIa || String(cfg.ligada).toLowerCase() !== "true") return semMensagem("ia_desligada");
+  const { data: card } = await sb
+    .from("clientes_crm")
+    .select("id, numero_whatsapp, telefone, vendedor_id, funil_id")
+    .eq("id", clienteId)
+    .maybeSingle();
+  if (!card) return semMensagem("card_nao_encontrado");
+  const para = canonicoTelefone(String((card as any).numero_whatsapp || (card as any).telefone || ""));
+  if (!telefoneBrPlausivel(para)) return semMensagem("telefone_invalido");
+  const fase = faseTeste(cfg, para);
+  if (!fase.atende) return semMensagem("fora_dos_numeros_teste");
+  const { data: ultLead } = await sb
+    .from("crm_conversas")
+    .select("criada_em")
+    .eq("cliente_crm_id", clienteId)
+    .eq("direcao", "recebida")
+    .gt("criada_em", new Date(Date.now() - 24 * 3600 * 1000).toISOString())
+    .limit(1);
+  if (!ultLead || !ultLead.length) return semMensagem("lead_sem_mensagem_24h");
+
+  const p = new Pipeline(sb, { cliente_crm_id: clienteId, conversa_id: null, vendedor_id: (card as any).vendedor_id, funil_id: (card as any).funil_id });
+  p.modelo = cfg.modelo || "claude-sonnet-5-5";
+  p.card = card;
+  p.para = para;
+  p.envioLigado = !fase.sombra && (await icFlag(sb, "envio_whatsapp_cloud_api"));
+  if ((card as any).vendedor_id) {
+    const res = await canalDoVendedor(sb, String((card as any).vendedor_id));
+    if (res.ok) p.canal = res.canal;
+  }
+  const env = await p.enviar(TEXTO_ENCERRAMENTO, ETAPA_ENCERRAMENTO, "encerrada_pela_equipe_com_mensagem",
+    { por: auth.usuario.name || auth.usuario.email }, { encerramento: true });
+  return json({ ok: true, encerrada: true, mensagem_enviada: env.enviado, motivo: env.enviado ? null : "envio_falhou_ou_desligado" });
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ ok: false, erro: "metodo_nao_suportado" }, 405);
-  if (!chamadaInternaValida(req)) return json({ ok: false, erro: "nao_autorizado" }, 401);
 
   try {
     const URL_SB = Deno.env.get("SUPABASE_URL") || "";
@@ -846,6 +944,9 @@ Deno.serve(async (req: Request) => {
       return json({ ok: false, erro: "payload_invalido" }, 400);
     }
     const sb = createClient(URL_SB, SR, { auth: { persistSession: false } });
+    // Unica acao do FRONT (JWT do usuario); todo o resto exige x-ic-internal.
+    if (body.acao === "encerrar_conversa_equipe") return await encerrarPelaEquipe(req, sb, body);
+    if (!chamadaInternaValida(req)) return json({ ok: false, erro: "nao_autorizado" }, 401);
     if (body.acao === "encerrar_inativas") return json(await encerrarInativas(sb));
 
     const clienteId = String(body.cliente_crm_id || "").trim();
