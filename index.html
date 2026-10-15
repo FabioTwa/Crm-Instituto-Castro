@@ -8027,7 +8027,7 @@ function renderCRMCard(cl, etapaKey) {
     // entao nasciam sempre 'sem' e o filtro devolvia zero card.
     // data-nome, data-telefone e data-conversa-match ficam: a busca ainda le.
     var telDigits = (cl.telefone || '').replace(/\D/g, '');
-    var h = '<div class="crm-card-pro" draggable="true" data-id="' + cl.id + '" data-etapa="' + etapaKey + '" data-nome="' + escaparAtributo(nomeLower) + '" data-telefone="' + telDigits + '" onclick="icAbrirCardDoPipeline(\'' + cl.id + '\')" ondragstart="crmDragStart(event)" ondragend="crmDragEnd(event)">';
+    var h = '<div class="crm-card-pro" draggable="true" data-id="' + cl.id + '" data-etapa="' + etapaKey + '" data-nome="' + escaparAtributo(nomeLower) + '" data-telefone="' + telDigits + '" data-ultima="' + escaparAtributo(String(cl.ultima_mensagem_em || '')) + '" onclick="icAbrirCardDoPipeline(\'' + cl.id + '\')" ondragstart="crmDragStart(event)" ondragend="crmDragEnd(event)">';
     h += '<div class="crm-card-temp ' + tempClass + '"></div>';
     h += '<div class="crm-card-nome">' + nome + '</div>';
     if (telefone) h += '<div class="ic-card-tel">' + escapeHtml(icFormatarTelefoneBR(telefone)) + '</div>';
@@ -9051,13 +9051,12 @@ function crmAplicarEscopoQuery(q, opts) {
 // O scroll infinito emendava as duas no card 50 - por isso a coluna comecava
 // com os que aguardam e, a partir dali, misturava respondido no meio.
 //
-// Regra: quem acabou de escrever no topo, descendo ate quem espera ha mais
-// tempo, e SO DEPOIS os ja respondidos. ordem_espera so tem valor quando a
-// ultima mensagem e do lead, entao "descendente com nulos por ultimo" ja
-// produz o bloco continuo. Card respondido nunca sobe.
+// Regra (IC): a conversa mais recente no topo, seja a ultima mensagem do lead
+// ou a resposta (da equipe ou da assistente virtual). Lead novo nasce no topo.
+// Quem aguarda resposta mostra o selo de espera e tem o filtro de espera.
 //
-// O terceiro criterio e o id, e ele nao e decoracao: sem uma chave unica no
-// fim, linhas empatadas em ordem_espera trocam de lugar entre uma pagina e a
+// O ultimo criterio e o id, e ele nao e decoracao: sem uma chave unica no
+// fim, linhas empatadas em ultima_mensagem_em trocam de lugar entre uma pagina e a
 // seguinte, e a paginacao por offset pula e repete card. updated_at ficou de
 // fora justamente por mudar enquanto se pagina.
 // Card absorvido pela unificacao nao aparece em lugar nenhum. Ele nao foi
@@ -9114,9 +9113,13 @@ function crmAplicarFiltroEspera(q) {
 }
 
 function crmAplicarOrdemColuna(q) {
+    // [ic] Com a assistente virtual respondendo na hora, quase todo lead novo
+    // vira "respondido" em segundos e caia para o fim da coluna. Regra do IC:
+    // a conversa mais recente (lead ou resposta) fica no topo; quem aguarda
+    // continua com o selo de espera e o filtro de espera.
     return q
-        .order('ordem_espera', { ascending: false, nullsFirst: false })
         .order('ultima_mensagem_em', { ascending: false, nullsFirst: false })
+        .order('created_at', { ascending: false })
         .order('id', { ascending: true });
 }
 
@@ -10211,23 +10214,6 @@ function crmInserirCardTopo(html, etapaKey) {
     return true;
 }
 
-// Respondeu: o card sai do bloco de aguardando e desce para o primeiro lugar
-// do bloco dos respondidos. A fronteira e o primeiro card sem o selo de espera.
-function crmMoverCardParaRespondidos(id, etapaKey) {
-    var body = document.querySelector('.crm-col-body[data-etapa="' + etapaKey + '"]');
-    var card = document.querySelector('.crm-card-pro[data-id="' + id + '"]');
-    if (!body || !card) return;
-    var alvo = null;
-    var filhos = body.children;
-    for (var i = 0; i < filhos.length; i++) {
-        var f = filhos[i];
-        if (f === card) continue;
-        if (f.classList.contains('crm-col-loading') || f.classList.contains('crm-col-sentinel')) { alvo = f; break; }
-        if (f.classList.contains('crm-card-pro') && !f.querySelector('.crm-card-aguarda-alert')) { alvo = f; break; }
-    }
-    body.insertBefore(card, alvo);
-}
-
 function crmMoverCardTopo(id, etapaKey) {
     var card = document.querySelector('.crm-card-pro[data-id="' + id + '"]');
     var body = document.querySelector('.crm-col-body[data-etapa="' + etapaKey + '"]');
@@ -10267,7 +10253,6 @@ function crmAplicarEventoCliente(row, eventType) {
         }
 
         var etapa = row.etapa;
-        var ehRecebida = row.ultima_mensagem_direcao === 'recebida';
         var novoHtml = renderCRMCard(row, etapa);
 
         if (existing) {
@@ -10276,16 +10261,16 @@ function crmAplicarEventoCliente(row, eventType) {
                 var tmp = document.createElement('div');
                 tmp.innerHTML = novoHtml;
                 var novo = tmp.firstChild;
+                var ultimaAntes = existing.getAttribute('data-ultima') || '';
                 if (novo && existing.parentNode) existing.parentNode.replaceChild(novo, existing);
-                // Lead escreveu: vai para o topo (a ordem e do mais recente para
-                // o mais antigo). Nos respondemos: sai do bloco de aguardando.
-                if (ehRecebida) crmMoverCardTopo(id, etapa);
-                else crmMoverCardParaRespondidos(id, etapa);
+                // [ic] Mensagem nova (do lead ou nossa): vai para o topo, a ordem
+                // e da conversa mais recente para a mais antiga. Edicao de outro
+                // campo nao mexe na posicao.
+                if (row.ultima_mensagem_em && String(row.ultima_mensagem_em) !== ultimaAntes) crmMoverCardTopo(id, etapa);
             } else {
                 // Mudou de coluna dentro do funil: move o card e ajusta os contadores.
                 existing.remove();
                 crmInserirCardTopo(novoHtml, etapa);
-                if (!ehRecebida) crmMoverCardParaRespondidos(id, etapa);
                 if (colAntiga && window._crmColTotals && window._crmColTotals[colAntiga] != null) {
                     window._crmColTotals[colAntiga] = Math.max(0, window._crmColTotals[colAntiga] - 1);
                 }
@@ -10294,8 +10279,6 @@ function crmAplicarEventoCliente(row, eventType) {
         } else {
             // Card ainda nao estava na tela: insere no topo da coluna dele.
             var inseriu = crmInserirCardTopo(novoHtml, etapa);
-            // Se ja esta respondido, o lugar dele nao e o topo.
-            if (inseriu && !ehRecebida) crmMoverCardParaRespondidos(id, etapa);
             // So incrementa o total em INSERT real (UPDATE de card fora do lote ja estava contado no total do load).
             if (inseriu && eventType === 'INSERT' && window._crmColTotals && window._crmColTotals[etapa] != null) {
                 window._crmColTotals[etapa]++;
