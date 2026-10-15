@@ -1,10 +1,10 @@
 # IC CRM: banco de dados
 
-O banco do IC CRM e Postgres no Supabase, montado por 29 arquivos SQL numerados
-(`00_` a `28_`) que se aplicam em ordem. Os arquivos `00_` a `12_` sao o esquema
+O banco do IC CRM e Postgres no Supabase, montado por 32 arquivos SQL numerados
+(`00_` a `31_`) que se aplicam em ordem. Os arquivos `00_` a `12_` sao o esquema
 base: extensoes, tabelas, funcoes do nucleo do CRM, views, gatilhos, politicas
 iniciais, realtime, o varredor do webhook e parametros de exemplo. Os arquivos
-`13_` a `28_` sao as camadas do IC CRM (perfis, dinheiro, RLS, jobs, IA, agenda,
+`13_` a `31_` sao as camadas do IC CRM (perfis, dinheiro, RLS, jobs, IA, agenda,
 funis, cadastro), cada um com cabecalho e, quando altera algo existente, um bloco
 `-- ROLLBACK:` no fim. O `11_agendamentos.sql` agenda o varredor do webhook
 (`ic-meta-webhook`); troque `<SEU-PROJETO>` antes de rodar.
@@ -36,6 +36,7 @@ No Supabase, SQL Editor, um arquivo por vez:
 | `28_ic_whatsapp_gupshup.sql` | `vendedores_whatsapp.provedor` (`meta`/`gupshup`, padrao `meta`), `gupshup_app`, `gupshup_app_id` (app unico por numero ativo); `crm_entrada_bruta` aceita origem `gupshup`; aditivo, rollback no rodape | 02 |
 | `29_ic_ia_fase_teste.sql` | `crm_ia_config`: chaves `modo_sombra` (padrao `true`, a IA nao envia) e `numeros_teste` (preenchida = a IA so atende esses telefones); aditivo, rollback no rodape | 17 |
 | `30_ic_ia_exemplos_iniciais.sql` | 16 exemplos anonimizados de atendimentos reais em `ia_exemplos_conversa` (tags por funil); nao duplica pelo titulo; rollback no rodape | 17 |
+| `31_ic_whatsapp_zapi.sql` | `vendedores_whatsapp.provedor` aceita `zapi` (treino da IA, não oficial); `zapi_instancia` obrigatória e única por número ativo; tokens nos segredos, não no banco; aditivo, rollback no rodapé | 28 |
 
 Depois do 13, inserir o primeiro usuario (criado antes no Supabase Auth, mesmo
 e-mail) e o numero de WhatsApp: o bloco comentado no fim do 13 mostra como.

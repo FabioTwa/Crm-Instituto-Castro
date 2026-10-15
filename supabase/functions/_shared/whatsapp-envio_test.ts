@@ -43,3 +43,21 @@ Deno.test("modelo: Meta exige name, Gupshup exige id", () => {
   assert(modeloValido(gs, { id: "uuid" }));
   assert(!modeloValido(gs, { name: "boas_vindas" }));
 });
+
+Deno.test("canal zapi: precisa de zapi_instancia e dos dois tokens nos segredos", () => {
+  assertEquals(provedorDaLinha({ provedor: "ZAPI" }), "zapi");
+  const linha = { provedor: "zapi", zapi_instancia: " INST1 ", zapi_token: "nao-usado" };
+  const ok = canalDaLinha(linha, env({ ZAPI_INSTANCE_TOKEN: "tk", ZAPI_CLIENT_TOKEN: "ct" }));
+  assert(ok.ok);
+  if (ok.ok) assertEquals(ok.canal, { provedor: "zapi", instancia: "INST1", token: "tk", clientToken: "ct" });
+  assertEquals(canalDaLinha(linha, env({ ZAPI_INSTANCE_TOKEN: "tk" })), { ok: false, provedor: "zapi", motivo: "sem_credencial" });
+  assertEquals(
+    canalDaLinha({ provedor: "zapi" }, env({ ZAPI_INSTANCE_TOKEN: "tk", ZAPI_CLIENT_TOKEN: "ct" })),
+    { ok: false, provedor: "zapi", motivo: "numero_incompleto" },
+  );
+});
+
+Deno.test("modelo: Z-API nunca envia modelo", () => {
+  const z = { provedor: "zapi" as const, instancia: "i", token: "t", clientToken: "c" };
+  assertEquals(modeloValido(z, { name: "x", id: "y" }), false);
+});

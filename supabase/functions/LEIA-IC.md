@@ -54,7 +54,7 @@ de `ic-meta-webhook`. O id gravado em `zapi_message_id` é o `messageId` do Gups
 | 403 | `{ok:false, erro:'envio_desligado'}` | flag `envio_whatsapp_cloud_api` desligada |
 | 404 | `{ok:false, erro:'card_nao_encontrado'\|'vendedor_sem_cloud_api'}` | número do vendedor sem `meta_phone_id` (Meta) ou sem `gupshup_app` (Gupshup) |
 | 409 | `{ok:false, erro:'fora_da_janela_24h'}` | Meta 131047: use `template` (no Gupshup a recusa vem depois, pelo webhook) |
-| 502 | `{ok:false, erro:'meta_recusou'\|'gupshup_recusou'}` | o provedor recusou (detalhe só no log) |
+| 502 | `{ok:false, erro:'meta_recusou'\|'gupshup_recusou'\|'zapi_recusou'}` | o provedor recusou (detalhe só no log) |
 | 503 | `{ok:false, erro:'envio_nao_configurado'}` | sem `META_ACCESS_TOKEN` / `GUPSHUP_API_KEY` |
 
 Dedup com o eco: a Meta devolve a mensagem enviada em `smb_message_echoes`
@@ -214,6 +214,40 @@ mandada para `*.gupshup.io`); no formato Meta/coexistência vem só o id, baixad
 em `https://api.gupshup.io/sm/api/wamedia/{app}/{id}` (endpoint do artigo de
 suporte do Gupshup: conferir em homologação).
 
+## 4c. Checklist Z-API (só para o treino da IA)
+
+⚠️ A Z-API **não é API oficial** da Meta: conecta o número como aparelho do
+WhatsApp Web. Há risco de banimento do número. Use só no treino da IA; a
+produção segue no Gupshup.
+
+1. **SQL 31** aplicado (`supabase/sql/31_ic_whatsapp_zapi.sql`) **antes** de publicar as funções.
+2. Segredos (Edge Functions → Secrets):
+   - `ZAPI_INSTANCE_TOKEN` = token da instância (painel Z-API → Instâncias);
+   - `ZAPI_CLIENT_TOKEN` = token de segurança da conta (painel Z-API → Segurança);
+   - `ZAPI_WEBHOOK_TOKEN` = texto longo e aleatório criado por você.
+3. Publicar `ic-meta-webhook` (`--no-verify-jwt`), `ic-whatsapp-send` e `ic-ia-pre-atendimento`.
+4. No painel da Z-API → instância → **Webhooks**, campo **Ao receber**:
+   `https://<SEU-PROJETO>.supabase.co/functions/v1/ic-meta-webhook?provedor=zapi&token=<ZAPI_WEBHOOK_TOKEN>`
+   e ligar **Notificar as enviadas por mim também** (sem isso a IA não percebe
+   que alguém da equipe respondeu pelo celular).
+5. Ligar o número no CRM (o `id` da linha em `vendedores_whatsapp`):
+
+```sql
+update public.vendedores_whatsapp
+set provedor = 'zapi', zapi_instancia = '<ID_DA_INSTANCIA>', numero_whatsapp = '<5511900000000>'
+where id = '<ID_DA_LINHA>';
+```
+
+   Um número tem um provedor ativo só: com `provedor = 'zapi'` a linha deixa de
+   ser achada pelos webhooks da Meta e do Gupshup. Voltar: `set provedor = 'gupshup'`.
+6. Teste: mandar "Oi" de outro celular → card no Kanban e `crm_entrada_bruta` com origem `zapi`.
+
+Detalhes: a Z-API não assina o webhook (a porta só aceita o `token` certo na
+URL). Mensagens enviadas pela própria API (`fromApi`) são ignoradas, porque o
+CRM já gravou o que enviou. Grupos, canais, listas de transmissão e outros
+callbacks também. Áudio vem com link direto (baixado sem credencial). Não há
+modelo (template): `ic-whatsapp-send` responde `template_invalido`.
+
 ## 5. Checklist Google OAuth (Calendar)
 
 1. Google Cloud Console → projeto → **APIs e serviços → Biblioteca**: ativar **Google Calendar API**.
@@ -238,6 +272,9 @@ No Google vai só: nome do lead, telefone, funil/etapa, horário e link do card.
 | `META_ACCESS_TOKEN` | ic-meta-webhook, ic-whatsapp-send, ic-ia-pre-atendimento | baixar mídia e enviar mensagens pela Graph API (números `meta`) |
 | `GUPSHUP_API_KEY` | ic-meta-webhook, ic-whatsapp-send, ic-ia-pre-atendimento | baixar mídia e enviar mensagens pelo Gupshup (números `gupshup`) |
 | `GUPSHUP_WEBHOOK_TOKEN` | ic-meta-webhook | segredo na URL do webhook do Gupshup |
+| `ZAPI_INSTANCE_TOKEN` | ic-whatsapp-send, ic-ia-pre-atendimento | token da instância da Z-API (números `zapi`) |
+| `ZAPI_CLIENT_TOKEN` | ic-whatsapp-send, ic-ia-pre-atendimento | header `Client-Token` (token de segurança da conta Z-API) |
+| `ZAPI_WEBHOOK_TOKEN` | ic-meta-webhook | segredo na URL do webhook da Z-API |
 | `GROQ_API_KEY` | ic-meta-webhook | transcrição de áudio (Whisper) |
 | `ANTHROPIC_API_KEY` | ic-ia-pre-atendimento | Messages API da Anthropic |
 | `IC_INTERNAL_SECRET` | todas | header `x-ic-internal` entre funções; assinatura do `state` OAuth |
