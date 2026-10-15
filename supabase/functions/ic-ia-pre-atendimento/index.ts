@@ -3,13 +3,17 @@
 // Quem chama: SOMENTE o ic-meta-webhook (segundo plano), com header
 // x-ic-internal = IC_INTERNAL_SECRET, body {cliente_crm_id, conversa_id,
 // vendedor_id, funil_id}. Nunca o front.
+// O varredor do webhook (pg_cron) tambem chama, uma vez por minuto, com
+// {acao:'encerrar_inativas'}: encerra as conversas em que o lead parou de
+// responder (crm_ia_config.encerrar_apos_minutos; ver _shared/ia-encerramento.ts).
 // Publicar: supabase functions deploy ic-ia-pre-atendimento --no-verify-jwt
 //
 // PIPELINE (cada etapa grava uma linha em ia_decisoes_log com etapa_pipeline e decisao):
 //   1  flags            ic_flag('ia_pre_atendimento') e crm_ia_config.ligada='true'
 //   2  humano_assumiu   vendedor respondeu nas ultimas 24 h, ou ia_handoffs pendente -> fim
 //   3  limites          horario (America/Sao_Paulo; fora do horario: 1 aviso/dia/card),
-//                       max_respostas_por_conversa (atingiu: handoff 'manual')
+//                       max_respostas_por_conversa (atingiu: handoff 'manual'),
+//                       contado desde o ultimo encerramento por inatividade
 //   4  contexto         RPC ic_ia_contexto(card, 12)
 //   5  consentimento    LGPD: pede, interpreta SIM/NAO, nega -> handoff + despedida
 //   6  handoff_regras   regex por CODIGO (urgencia, duvida clinica, reclamacao, humano)
@@ -64,10 +68,12 @@ import { respostaProibida } from "../_shared/pos-validacao.ts";
 import { interpretarConsentimento } from "../_shared/consentimento.ts";
 import { dentroDoHorario, partesNoFuso, TZ_PADRAO } from "../_shared/horario.ts";
 import { faseTeste } from "../_shared/ia-teste.ts";
+import { decidirEncerramento, ETAPA_ENCERRAMENTO, minutosEncerramento } from "../_shared/ia-encerramento.ts";
 import {
   FERRAMENTAS,
   montarSystemPrompt,
   TEXTO_CONSENTIMENTO_NEGADO,
+  TEXTO_ENCERRAMENTO,
   TEXTO_HANDOFF_GENERICO,
   TEXTO_RESPOSTA_BLOQUEADA,
   textoForaDoHorario,
@@ -434,12 +440,17 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
     await p.enviar(textoForaDoHorario(), "limites", "fora_horario_enviada", {}, { fora_horario: true });
     return { ok: true, decisao: "fora_horario" };
   }
+  // Conta so as respostas da conversa atual: o encerramento por inatividade
+  // abre uma conversa nova.
   const maxRespostas = Math.max(1, Number(cfg.max_respostas_por_conversa || "6") || 6);
-  const { count: respostasDadas } = await sb
+  const inicioConversa = await ultimoEncerramento(sb, body.cliente_crm_id);
+  let qRespostas = sb
     .from("ia_decisoes_log")
     .select("id", { count: "exact", head: true })
     .eq("cliente_crm_id", body.cliente_crm_id)
     .eq("resposta_enviada", true);
+  if (inicioConversa) qRespostas = qRespostas.gt("criado_em", inicioConversa);
+  const { count: respostasDadas } = await qRespostas;
   if ((respostasDadas || 0) >= maxRespostas) {
     await p.handoff("manual", "limite de respostas da IA");
     await p.log("limites", "limite_respostas", { motivo: `${respostasDadas}/${maxRespostas}` });
@@ -642,6 +653,92 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
   return { ok: true, decisao: env.enviado ? "enviada" : "simulada_envio_desligado" };
 }
 
+// Quando a conversa do card foi encerrada pela ultima vez (ou null).
+async function ultimoEncerramento(sb: SupabaseClient, clienteId: string): Promise<string | null> {
+  const { data, error } = await sb
+    .from("ia_decisoes_log")
+    .select("criado_em")
+    .eq("cliente_crm_id", clienteId)
+    .eq("etapa_pipeline", ETAPA_ENCERRAMENTO)
+    .order("criado_em", { ascending: false })
+    .limit(1);
+  if (error) {
+    console.warn(LOG, "ultimo encerramento falhou:", error.message);
+    return null;
+  }
+  return data && data.length ? String((data[0] as any).criado_em) : null;
+}
+
+// Encerra as conversas em que a IA falou por ultimo e o lead nao respondeu
+// dentro de encerrar_apos_minutos. Chamado pelo varredor (1x por minuto).
+async function encerrarInativas(sb: SupabaseClient): Promise<Record<string, unknown>> {
+  const flagIa = await icFlag(sb, "ia_pre_atendimento");
+  const cfg = await iaConfig(sb);
+  if (!flagIa || String(cfg.ligada).toLowerCase() !== "true") return { ok: true, decisao: "desligada" };
+  const minutos = minutosEncerramento(cfg);
+  if (!minutos) return { ok: true, decisao: "encerramento_desligado" };
+
+  const agora = new Date();
+  const ate = new Date(agora.getTime() - minutos * 60000).toISOString();
+  const desde = new Date(agora.getTime() - 3 * 24 * 3600 * 1000).toISOString();
+  const { data: cards, error } = await sb
+    .from("clientes_crm")
+    .select("id, numero_whatsapp, telefone, vendedor_id, funil_id")
+    .eq("ultima_mensagem_direcao", "enviada")
+    .lt("ultima_mensagem_em", ate)
+    .gte("ultima_mensagem_em", desde)
+    .is("deleted_at", null)
+    .order("ultima_mensagem_em", { ascending: true })
+    .limit(30);
+  if (error) {
+    console.error(LOG, "busca de conversas inativas falhou:", error.message);
+    return { ok: false, erro: "erro_banco" };
+  }
+
+  const horario = dentroDoHorario(agora, cfg.horario_inicio || "08:00", cfg.horario_fim || "19:00", TZ_PADRAO);
+  const envioFlag = await icFlag(sb, "envio_whatsapp_cloud_api");
+  let encerradas = 0;
+  for (const card of (cards as any[]) || []) {
+    const para = canonicoTelefone(String(card.numero_whatsapp || card.telefone || ""));
+    if (!telefoneBrPlausivel(para)) continue;
+    const fase = faseTeste(cfg, para);
+    if (!fase.atende) continue;
+
+    const { data: ult } = await sb
+      .from("crm_conversas")
+      .select("autor, criada_em, payload_raw")
+      .eq("cliente_crm_id", card.id)
+      .order("criada_em", { ascending: false })
+      .limit(1);
+    const p = new Pipeline(sb, { cliente_crm_id: String(card.id), conversa_id: null, vendedor_id: card.vendedor_id, funil_id: card.funil_id });
+    p.modelo = cfg.modelo || "claude-sonnet-5-5";
+    p.card = card;
+    p.para = para;
+    const decisao = decidirEncerramento({
+      ultima: ult && ult.length ? (ult[0] as any) : null,
+      agora,
+      minutos,
+      ultimoEncerramentoEm: await ultimoEncerramento(sb, String(card.id)),
+      handoffPendente: await p.temHandoffPendente(),
+      dentroDoHorario: horario,
+    });
+    if (!decisao) continue;
+    encerradas++;
+    if (decisao === "sem_mensagem") {
+      await p.log(ETAPA_ENCERRAMENTO, "encerrada_sem_mensagem", { detalhe: { minutos, dentro_do_horario: horario } });
+      continue;
+    }
+    p.envioLigado = !fase.sombra && envioFlag;
+    if (card.vendedor_id) {
+      const res = await canalDoVendedor(sb, String(card.vendedor_id));
+      if (res.ok) p.canal = res.canal;
+    }
+    await p.enviar(TEXTO_ENCERRAMENTO, ETAPA_ENCERRAMENTO, "encerrada", { minutos }, { encerramento: true });
+  }
+  if (encerradas) console.log(LOG, "conversas encerradas por inatividade:", encerradas);
+  return { ok: true, decisao: "encerramento", encerradas };
+}
+
 // Chama ic-agendamento internamente (acao 'propor'). Nunca confirma: status pendente.
 async function proporAgendamento(
   clienteId: string,
@@ -696,10 +793,12 @@ Deno.serve(async (req: Request) => {
     } catch (_e) {
       return json({ ok: false, erro: "payload_invalido" }, 400);
     }
+    const sb = createClient(URL_SB, SR, { auth: { persistSession: false } });
+    if (body.acao === "encerrar_inativas") return json(await encerrarInativas(sb));
+
     const clienteId = String(body.cliente_crm_id || "").trim();
     if (!clienteId) return json({ ok: false, erro: "payload_invalido" }, 400);
 
-    const sb = createClient(URL_SB, SR, { auth: { persistSession: false } });
     const inicio = Date.now();
     const resultado = await rodar(sb, {
       cliente_crm_id: clienteId,

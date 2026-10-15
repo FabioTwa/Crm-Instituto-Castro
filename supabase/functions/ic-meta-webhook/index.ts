@@ -1549,6 +1549,37 @@ function dispararIaPreAtendimento(
   if (typeof espera === "function") espera.call((globalThis as any).EdgeRuntime, trabalho);
 }
 
+// Pede a ic-ia-pre-atendimento para encerrar as conversas em que o lead parou
+// de responder. Segundo plano, mesmo jeito do gancho acima; erro e ignorado.
+function dispararEncerramentoInativas(supabase: Supa): void {
+  const trabalho = (async () => {
+    try {
+      if (!(await icFlag(supabase, "ia_pre_atendimento"))) return;
+      const URL_SB = Deno.env.get("SUPABASE_URL") || "";
+      const segredo = Deno.env.get("IC_INTERNAL_SECRET") || "";
+      if (!URL_SB || !segredo) return;
+      const ctl = new AbortController();
+      const t = setTimeout(() => ctl.abort(), 25000);
+      const resp = await fetch(`${URL_SB}/functions/v1/ic-ia-pre-atendimento`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-ic-internal": segredo,
+          Authorization: "Bearer " + (Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || ""),
+        },
+        body: JSON.stringify({ acao: "encerrar_inativas" }),
+        signal: ctl.signal,
+      });
+      clearTimeout(t);
+      if (!resp.ok) console.warn("[ic-meta-webhook] encerramento por inatividade devolveu", resp.status);
+    } catch (e) {
+      console.warn("[ic-meta-webhook] encerramento por inatividade falhou (ignorado):", e instanceof Error ? e.message : e);
+    }
+  })();
+  const espera = (globalThis as any).EdgeRuntime?.waitUntil;
+  if (typeof espera === "function") espera.call((globalThis as any).EdgeRuntime, trabalho);
+}
+
 // ===================================================================
 // ENTRADA
 // ===================================================================
@@ -1655,6 +1686,8 @@ Deno.serve(async (req: Request) => {
       try { talvez = await req.clone().json(); } catch (_e) { talvez = null; }
       if (talvez && talvez.varredor === true) {
         if (!URL_SB || !SR) return json({ ok: false, error: "env missing" }, 500);
+        // O cron roda a cada 30 s; o encerramento por inatividade basta 1x por minuto.
+        if (new Date().getUTCSeconds() < 30) dispararEncerramentoInativas(createClient(URL_SB, SR, { auth: { persistSession: false } }));
         return json(await varrerPendentes(URL_SB, SR));
       }
     }

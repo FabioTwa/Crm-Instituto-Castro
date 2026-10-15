@@ -81,7 +81,7 @@ Cada etapa grava uma linha em `ia_decisoes_log` (`etapa_pipeline`, `decisao`).
 
 1. **flags** — `ic_flag('ia_pre_atendimento')` e `crm_ia_config.ligada='true'`; senão `desligada`.
 2. **humano_assumiu** — há `crm_conversas` `direcao='enviada'`, `autor='vendedor'` nas últimas 24 h (equipe respondeu pelo celular: é a linha que o eco grava) ou `ia_handoffs` com `atendido_em is null` → `humano_no_controle`.
-3. **limites** — fora de `horario_inicio`/`horario_fim` (America/Sao_Paulo; sexta até 18h; fim de semana sempre fora): manda o aviso fixo no máximo 1 vez por dia por card (`payload_raw.fora_horario=true`) e encerra. `max_respostas_por_conversa` atingido (conta `ia_decisoes_log.resposta_enviada=true` do card) → handoff `manual` "limite de respostas da IA".
+3. **limites** — fora de `horario_inicio`/`horario_fim` (America/Sao_Paulo; sexta até 18h; fim de semana sempre fora): manda o aviso fixo no máximo 1 vez por dia por card (`payload_raw.fora_horario=true`) e encerra. `max_respostas_por_conversa` atingido (conta `ia_decisoes_log.resposta_enviada=true` do card desde o último encerramento por inatividade) → handoff `manual` "limite de respostas da IA".
 4. **contexto** — RPC `ic_ia_contexto(card, 12)`.
 5. **consentimento** — `ia_consentimentos`: pendente e nunca pedido → envia o texto de consentimento (constante em `_shared/ia-prompt.ts`, com `IC_POLITICA_PRIVACIDADE_URL`) e grava `texto_apresentado`; pendente e já pedido → `interpretarConsentimento` (SIM/NÃO/ambíguo): NÃO → `negado` + handoff `consentimento_negado` + despedida; SIM → `concedido`, segue; ambíguo → não responde.
 6. **handoff_regras** — `detectarHandoff` (código, antes da IA): urgência (resposta fixa orientando PS/192), dúvida clínica, reclamação, pedido de humano. Grava `ia_handoffs`.
@@ -125,6 +125,26 @@ Ordem recomendada: `ia_transcricao_audio` → `ia_pre_atendimento` + `ligada`
 
 Outras chaves de `crm_ia_config`: `horario_inicio` ('08:00'), `horario_fim`
 ('19:00'), `max_respostas_por_conversa` ('6'), `modelo`, `max_tokens`.
+
+### Encerramento por inatividade
+
+`encerrar_apos_minutos` (padrão '60' sem linha na tabela; '0' desliga; 5 a 1440).
+Quando a IA foi a última a falar e o lead não responde nesse prazo, a conversa é
+encerrada: dentro do horário de atendimento (e da janela de 24 h do WhatsApp)
+sai a despedida fixa `TEXTO_ENCERRAMENTO` (`payload_raw.encerramento=true`);
+fora dele, encerra sem mensagem. Fica uma linha em `ia_decisoes_log` com
+`etapa_pipeline='encerramento'`. A próxima mensagem do lead abre conversa nova
+e o `max_respostas_por_conversa` volta a contar do zero. Não encerra card com
+handoff pendente nem quando o vendedor falou por último.
+Quem dispara: o varredor do `ic-meta-webhook` (pg_cron de 30 s), 1x por minuto,
+com `{acao:'encerrar_inativas'}` e `x-ic-internal`. Lógica em
+`_shared/ia-encerramento.ts`.
+
+```sql
+insert into crm_ia_config (chave, valor, descricao)
+values ('encerrar_apos_minutos', '60', 'IC: minutos sem resposta do lead para encerrar a conversa (0 desliga)')
+on conflict (chave) do update set valor = excluded.valor;
+```
 
 ### Fase de teste no número real (SQL 29)
 
