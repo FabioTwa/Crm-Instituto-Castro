@@ -126,21 +126,45 @@ export function interpretarDia(diaPreferido: string, agoraUTC: Date, tz: string 
   return base;
 }
 
-// Proximo slot de avaliacao: manha 09:00-09:30, tarde 14:00-14:30 (horario de
-// Sao Paulo) do dia pedido. Se o dia cair em fim de semana, ou se o slot ja
-// passou (ex.: pediu "hoje a tarde" as 17h, ou sexta depois das 18h), avanca
+// Le "HH:MM", "15h", "15h30", "15:30" ou "15". Devolve minutos do dia ou null.
+export function interpretarHorario(texto: string): number | null {
+  const s = normalizar(texto).replace(/\s+/g, "");
+  const m = /^(\d{1,2})(?:(?::|h)(\d{2})?)?(?:h|hs|hrs|horas)?$/.exec(s);
+  if (!m) return null;
+  const h = Number(m[1]), mi = m[2] ? Number(m[2]) : 0;
+  if (h > 23 || mi > 59) return null;
+  return h * 60 + mi;
+}
+
+// Ultimo inicio de avaliacao (30 min) no dia: seg-qui ate 18:30, sex ate 17:30.
+function ultimoInicio(diaSemana: number): number {
+  return diaSemana === 5 ? 17 * 60 + 30 : 18 * 60 + 30;
+}
+
+// Proximo slot de avaliacao (30 min, horario de Sao Paulo) no dia pedido.
+// Com horarioPreferido valido ("15:00", "15h") usa esse horario, arredondado
+// para baixo na meia hora (15:10 -> 15:00); fora do expediente (antes das 08:00
+// ou depois do ultimo inicio do dia) ele e ignorado. Sem horario: manha 09:00,
+// tarde 14:00. Se o dia cair em fim de semana, ou se o slot ja passou, avanca
 // para o proximo dia util. Devolve inicio/fim em UTC (Date).
 export function proximoSlot(
   diaPreferido: string,
   periodo: Periodo,
   agoraUTC: Date = new Date(),
   tz: string = TZ_PADRAO,
+  horarioPreferido: string = "",
 ): { inicio: Date; fim: Date } {
-  const hora = periodo === "tarde" ? 14 : 9;
+  const padrao = periodo === "tarde" ? 14 * 60 : 9 * 60;
+  const pedido = interpretarHorario(horarioPreferido);
   let d = interpretarDia(diaPreferido, agoraUTC, tz);
   for (let i = 0; i < 14; i++) {
-    const inicio = dataLocal(d.ano, d.mes, d.dia, hora, 0, tz);
-    const diaSemana = partesNoFuso(inicio, tz).diaSemana;
+    const diaSemana = partesNoFuso(dataLocal(d.ano, d.mes, d.dia, 12, 0, tz), tz).diaSemana;
+    let min = padrao;
+    if (pedido != null) {
+      const arred = pedido - (pedido % 30);
+      if (arred >= 8 * 60 && arred <= ultimoInicio(diaSemana)) min = arred;
+    }
+    const inicio = dataLocal(d.ano, d.mes, d.dia, Math.floor(min / 60), min % 60, tz);
     const util = diaSemana >= 1 && diaSemana <= 5;
     if (util && inicio.getTime() > agoraUTC.getTime()) {
       return { inicio, fim: new Date(inicio.getTime() + 30 * 60000) };
@@ -148,6 +172,6 @@ export function proximoSlot(
     d = somarDias(d.ano, d.mes, d.dia, 1);
   }
   // Nunca deve chegar aqui (14 dias cobrem qualquer fim de semana); garante retorno.
-  const inicio = dataLocal(d.ano, d.mes, d.dia, hora, 0, tz);
+  const inicio = dataLocal(d.ano, d.mes, d.dia, Math.floor(padrao / 60), padrao % 60, tz);
   return { inicio, fim: new Date(inicio.getTime() + 30 * 60000) };
 }

@@ -26,7 +26,7 @@ export const FERRAMENTAS = [
   {
     name: TOOL_PROPOR_AGENDAMENTO,
     description:
-      "Use quando o lead demonstrar interesse em marcar uma avaliação e já tiver dito (ou aceitado) um dia e um período. " +
+      "Use quando o lead demonstrar interesse em marcar uma avaliação e já tiver dito (ou aceitado) um dia e um período ou horário. " +
       "Cria uma PROPOSTA de horário que a equipe humana confirma depois. Não confirme horário ao lead: diga que a equipe vai confirmar.",
     strict: true,
     input_schema: {
@@ -38,7 +38,11 @@ export const FERRAMENTAS = [
           description:
             "Dia pedido pelo lead. Prefira formato YYYY-MM-DD; aceita também 'hoje', 'amanhã', 'segunda', 'quinta-feira', 'DD/MM'. Vazio = próximo dia útil.",
         },
-        periodo: { type: "string", enum: ["manha", "tarde"], description: "Período preferido." },
+        periodo: { type: "string", enum: ["manha", "tarde"], description: "Período preferido (se o lead disse um horário, o período desse horário)." },
+        horario_preferido: {
+          type: "string",
+          description: "Horário exato que o lead pediu ou aceitou, no formato HH:MM (ex.: '15:00'). Vazio se ele só disse o período.",
+        },
         servico: {
           type: "string",
           description:
@@ -46,7 +50,7 @@ export const FERRAMENTAS = [
         },
         observacao: { type: "string", description: "Observação curta e NÃO clínica para a equipe (ex.: 'prefere ligar antes'). Vazio se não houver." },
       },
-      required: ["dia_preferido", "periodo", "servico", "observacao"],
+      required: ["dia_preferido", "periodo", "horario_preferido", "servico", "observacao"],
     },
   },
   {
@@ -129,12 +133,12 @@ Acolher, entender a necessidade da pessoa em poucas perguntas e conduzir ao agen
 - RECLAMAÇÃO OU PEDIDO PARA FALAR COM UMA PESSOA: chame ${TOOL_ENCAMINHAR_HUMANO} com o motivo correspondente e avise que alguém da equipe assume.
 
 # Dados pessoais (LGPD)
-- Só peça: primeiro nome (se não souber), preferência de dia/período, formato (presencial ou online) e se é convênio (qual e plano) ou particular. Nome completo, documentos e e-mail para o cadastro a equipe pede depois, na confirmação. NÃO peça CPF, data de nascimento, endereço, e-mail, peso, altura, exames, histórico de saúde, nome de remédios nem fotos. Se a pessoa enviar algo assim espontaneamente, não comente o conteúdo e siga para o agendamento ou encaminhe à equipe.
+- Só peça: primeiro nome (se não souber), preferência de dia e período ou horário, formato (presencial ou online) e se é convênio (qual e plano) ou particular. Nome completo, documentos e e-mail para o cadastro a equipe pede depois, na confirmação. NÃO peça CPF, data de nascimento, endereço, e-mail, peso, altura, exames, histórico de saúde, nome de remédios nem fotos. Se a pessoa enviar algo assim espontaneamente, não comente o conteúdo e siga para o agendamento ou encaminhe à equipe.
 
 # Forma das respostas
 - Curtas: até 3 frases e no máximo 1 pergunta por mensagem. Sem listas longas, sem markdown, sem títulos. É WhatsApp.
 - Uma pergunta por vez. Não repita o que a pessoa acabou de dizer.
-- Se a pessoa já disse dia e período, use ${TOOL_PROPOR_AGENDAMENTO} imediatamente e diga que a equipe vai confirmar o horário por aqui.
+- Se a pessoa já disse dia e período (ou um horário), use ${TOOL_PROPOR_AGENDAMENTO} imediatamente e diga que a equipe vai confirmar o horário por aqui.
 - Se não souber algo, diga que vai pedir para a equipe responder (e chame ${TOOL_ENCAMINHAR_HUMANO} com motivo "outro").
 - Nunca invente informações sobre a clínica além das listadas acima.
 

@@ -659,6 +659,7 @@ async function proporAgendamento(
         cliente_crm_id: clienteId,
         dia_preferido: String(input.dia_preferido || ""),
         periodo: input.periodo === "tarde" ? "tarde" : "manha",
+        horario_preferido: String(input.horario_preferido || "").slice(0, 10),
         servico: String(input.servico || "Avaliação").slice(0, 120),
         observacao: String(input.observacao || "").slice(0, 300),
       }),
