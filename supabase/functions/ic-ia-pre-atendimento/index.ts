@@ -23,6 +23,9 @@
 //   9  pos_validacao    filtro regex CFM na resposta do modelo
 //   10 tools            executa as ferramentas (ic-agendamento 'propor', handoffs)
 //   11 envio            provedor do numero (_shared/whatsapp-envio.ts: Meta ou Gupshup) + crm_conversas autor 'ia'
+//   12 funil            RPC ic_avancar_etapa (SQL 33): card anda so para frente
+//                       (conversa -> em_conversa; lead pergunta valor/convenio/formato
+//                       -> negociacao; IA propoe horario -> agendamento_pendente)
 //
 // FASE DE TESTE: crm_ia_config.numeros_teste preenchida = so esses telefones sao
 // atendidos (os demais: decisao='fora_dos_numeros_teste'). Ver _shared/ia-teste.ts.
@@ -70,6 +73,7 @@ import { interpretarConsentimento } from "../_shared/consentimento.ts";
 import { dentroDoHorario, partesNoFuso, TZ_PADRAO } from "../_shared/horario.ts";
 import { faseTeste } from "../_shared/ia-teste.ts";
 import { decidirEncerramento, ETAPA_ENCERRAMENTO, minutosEncerramento } from "../_shared/ia-encerramento.ts";
+import { detectarNegociacao, type EventoFunil } from "../_shared/funil-ia.ts";
 import {
   FERRAMENTAS,
   montarSystemPrompt,
@@ -676,7 +680,29 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
 
   // 11) envio
   const env = await p.enviar(textoResposta, "envio", "enviada", { tools: r.tools.map((t) => t.name) }, marcadores);
+
+  // 12) funil: o card anda sozinho, so para frente (SQL 33). Desliga com
+  // crm_ia_config.funil_automatico = 'false' (o card volta a so mudar na mao).
+  const funilAuto = String(cfg.funil_automatico ?? "true").toLowerCase() !== "false";
+  if (funilAuto && env.enviado) await avancarEtapa(sb, p, body.cliente_crm_id, "conversa", "a IA respondeu o lead");
+  const termoNegociacao = funilAuto ? detectarNegociacao(textoLead) : null;
+  if (termoNegociacao) await avancarEtapa(sb, p, body.cliente_crm_id, "negociacao", `lead perguntou sobre "${termoNegociacao}"`);
+  if (funilAuto && marcadores.agendamento_id) await avancarEtapa(sb, p, body.cliente_crm_id, "proposta", "a IA propôs um horário");
+
   return { ok: true, decisao: env.enviado ? "enviada" : "simulada_envio_desligado" };
+}
+
+// Move o card para a etapa ligada ao evento (ic_avancar_etapa, so para frente).
+// Falha aqui nunca derruba a conversa: so registra no log.
+async function avancarEtapa(sb: SupabaseClient, p: Pipeline, clienteId: string, evento: EventoFunil, motivo: string): Promise<void> {
+  const { data, error } = await sb.rpc("ic_avancar_etapa", {
+    p_cliente: clienteId, p_evento: evento, p_autor: "Assistente virtual", p_motivo: motivo,
+  });
+  if (error) {
+    await p.log("funil", "falhou", { motivo: error.message, detalhe: { evento } });
+  } else if (data) {
+    await p.log("funil", "etapa_avancada", { detalhe: { evento, etapa_nova: data, motivo } });
+  }
 }
 
 // Quando a conversa do card foi encerrada pela ultima vez (ou null).

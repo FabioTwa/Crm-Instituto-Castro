@@ -75,7 +75,7 @@ o webhook reconhece a repetição (busca + índice único
 
 Porta interna (header `x-ic-internal`): `{acao:'propor', cliente_crm_id, dia_preferido, periodo:'manha'|'tarde', servico, observacao}` → `{ok:true, confirmado:false, agendamento_id, inicio, fim}`. Cria `agendamentos` com `status='pendente'`, `origem='ia'`, `google_sync_status='desligado'` (só vai ao Google quando um humano confirmar na aba Agendamentos). Se já há proposta pendente da IA para o card, devolve a existente com `repetido:true`.
 
-## 2. Fluxo da IA em 11 etapas (`ic-ia-pre-atendimento`)
+## 2. Fluxo da IA em 12 etapas (`ic-ia-pre-atendimento`)
 
 Cada etapa grava uma linha em `ia_decisoes_log` (`etapa_pipeline`, `decisao`).
 
@@ -90,6 +90,7 @@ Cada etapa grava uma linha em `ia_decisoes_log` (`etapa_pipeline`, `decisao`).
 9. **pos_validacao** — `respostaProibida` (medicamentos, mg, dose, garantias, "você tem"/"você está com" afirmativos, diagnóstico, receita): bateu → `bloqueada_pos_validacao`, handoff `erro_ia`, resposta fixa neutra.
 10. **tools** — `encaminhar_humano` → handoff com o motivo; `propor_agendamento` → `ic-agendamento` `{acao:'propor'}`; se voltar `confirmado:true` grava handoff `agendamento_confirmado` (verificando pendente para não duplicar com o gatilho do banco).
 11. **envio** — `_shared/whatsapp-envio.ts → enviarTextoCanal` (Meta ou Gupshup, pelo provedor do número); grava `crm_conversas` `autor='ia'`, `direcao='enviada'`, `zapi_message_id`=wamid, `payload_raw={ia:true, modelo, decisao_log_id}`.
+12. **funil** — RPC `ic_avancar_etapa` (SQL 33), só para frente e nunca em fechado/perdido/cliente antigo: IA respondeu de verdade → `em_conversa`; lead perguntou valor, preço, convênio, parcelamento, online/presencial (`_shared/funil-ia.ts → detectarNegociacao`) → `negociacao` / `negociacao_quente`; IA propôs horário → `agendamento_pendente` / `avaliacao_inicial`. Funil sem a etapa: nada muda. Cada movimento grava `crm_historico` tipo `automatico` (autor "Assistente virtual") e `ia_decisoes_log` `funil/etapa_avancada`. Desligar: `crm_ia_config.funil_automatico='false'`. A confirmação do agendamento pela equipe (gatilho do SQL 18, agora via a mesma RPC) leva a `visita_confirmada` / `consulta_agendada` / `avaliacao_inicial`.
 
 ### Modo sombra
 
