@@ -589,21 +589,30 @@
         if (clienteId && typeof openCRMDetalhe === 'function') openCRMDetalhe(clienteId);
     };
 
-    // Encerrar conversa (painel do lead): fecha os encaminhamentos pendentes e
-    // marca o encerramento. A próxima mensagem do lead volta para a assistente
-    // virtual como conversa nova. Nada é enviado ao lead (SQL 32).
+    // Encerrar conversa (painel do lead e card completo): fecha os
+    // encaminhamentos pendentes, marca o encerramento e a assistente virtual
+    // manda a despedida ao lead (ic-ia-pre-atendimento, acao
+    // encerrar_conversa_equipe; banco: SQL 32). A próxima mensagem do lead
+    // volta para a assistente virtual como conversa nova.
     window.icEncerrarConversa = function (clienteId) {
         if (!clienteId) return;
-        icConfirmar('Encerrar a conversa deste lead?\n\nNada é enviado ao lead. Quando ele mandar uma nova mensagem, a assistente virtual volta a atender desde o começo.', 'Encerrar conversa', async function () {
+        icConfirmar('Encerrar a conversa deste lead?\n\nA assistente virtual manda a mensagem de despedida ao lead. Quando ele mandar uma nova mensagem, ela volta a atender desde o começo.', 'Encerrar conversa', async function () {
             var r;
-            try { r = await supabaseClient.rpc('ic_encerrar_conversa', { p_cliente: clienteId }); } catch (e) { r = { error: e }; }
-            if (r.error) {
-                var m = String((r.error && r.error.message) || '');
-                showToast(m.indexOf('nao_autorizado') >= 0 || m.indexOf('card_nao_encontrado') >= 0
+            try {
+                r = await supabaseClient.functions.invoke('ic-ia-pre-atendimento', {
+                    body: { acao: 'encerrar_conversa_equipe', cliente_crm_id: clienteId }
+                });
+            } catch (e) { r = { error: e }; }
+            var d = r && r.data;
+            if (r.error || !d || !d.ok) {
+                var st = r.error && r.error.context && r.error.context.status;
+                showToast(st === 403 || (d && d.erro === 'sem_permissao')
                     ? 'Você não tem permissão para encerrar esta conversa.' : 'Não foi possível encerrar a conversa.', 'error');
                 return;
             }
-            showToast('Conversa encerrada. A próxima mensagem do lead volta para a assistente virtual.', 'success');
+            showToast(d.mensagem_enviada
+                ? 'Conversa encerrada e despedida enviada ao lead.'
+                : 'Conversa encerrada (sem mensagem ao lead). A próxima mensagem dele volta para a assistente virtual.', 'success');
             var bloco = document.getElementById('ic-handoffs');
             if (bloco) { bloco.remove(); if (typeof icRenderHandoffs === 'function') icRenderHandoffs(); }
         });
