@@ -1,5 +1,5 @@
 import { assertEquals, assert } from "jsr:@std/assert";
-import { dataLocal, dentroDoHorario, interpretarDia, partesNoFuso, proximoSlot } from "./horario.ts";
+import { dataLocal, dentroDoHorario, interpretarDia, interpretarHorario, partesNoFuso, proximoSlot } from "./horario.ts";
 
 const TZ = "America/Sao_Paulo";
 
@@ -62,4 +62,42 @@ Deno.test("interpretarDia: amanha, dia da semana com acento, DD/MM", () => {
   assertEquals(interpretarDia("próxima terça", agora, TZ), { ano: 2026, mes: 10, dia: 6 });
   assertEquals(interpretarDia("15/10", agora, TZ), { ano: 2026, mes: 10, dia: 15 });
   assertEquals(interpretarDia("qualquer coisa", agora, TZ), { ano: 2026, mes: 10, dia: 5 });
+});
+
+Deno.test("proximoSlot: horario pedido pelo lead e respeitado", () => {
+  const agora = dataLocal(2026, 10, 15, 12, 0, TZ); // quinta 12:00
+  const s = proximoSlot("2026-10-26", "tarde", agora, TZ, "15:00");
+  assertEquals(s.inicio.toISOString(), "2026-10-26T18:00:00.000Z"); // segunda 15:00 SP
+  assertEquals(s.fim.toISOString(), "2026-10-26T18:30:00.000Z");
+  const meia = proximoSlot("2026-10-26", "manha", agora, TZ, "10h30");
+  assertEquals(meia.inicio.toISOString(), "2026-10-26T13:30:00.000Z"); // 10:30 SP
+  const quebrado = proximoSlot("2026-10-26", "tarde", agora, TZ, "15:10");
+  assertEquals(quebrado.inicio.toISOString(), "2026-10-26T18:00:00.000Z"); // arredonda para 15:00
+});
+
+Deno.test("proximoSlot: horario fora do expediente ou invalido usa o padrao do periodo", () => {
+  const agora = dataLocal(2026, 10, 15, 12, 0, TZ);
+  assertEquals(proximoSlot("2026-10-26", "tarde", agora, TZ, "20:00").inicio.toISOString(), "2026-10-26T17:00:00.000Z");
+  assertEquals(proximoSlot("2026-10-26", "manha", agora, TZ, "07:00").inicio.toISOString(), "2026-10-26T12:00:00.000Z");
+  assertEquals(proximoSlot("2026-10-26", "tarde", agora, TZ, "depois do almoço").inicio.toISOString(), "2026-10-26T17:00:00.000Z");
+  // Sexta: ultimo inicio 17:30.
+  assertEquals(proximoSlot("2026-10-23", "tarde", agora, TZ, "18:00").inicio.toISOString(), "2026-10-23T17:00:00.000Z");
+  assertEquals(proximoSlot("2026-10-23", "tarde", agora, TZ, "17:30").inicio.toISOString(), "2026-10-23T20:30:00.000Z");
+});
+
+Deno.test("proximoSlot: horario de hoje que ja passou vai para o proximo dia util no mesmo horario", () => {
+  const agora = dataLocal(2026, 10, 15, 16, 0, TZ); // quinta 16:00
+  const s = proximoSlot("hoje", "tarde", agora, TZ, "15:00");
+  assertEquals(s.inicio.toISOString(), "2026-10-16T18:00:00.000Z"); // sexta 15:00
+});
+
+Deno.test("interpretarHorario: formatos comuns", () => {
+  assertEquals(interpretarHorario("15:00"), 900);
+  assertEquals(interpretarHorario("15h"), 900);
+  assertEquals(interpretarHorario("15h30"), 930);
+  assertEquals(interpretarHorario("15hrs"), 900);
+  assertEquals(interpretarHorario(" 9 "), 540);
+  assertEquals(interpretarHorario(""), null);
+  assertEquals(interpretarHorario("25:00"), null);
+  assertEquals(interpretarHorario("tarde"), null);
 });

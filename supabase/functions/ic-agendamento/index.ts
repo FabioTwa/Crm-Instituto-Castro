@@ -10,7 +10,7 @@
 //      {acao:'google_oauth_callback', code, state}      troca code por refresh_token e guarda cifrado
 //      GET ?acao=google_oauth_callback&code=&state=     (o Google redireciona para ca; redireciona ao IC_APP_URL)
 //  (b) INTERNA (header x-ic-internal = IC_INTERNAL_SECRET):
-//      {acao:'propor', cliente_crm_id, dia_preferido, periodo, servico, observacao}
+//      {acao:'propor', cliente_crm_id, dia_preferido, periodo, horario_preferido?, servico, observacao}
 //        -> cria agendamentos status 'pendente', origem 'ia'. NAO confirma. {ok, confirmado:false, agendamento_id}
 //
 // PUBLICAR: supabase functions deploy ic-agendamento --no-verify-jwt
@@ -425,7 +425,9 @@ async function acaoPropor(sb: SupabaseClient, body: any): Promise<Response> {
   }
 
   const periodo = body.periodo === "tarde" ? "tarde" : "manha";
-  const slot = proximoSlot(String(body.dia_preferido || ""), periodo, new Date(), TZ_PADRAO);
+  const slot = proximoSlot(
+    String(body.dia_preferido || ""), periodo, new Date(), TZ_PADRAO, String(body.horario_preferido || "").slice(0, 10),
+  );
   const servico = String(body.servico || "Avaliação").trim().slice(0, 120);
   const obs = String(body.observacao || "").trim().slice(0, 300);
   const telefone = canonicoTelefone(String((card as any).numero_whatsapp || (card as any).telefone || ""));
