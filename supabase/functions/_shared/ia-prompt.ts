@@ -177,5 +177,9 @@ export const TEXTO_RESPOSTA_BLOQUEADA = "Vou pedir para a nossa equipe te respon
 export const TEXTO_HANDOFF_GENERICO =
   "Vou encaminhar para a nossa equipe, que responde por aqui em breve. Obrigada pela paciência!";
 
+// Lead escreveu de novo com a equipe ja chamada (handoff pendente): 1 vez por handoff.
+export const TEXTO_AVISO_ESPERA =
+  "Nossa equipe já foi avisada e vai te responder por aqui o quanto antes. Obrigada pela paciência! 😊";
+
 export const TEXTO_ENCERRAMENTO =
   "Como não tivemos mais retorno, vou encerrar o atendimento por aqui. Quando quiser continuar, é só mandar uma mensagem que eu te ajudo! 😊";

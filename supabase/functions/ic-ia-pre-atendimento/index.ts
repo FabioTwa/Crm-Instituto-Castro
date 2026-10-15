@@ -11,7 +11,8 @@
 // PIPELINE (cada etapa grava uma linha em ia_decisoes_log com etapa_pipeline e decisao):
 //   1  flags            ic_flag('ia_pre_atendimento') e crm_ia_config.ligada='true'
 //   2  humano_assumiu   vendedor respondeu nas ultimas 24 h (e depois do ultimo
-//                       encerramento), ou ia_handoffs pendente -> fim
+//                       encerramento) -> fim; ia_handoffs pendente -> aviso de
+//                       espera UMA vez por handoff (TEXTO_AVISO_ESPERA), depois fim
 //   3  limites          horario (America/Sao_Paulo; fora do horario: 1 aviso/dia/card),
 //                       max_respostas_por_conversa (atingiu: handoff 'manual'),
 //                       contado desde o ultimo encerramento por inatividade
@@ -78,6 +79,7 @@ import {
   FERRAMENTAS,
   montarSystemPrompt,
   TEXTO_CONSENTIMENTO_NEGADO,
+  TEXTO_AVISO_ESPERA,
   TEXTO_ENCERRAMENTO,
   TEXTO_HANDOFF_GENERICO,
   TEXTO_RESPOSTA_BLOQUEADA,
@@ -187,6 +189,22 @@ class Pipeline {
       console.error(LOG, "excecao em ia_handoffs:", e);
       return false;
     }
+  }
+
+  // Quando foi aberto o handoff pendente mais antigo do card (ou null).
+  async handoffPendenteDesde(): Promise<string | null> {
+    const { data, error } = await this.sb
+      .from("ia_handoffs")
+      .select("criado_em")
+      .eq("cliente_crm_id", this.body.cliente_crm_id)
+      .is("atendido_em", null)
+      .order("criado_em", { ascending: true })
+      .limit(1);
+    if (error) {
+      console.warn(LOG, "ia_handoffs consulta falhou:", error.message);
+      return null;
+    }
+    return data && data.length ? String(data[0].criado_em) : null;
   }
 
   async temHandoffPendente(): Promise<boolean> {
@@ -409,8 +427,23 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
     await p.log("humano_assumiu", "humano_no_controle", { motivo: "vendedor respondeu nas ultimas 24h" });
     return { ok: true, decisao: "humano_no_controle" };
   }
-  if (await p.temHandoffPendente()) {
-    await p.log("humano_assumiu", "humano_no_controle", { motivo: "handoff pendente" });
+  const handoffDesde = await p.handoffPendenteDesde();
+  if (handoffDesde) {
+    // Equipe ja chamada e o lead escreveu de novo: avisa UMA vez por handoff
+    // que a equipe vai responder, para o lead nao ficar sem retorno.
+    const { data: avisos } = await sb
+      .from("ia_decisoes_log")
+      .select("id")
+      .eq("cliente_crm_id", body.cliente_crm_id)
+      .eq("etapa_pipeline", "humano_assumiu")
+      .eq("decisao", "aviso_espera")
+      .gte("criado_em", handoffDesde)
+      .limit(1);
+    if (!avisos || !avisos.length) {
+      const env = await p.enviar(TEXTO_AVISO_ESPERA, "humano_assumiu", "aviso_espera", { origem: "handoff_pendente" });
+      return { ok: true, decisao: env.enviado ? "aviso_espera" : "simulada_envio_desligado" };
+    }
+    await p.log("humano_assumiu", "humano_no_controle", { motivo: "handoff pendente (aviso de espera ja enviado)" });
     return { ok: true, decisao: "humano_no_controle" };
   }
   await p.log("humano_assumiu", "ia_pode_responder");
