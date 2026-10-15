@@ -10,7 +10,8 @@
 //
 // PIPELINE (cada etapa grava uma linha em ia_decisoes_log com etapa_pipeline e decisao):
 //   1  flags            ic_flag('ia_pre_atendimento') e crm_ia_config.ligada='true'
-//   2  humano_assumiu   vendedor respondeu nas ultimas 24 h, ou ia_handoffs pendente -> fim
+//   2  humano_assumiu   vendedor respondeu nas ultimas 24 h (e depois do ultimo
+//                       encerramento), ou ia_handoffs pendente -> fim
 //   3  limites          horario (America/Sao_Paulo; fora do horario: 1 aviso/dia/card),
 //                       max_respostas_por_conversa (atingiu: handoff 'manual'),
 //                       contado desde o ultimo encerramento por inatividade
@@ -386,14 +387,19 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
   }
 
   // 2) humano_assumiu
-  const desde24h = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+  // O encerramento (por inatividade ou pela equipe, SQL 32) abre conversa nova:
+  // o que o vendedor disse antes dele nao cala a IA.
+  const inicioConversa = await ultimoEncerramento(sb, body.cliente_crm_id);
+  const ha24h = Date.now() - 24 * 3600 * 1000;
+  const inicioMs = inicioConversa ? Date.parse(inicioConversa) : NaN;
+  const desde24h = new Date(Number.isFinite(inicioMs) ? Math.max(ha24h, inicioMs) : ha24h).toISOString();
   const { data: humano } = await sb
     .from("crm_conversas")
     .select("id")
     .eq("cliente_crm_id", body.cliente_crm_id)
     .eq("direcao", "enviada")
     .eq("autor", "vendedor")
-    .gte("criada_em", desde24h)
+    .gt("criada_em", desde24h)
     .limit(1);
   if (humano && humano.length) {
     await p.log("humano_assumiu", "humano_no_controle", { motivo: "vendedor respondeu nas ultimas 24h" });
@@ -443,7 +449,6 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
   // Conta so as respostas da conversa atual: o encerramento por inatividade
   // abre uma conversa nova.
   const maxRespostas = Math.max(1, Number(cfg.max_respostas_por_conversa || "6") || 6);
-  const inicioConversa = await ultimoEncerramento(sb, body.cliente_crm_id);
   let qRespostas = sb
     .from("ia_decisoes_log")
     .select("id", { count: "exact", head: true })

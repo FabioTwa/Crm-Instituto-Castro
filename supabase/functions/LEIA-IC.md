@@ -136,6 +136,10 @@ fora dele, encerra sem mensagem. Fica uma linha em `ia_decisoes_log` com
 `etapa_pipeline='encerramento'`. A próxima mensagem do lead abre conversa nova
 e o `max_respostas_por_conversa` volta a contar do zero. Não encerra card com
 handoff pendente nem quando o vendedor falou por último.
+A equipe também encerra pelo botão **Encerrar conversa** do painel do lead
+(RPC `ic_encerrar_conversa`, SQL 32): fecha os handoffs pendentes e grava
+`decisao='encerrada_pela_equipe'`, sem enviar nada. Depois de qualquer
+encerramento, mensagem antiga do vendedor não cala mais a IA.
 Quem dispara: o varredor do `ic-meta-webhook` (pg_cron de 30 s), 1x por minuto,
 com `{acao:'encerrar_inativas'}` e `x-ic-internal`. Lógica em
 `_shared/ia-encerramento.ts`.

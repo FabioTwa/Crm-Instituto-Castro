@@ -11246,6 +11246,9 @@ async function icPainelRecarregar(clienteId) {
     if (cl.etapa !== 'fechado') {
         h += '<button type="button" class="icp-acao ganho" onclick="crmMarcarVenda()">' + icon('check', 13) + 'Marcar como ganho</button>';
     }
+    // [ic] Encerra a conversa da assistente virtual (ic-extensoes.js, SQL 32).
+    h += '<button type="button" class="icp-acao" onclick="icEncerrarConversa(\'' + escaparAtributo(String(cl.id)) + '\')"'
+       + ' title="Libera o lead para começar uma conversa nova com a assistente virtual">' + icon('message-circle-x', 13) + 'Encerrar conversa</button>';
     h += '</div>';
 
     // --- DADOS: cada linha grava um campo so e nao sai da tela ---
