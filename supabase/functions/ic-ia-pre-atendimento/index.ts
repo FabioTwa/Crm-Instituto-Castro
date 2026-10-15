@@ -485,17 +485,38 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
   }
 
   // 5) consentimento (LGPD)
+  // Vale o registro MAIS RECENTE (o historico de respostas fica guardado).
   const { data: consRows } = await sb
     .from("ia_consentimentos")
-    .select("id, status, texto_apresentado")
+    .select("id, status, texto_apresentado, respondido_em, criado_em")
     .eq("cliente_crm_id", body.cliente_crm_id)
+    .order("criado_em", { ascending: false })
     .limit(1);
   let cons: any = consRows && consRows[0] ? consRows[0] : null;
-  const statusCons = String((cons && cons.status) || ctx.consentimento || "pendente").toLowerCase();
+  let statusCons = String((cons && cons.status) || ctx.consentimento || "pendente").toLowerCase();
 
   if (statusCons === "negado" || statusCons === "revogado") {
-    await p.log("consentimento", "negado_anteriormente");
-    return { ok: true, decisao: "consentimento_negado" };
+    // Recusou, a conversa foi encerrada depois e o lead voltou a escrever:
+    // conversa nova, pede a autorizacao de novo (registro novo, a recusa fica).
+    const recusaMs = cons ? Date.parse(String(cons.respondido_em || cons.criado_em || "")) : NaN;
+    const encerrouDepois = Number.isFinite(inicioMs) && (!Number.isFinite(recusaMs) || inicioMs > recusaMs);
+    if (!encerrouDepois) {
+      await p.log("consentimento", "negado_anteriormente");
+      return { ok: true, decisao: "consentimento_negado" };
+    }
+    const { data: novo, error: errNovo } = await sb
+      .from("ia_consentimentos")
+      .insert({ cliente_crm_id: body.cliente_crm_id, telefone_norm: p.para, status: "pendente" })
+      .select("id, status, texto_apresentado")
+      .maybeSingle();
+    if (errNovo || !novo) {
+      console.error(LOG, "ia_consentimentos (novo pedido) falhou:", errNovo ? errNovo.message : "sem retorno");
+      await p.log("consentimento", "negado_anteriormente", { motivo: "novo pedido falhou" });
+      return { ok: true, decisao: "consentimento_negado" };
+    }
+    await p.log("consentimento", "pedido_de_novo_apos_encerramento");
+    cons = novo;
+    statusCons = "pendente";
   }
   if (statusCons === "pendente") {
     const jaPediu = !!(cons && cons.texto_apresentado);
