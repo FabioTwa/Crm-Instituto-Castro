@@ -68,6 +68,7 @@ import { chamadaInternaValida, headersInternos, tokenDoHeader, usuarioAtivo } fr
 import { iaConfig, icFlag } from "../_shared/flags.ts";
 import { canonicoTelefone, telefoneBrPlausivel } from "../_shared/telefone.ts";
 import { canalDoVendedor, type CanalEnvio, enviarTextoCanal } from "../_shared/whatsapp-envio.ts";
+import { assinarMensagem } from "../_shared/texto.ts";
 import { detectarHandoff } from "../_shared/handoff-regras.ts";
 import { respostaProibida } from "../_shared/pos-validacao.ts";
 import { interpretarConsentimento } from "../_shared/consentimento.ts";
@@ -89,6 +90,9 @@ import {
   TOOL_PROPOR_AGENDAMENTO,
   type ExemploConversa,
 } from "../_shared/ia-prompt.ts";
+
+// Nome em negrito que abre cada resposta da IA no WhatsApp (nunca nome de pessoa).
+const ASSINATURA_IA = "Assistente virtual";
 
 const LOG = "[ic-ia-pre-atendimento]";
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
@@ -238,7 +242,8 @@ class Pipeline {
       console.log(LOG, "MODO SOMBRA (nao enviado):", texto.slice(0, 120));
       return { enviado: false, log_id };
     }
-    const envio = await enviarTextoCanal(this.canal, this.para, texto, LOG);
+    // Assina como a equipe assina: *Assistente virtual* na primeira linha.
+    const envio = await enviarTextoCanal(this.canal, this.para, assinarMensagem(ASSINATURA_IA, texto), LOG);
     if (!envio.ok) {
       const log_id = await this.log(etapa, "erro_envio", {
         modelo: this.modelo,
