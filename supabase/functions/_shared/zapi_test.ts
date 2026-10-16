@@ -1,6 +1,7 @@
 import { assert, assertEquals } from "jsr:@std/assert";
 import {
   corpoTextoZapi,
+  segundosDigitando,
   envelopeZapi,
   interpretarRespostaZapi,
   mensagemZapiParaMeta,
@@ -132,4 +133,12 @@ Deno.test("midia: so https", () => {
   assert(urlMidiaZapiPermitida("https://storage.example/a.ogg"));
   assert(!urlMidiaZapiPermitida("http://storage.example/a.ogg"));
   assert(!urlMidiaZapiPermitida("nada"));
+});
+
+Deno.test("delayTyping vai no corpo so quando pedido e cresce com o texto", () => {
+  assertEquals(corpoTextoZapi("5511999990000", "Oi", 3), { phone: "5511999990000", message: "Oi", delayTyping: 3 });
+  assertEquals(corpoTextoZapi("5511999990000", "Oi", 0), { phone: "5511999990000", message: "Oi" });
+  assertEquals(segundosDigitando("Oi"), 2);
+  assertEquals(segundosDigitando("x".repeat(140)), 7);
+  assertEquals(segundosDigitando("x".repeat(2000)), 9);
 });
