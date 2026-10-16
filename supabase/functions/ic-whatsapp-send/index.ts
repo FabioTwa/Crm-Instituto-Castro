@@ -53,6 +53,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { corsHeaders, erroGenerico, json } from "../_shared/http.ts";
 import { usuarioAtivo } from "../_shared/auth.ts";
+import { assinarMensagem } from "../_shared/texto.ts";
 import { icFlag } from "../_shared/flags.ts";
 import { canonicoTelefone, telefoneBrPlausivel } from "../_shared/telefone.ts";
 import type { ResultadoEnvio } from "../_shared/whatsapp-cloud.ts";
@@ -141,7 +142,8 @@ Deno.serve(async (req: Request) => {
       mensagemGravar = "[Modelo enviado] " + String(canal.provedor === "gupshup" ? template.id : template.name);
     } else {
       tipoEnvio = "texto";
-      envio = await enviarTextoCanal(canal, para, texto, LOG);
+      // Quem responde assina: *Nome* na primeira linha. O CRM guarda so o texto.
+      envio = await enviarTextoCanal(canal, para, assinarMensagem(auth.usuario.name, texto, MAX_TEXTO), LOG);
       mensagemGravar = texto;
     }
 
