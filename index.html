@@ -10589,7 +10589,13 @@ function crmConteudoBalao(m) {
         if (tipo !== 'texto') return '<div class="ic-midia-placeholder">' + icon(icIconeMidia(tipo), 16) + ' ' + escapeHtml(crmPlaceholderConteudo(tipo)) + '</div>';
         texto = crmPlaceholderConteudo(tipo);
     }
-    return '<div class="crm-conv-texto">' + escapeHtml(texto) + '</div>';
+    return '<div class="crm-conv-texto">' + crmNegritoWhatsApp(escapeHtml(texto)) + '</div>';
+}
+
+// [ic] Negrito do WhatsApp (*texto*) aparece em negrito no balão, como no celular.
+// Recebe HTML já escapado; o conteúdo entre asteriscos não pode ter quebra de linha.
+function crmNegritoWhatsApp(html) {
+    return String(html || '').replace(/(^|[\s(])\*([^*\n]+?)\*(?=$|[\s.,!?:;)])/g, '$1<strong>$2</strong>');
 }
 
 // Formata o horario do balao: HH:MM se for de hoje, DD/MM HH:MM se for mais antigo.

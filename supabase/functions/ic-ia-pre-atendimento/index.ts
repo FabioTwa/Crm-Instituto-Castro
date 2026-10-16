@@ -19,7 +19,7 @@
 //   4  contexto         RPC ic_ia_contexto(card, 12)
 //   5  consentimento    LGPD: pede, interpreta SIM/NAO, nega -> handoff + despedida
 //   6  handoff_regras   regex por CODIGO (urgencia, duvida clinica, reclamacao, humano)
-//   7  exemplos         ate 12 ia_exemplos_conversa ativos, filtrados por tag do funil
+//   7  exemplos         ate 20 ia_exemplos_conversa ativos, filtrados por tag do funil
 //   8  claude           Messages API (fetch), tools propor_agendamento / encaminhar_humano
 //   9  pos_validacao    filtro regex CFM na resposta do modelo
 //   10 tools            executa as ferramentas (ic-agendamento 'propor', handoffs)
@@ -77,8 +77,11 @@ import { faseTeste } from "../_shared/ia-teste.ts";
 import { decidirEncerramento, ETAPA_ENCERRAMENTO, minutosEncerramento } from "../_shared/ia-encerramento.ts";
 import { detectarNegociacao, type EventoFunil } from "../_shared/funil-ia.ts";
 import {
+  calendarioDiasUteis,
   FERRAMENTAS,
   montarSystemPrompt,
+  paraWhatsApp,
+  TEXTO_AGENDAMENTO_ANOTADO,
   TEXTO_CONSENTIMENTO_NEGADO,
   TEXTO_AVISO_ESPERA,
   TEXTO_ENCERRAMENTO,
@@ -93,6 +96,9 @@ import {
 
 // Nome em negrito que abre cada resposta da IA no WhatsApp (nunca nome de pessoa).
 const ASSINATURA_IA = "Assistente virtual";
+
+// Exemplos de conversa no prompt (todos os de um funil cabem; ver SQL 35).
+const MAX_EXEMPLOS = 20;
 
 const LOG = "[ic-ia-pre-atendimento]";
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
@@ -617,13 +623,14 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
       .from("ia_exemplos_conversa")
       .select("titulo, contexto, mensagem_lead, resposta_ideal, tags")
       .eq("ativo", true)
+      .order("titulo")
       .limit(40);
     const todos = ((ex as any[]) || []).filter((e) => e && e.mensagem_lead && e.resposta_ideal);
     const funilNorm = String(ctx.funil || "").toLowerCase();
     const casam = funilNorm
       ? todos.filter((e) => Array.isArray(e.tags) && e.tags.some((t: string) => funilNorm.includes(String(t).toLowerCase()) || String(t).toLowerCase().includes(funilNorm)))
       : [];
-    exemplos = (casam.length ? casam : todos).slice(0, 12);
+    exemplos = (casam.length ? casam : todos).slice(0, MAX_EXEMPLOS);
   } catch (e) {
     console.warn(LOG, "ia_exemplos_conversa falhou (segue sem exemplos):", e);
   }
@@ -649,6 +656,7 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
     etapa: ctx.etapa_label,
     exemplos,
     agoraLocal,
+    calendario: calendarioDiasUteis(agoraSp.ano, agoraSp.mes, agoraSp.dia),
   });
   const maxTokens = Math.max(256, Number(cfg.max_tokens || "1024") || 1024);
   const r = await chamarClaude({ apiKey, modelo: p.modelo, maxTokens, system, messages });
@@ -673,7 +681,7 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
   });
 
   // 9) pos_validacao
-  let textoResposta = r.texto;
+  let textoResposta = paraWhatsApp(r.texto);
   const proibido = textoResposta ? respostaProibida(textoResposta) : null;
   if (proibido) {
     await p.log("pos_validacao", "bloqueada_pos_validacao", { modelo: p.modelo, motivo: proibido, detalhe: { resposta: textoResposta } });
@@ -703,7 +711,7 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
       if (resultado.confirmado) await p.handoff("agendamento_confirmado", "agendamento " + resultado.agendamento_id);
       if (!textoResposta) {
         textoResposta = resultado.ok
-          ? "Anotei a sua preferência de horário! A nossa equipe vai confirmar com você por aqui em breve. 😊"
+          ? TEXTO_AGENDAMENTO_ANOTADO
           : TEXTO_HANDOFF_GENERICO;
       }
       marcadores.agendamento_id = resultado.agendamento_id;
