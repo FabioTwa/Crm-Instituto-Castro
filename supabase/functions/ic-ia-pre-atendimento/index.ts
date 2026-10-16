@@ -12,7 +12,7 @@
 //   1  flags            ic_flag('ia_pre_atendimento') e crm_ia_config.ligada='true'
 //   2  humano_assumiu   vendedor respondeu nas ultimas 24 h (e depois do ultimo
 //                       encerramento) -> fim; ia_handoffs pendente -> aviso de
-//                       espera UMA vez por handoff (TEXTO_AVISO_ESPERA), depois fim
+//                       espera UMA vez por handoff (TEXTOS_AVISO_ESPERA), depois fim
 //   3  limites          horario (America/Sao_Paulo; fora do horario: 1 aviso/dia/card),
 //                       max_respostas_por_conversa (atingiu: handoff 'manual'),
 //                       contado desde o ultimo encerramento por inatividade
@@ -68,12 +68,12 @@ import { chamadaInternaValida, headersInternos, tokenDoHeader, usuarioAtivo } fr
 import { iaConfig, icFlag } from "../_shared/flags.ts";
 import { canonicoTelefone, telefoneBrPlausivel } from "../_shared/telefone.ts";
 import { canalDoVendedor, type CanalEnvio, enviarTextoCanal } from "../_shared/whatsapp-envio.ts";
-import { assinarMensagem } from "../_shared/texto.ts";
 import { detectarHandoff } from "../_shared/handoff-regras.ts";
 import { respostaProibida } from "../_shared/pos-validacao.ts";
 import { interpretarConsentimento } from "../_shared/consentimento.ts";
 import { dentroDoHorario, partesNoFuso, TZ_PADRAO } from "../_shared/horario.ts";
 import { faseTeste } from "../_shared/ia-teste.ts";
+import { decidirRajada } from "../_shared/rajada.ts";
 import { decidirEncerramento, ETAPA_ENCERRAMENTO, minutosEncerramento } from "../_shared/ia-encerramento.ts";
 import { detectarNegociacao, type EventoFunil } from "../_shared/funil-ia.ts";
 import {
@@ -81,21 +81,19 @@ import {
   FERRAMENTAS,
   montarSystemPrompt,
   paraWhatsApp,
-  TEXTO_AGENDAMENTO_ANOTADO,
-  TEXTO_CONSENTIMENTO_NEGADO,
-  TEXTO_AVISO_ESPERA,
-  TEXTO_ENCERRAMENTO,
-  TEXTO_HANDOFF_GENERICO,
-  TEXTO_RESPOSTA_BLOQUEADA,
+  sortear,
+  TEXTOS_AGENDAMENTO_ANOTADO,
+  TEXTOS_AVISO_ESPERA,
+  TEXTOS_CONSENTIMENTO_NEGADO,
+  TEXTOS_ENCERRAMENTO,
+  TEXTOS_HANDOFF_GENERICO,
+  TEXTOS_RESPOSTA_BLOQUEADA,
   textoForaDoHorario,
   textoPedidoConsentimento,
   TOOL_ENCAMINHAR_HUMANO,
   TOOL_PROPOR_AGENDAMENTO,
   type ExemploConversa,
 } from "../_shared/ia-prompt.ts";
-
-// Nome em negrito que abre cada resposta da IA no WhatsApp (nunca nome de pessoa).
-const ASSINATURA_IA = "Assistente virtual";
 
 // Exemplos de conversa no prompt (todos os de um funil cabem; ver SQL 35).
 const MAX_EXEMPLOS = 20;
@@ -248,8 +246,9 @@ class Pipeline {
       console.log(LOG, "MODO SOMBRA (nao enviado):", texto.slice(0, 120));
       return { enviado: false, log_id };
     }
-    // Assina como a equipe assina: *Assistente virtual* na primeira linha.
-    const envio = await enviarTextoCanal(this.canal, this.para, assinarMensagem(ASSINATURA_IA, texto), LOG);
+    // Sem assinatura: a IA fala em nome da equipe; o nome so aparece quando um
+    // atendente assume (ic-whatsapp-send). "Digitando..." antes, onde o provedor tem.
+    const envio = await enviarTextoCanal(this.canal, this.para, texto, LOG, { simularDigitacao: true });
     if (!envio.ok) {
       const log_id = await this.log(etapa, "erro_envio", {
         modelo: this.modelo,
@@ -419,6 +418,30 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
     return { ok: true, decisao: "fora_dos_numeros_teste" };
   }
 
+  // Rajada (_shared/rajada.ts): espera a pessoa parar de digitar; so a
+  // invocacao da ultima mensagem responde, lendo todas juntas.
+  if (body.conversa_id) {
+    const inicioEspera = Date.now();
+    for (;;) {
+      const { data: ult, error: errUlt } = await sb
+        .from("crm_conversas")
+        .select("id, criada_em")
+        .eq("cliente_crm_id", body.cliente_crm_id)
+        .eq("direcao", "recebida")
+        .order("criada_em", { ascending: false })
+        .limit(1);
+      if (errUlt) console.warn(LOG, "rajada: leitura falhou (segue):", errUlt.message);
+      const linha = !errUlt && ult && ult.length ? { id: String(ult[0].id), criada_em: String(ult[0].criada_em) } : null;
+      const d = decidirRajada({ gatilhoId: String(body.conversa_id), ultimaDoLead: linha, agoraMs: Date.now(), inicioEsperaMs: inicioEspera });
+      if (d.acao === "absorvida") {
+        await p.log("rajada", "absorvida", { detalhe: { esperou_ms: Date.now() - inicioEspera } });
+        return { ok: true, decisao: "absorvida_na_rajada" };
+      }
+      if (d.acao === "responder") break;
+      await new Promise((r) => setTimeout(r, d.ms));
+    }
+  }
+
   // 2) humano_assumiu
   // O encerramento (por inatividade ou pela equipe, SQL 32) abre conversa nova:
   // o que o vendedor disse antes dele nao cala a IA.
@@ -451,7 +474,7 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
       .gte("criado_em", handoffDesde)
       .limit(1);
     if (!avisos || !avisos.length) {
-      const env = await p.enviar(TEXTO_AVISO_ESPERA, "humano_assumiu", "aviso_espera", { origem: "handoff_pendente" });
+      const env = await p.enviar(sortear(TEXTOS_AVISO_ESPERA), "humano_assumiu", "aviso_espera", { origem: "handoff_pendente" });
       return { ok: true, decisao: env.enviado ? "aviso_espera" : "simulada_envio_desligado" };
     }
     await p.log("humano_assumiu", "humano_no_controle", { motivo: "handoff pendente (aviso de espera ja enviado)" });
@@ -591,10 +614,19 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
     if (resp === "nao") {
       await sb.from("ia_consentimentos").update({ status: "negado", respondido_em: new Date().toISOString() }).eq("id", cons.id);
       await p.handoff("consentimento_negado", "lead nao autorizou atendimento automatizado");
-      await p.enviar(TEXTO_CONSENTIMENTO_NEGADO, "consentimento", "negado_despedida");
+      await p.enviar(sortear(TEXTOS_CONSENTIMENTO_NEGADO), "consentimento", "negado_despedida");
       return { ok: true, decisao: "consentimento_negado" };
     }
     if (resp === "ambiguo") {
+      // "Prefiro falar com alguém" no lugar do sim/não: a mensagem de
+      // autorização oferece isso, então passa para a equipe.
+      const hdCons = detectarHandoff(textoLead);
+      if (hdCons) {
+        await p.handoff(hdCons.motivo, `regra '${hdCons.termo}' na resposta ao consentimento`);
+        await p.log("consentimento", "ambiguo_com_handoff", { motivo: hdCons.termo });
+        await p.enviar(hdCons.resposta_fixa || sortear(TEXTOS_HANDOFF_GENERICO), "envio", "enviada_fixa", { origem: "consentimento", motivo: hdCons.motivo });
+        return { ok: true, decisao: "handoff_" + hdCons.motivo };
+      }
       await p.log("consentimento", "ambiguo");
       return { ok: true, decisao: "consentimento_ambiguo" };
     }
@@ -672,7 +704,7 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
       latencia_ms: r.latencia_ms, dados_enviados_resumo: resumo,
     });
     await p.handoff("erro_ia", "falha na chamada do modelo: " + (r.erro || r.stop_reason));
-    await p.enviar(TEXTO_RESPOSTA_BLOQUEADA, "envio", "enviada_fixa", { origem: "erro_ia" });
+    await p.enviar(sortear(TEXTOS_RESPOSTA_BLOQUEADA), "envio", "enviada_fixa", { origem: "erro_ia" });
     return { ok: true, decisao: "erro_ia" };
   }
   await p.log("claude", "respondeu", {
@@ -686,7 +718,7 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
   if (proibido) {
     await p.log("pos_validacao", "bloqueada_pos_validacao", { modelo: p.modelo, motivo: proibido, detalhe: { resposta: textoResposta } });
     await p.handoff("erro_ia", "resposta bloqueada");
-    await p.enviar(TEXTO_RESPOSTA_BLOQUEADA, "envio", "enviada_fixa", { origem: "pos_validacao", termo: proibido });
+    await p.enviar(sortear(TEXTOS_RESPOSTA_BLOQUEADA), "envio", "enviada_fixa", { origem: "pos_validacao", termo: proibido });
     return { ok: true, decisao: "bloqueada_pos_validacao" };
   }
   await p.log("pos_validacao", textoResposta ? "ok" : "sem_texto");
@@ -701,7 +733,7 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
         : "manual";
       await p.handoff(motivo, "IA: " + String(t.input?.detalhe || motivoBruto));
       await p.log("tools", "encaminhar_humano", { motivo });
-      if (!textoResposta) textoResposta = TEXTO_HANDOFF_GENERICO;
+      if (!textoResposta) textoResposta = sortear(TEXTOS_HANDOFF_GENERICO);
       marcadores.handoff = motivo;
     } else if (t.name === TOOL_PROPOR_AGENDAMENTO) {
       const resultado = await proporAgendamento(body.cliente_crm_id, t.input || {});
@@ -711,8 +743,8 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
       if (resultado.confirmado) await p.handoff("agendamento_confirmado", "agendamento " + resultado.agendamento_id);
       if (!textoResposta) {
         textoResposta = resultado.ok
-          ? TEXTO_AGENDAMENTO_ANOTADO
-          : TEXTO_HANDOFF_GENERICO;
+          ? sortear(TEXTOS_AGENDAMENTO_ANOTADO)
+          : sortear(TEXTOS_HANDOFF_GENERICO);
       }
       marcadores.agendamento_id = resultado.agendamento_id;
     } else {
@@ -831,7 +863,7 @@ async function encerrarInativas(sb: SupabaseClient): Promise<Record<string, unkn
       const res = await canalDoVendedor(sb, String(card.vendedor_id));
       if (res.ok) p.canal = res.canal;
     }
-    await p.enviar(TEXTO_ENCERRAMENTO, ETAPA_ENCERRAMENTO, "encerrada", { minutos }, { encerramento: true });
+    await p.enviar(sortear(TEXTOS_ENCERRAMENTO), ETAPA_ENCERRAMENTO, "encerrada", { minutos }, { encerramento: true });
   }
   if (encerradas) console.log(LOG, "conversas encerradas por inatividade:", encerradas);
   return { ok: true, decisao: "encerramento", encerradas };
@@ -877,7 +909,7 @@ async function proporAgendamento(
 // com o JWT do usuario. Encerra via RPC ic_encerrar_conversa COMO o usuario
 // (o banco confere usuario ativo e card no escopo, SQL 32) e, se a IA estiver
 // atendendo esse numero e o lead tiver escrito nas ultimas 24 h, manda a
-// despedida TEXTO_ENCERRAMENTO pelo numero do vendedor.
+// despedida TEXTOS_ENCERRAMENTO pelo numero do vendedor.
 async function encerrarPelaEquipe(req: Request, sb: SupabaseClient, body: any): Promise<Response> {
   const auth = await usuarioAtivo(req, sb);
   if (!auth.ok) return json({ ok: false, erro: auth.erro }, auth.status);
@@ -934,7 +966,7 @@ async function encerrarPelaEquipe(req: Request, sb: SupabaseClient, body: any): 
     const res = await canalDoVendedor(sb, String((card as any).vendedor_id));
     if (res.ok) p.canal = res.canal;
   }
-  const env = await p.enviar(TEXTO_ENCERRAMENTO, ETAPA_ENCERRAMENTO, "encerrada_pela_equipe_com_mensagem",
+  const env = await p.enviar(sortear(TEXTOS_ENCERRAMENTO), ETAPA_ENCERRAMENTO, "encerrada_pela_equipe_com_mensagem",
     { por: auth.usuario.name || auth.usuario.email }, { encerramento: true });
   return json({ ok: true, encerrada: true, mensagem_enviada: env.enviado, motivo: env.enviado ? null : "envio_falhou_ou_desligado" });
 }

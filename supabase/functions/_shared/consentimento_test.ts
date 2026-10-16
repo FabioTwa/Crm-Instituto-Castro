@@ -36,3 +36,10 @@ Deno.test("'pode' sozinho conta como sim (limitacao documentada)", () => {
 Deno.test("'nao' em frase longa negativa -> nao", () => {
   assertEquals(interpretarConsentimento("não quero atendimento automático, obrigado"), "nao");
 });
+
+Deno.test("resposta a 'Podemos seguir?' conta como autorizacao", () => {
+  assertEquals(interpretarConsentimento("Podemos"), "sim");
+  assertEquals(interpretarConsentimento("pode seguir"), "sim");
+  assertEquals(interpretarConsentimento("pode continuar sim"), "sim");
+  assertEquals(interpretarConsentimento("não podemos"), "nao");
+});

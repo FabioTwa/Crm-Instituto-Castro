@@ -14,7 +14,7 @@
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { enviarTemplate, enviarTexto, type ResultadoEnvio } from "./whatsapp-cloud.ts";
 import { enviarTemplateGupshup, enviarTextoGupshup } from "./gupshup.ts";
-import { enviarTextoZapi } from "./zapi.ts";
+import { enviarTextoZapi, segundosDigitando } from "./zapi.ts";
 import { canonicoTelefone } from "./telefone.ts";
 
 export type Provedor = "meta" | "gupshup" | "zapi";
@@ -94,12 +94,15 @@ export async function enviarTextoCanal(
   para: string,
   texto: string,
   prefixoLog: string,
+  opcoes: { simularDigitacao?: boolean } = {},
 ): Promise<ResultadoEnvio> {
   if (canal.provedor === "gupshup") {
     return await enviarTextoGupshup({ canal, para, texto, prefixoLog });
   }
   if (canal.provedor === "zapi") {
-    return await enviarTextoZapi({ canal, para, texto, prefixoLog });
+    // So a Z-API mostra "digitando..." antes de entregar (delayTyping).
+    const delayTyping = opcoes.simularDigitacao ? segundosDigitando(texto) : undefined;
+    return await enviarTextoZapi({ canal, para, texto, prefixoLog, delayTyping });
   }
   return await enviarTexto({ phoneId: canal.phoneId, token: canal.token, para, texto, prefixoLog });
 }

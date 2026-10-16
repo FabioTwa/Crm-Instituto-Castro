@@ -239,8 +239,21 @@ export function urlEnvioTextoZapi(canal: CanalZapi): string {
   return `${ZAPI_API}/instances/${encodeURIComponent(canal.instancia)}/token/${encodeURIComponent(canal.token)}/send-text`;
 }
 
-export function corpoTextoZapi(para: string, texto: string): { phone: string; message: string } {
-  return { phone: soDigitos(para), message: texto };
+export function corpoTextoZapi(
+  para: string,
+  texto: string,
+  delayTyping?: number,
+): { phone: string; message: string; delayTyping?: number } {
+  const corpo: { phone: string; message: string; delayTyping?: number } = { phone: soDigitos(para), message: texto };
+  if (delayTyping && delayTyping > 0) corpo.delayTyping = delayTyping;
+  return corpo;
+}
+
+// Segundos de "digitando..." antes de a Z-API entregar a mensagem: cresce com o
+// tamanho do texto, como alguem digitando de verdade, entre 2 e 9 segundos.
+export function segundosDigitando(texto: string): number {
+  const s = 1.5 + String(texto || "").length / 28;
+  return Math.min(9, Math.max(2, Math.round(s)));
 }
 
 // Sucesso so com 2xx + messageId.
@@ -265,17 +278,18 @@ export async function enviarTextoZapi(args: {
   para: string;
   texto: string;
   prefixoLog?: string;
+  delayTyping?: number; // segundos de "digitando..." (Z-API segura a entrega)
 }): Promise<ResultadoEnvio> {
   const LOG = args.prefixoLog || "[zapi]";
   const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), 15000);
+  const t = setTimeout(() => ctl.abort(), 15000 + (args.delayTyping || 0) * 1000);
   let resp: Response;
   let data: any = {};
   try {
     resp = await fetch(urlEnvioTextoZapi(args.canal), {
       method: "POST",
       headers: { "Content-Type": "application/json", "Client-Token": args.canal.clientToken },
-      body: JSON.stringify(corpoTextoZapi(args.para, args.texto)),
+      body: JSON.stringify(corpoTextoZapi(args.para, args.texto, args.delayTyping)),
       signal: ctl.signal,
     });
     const txt = await resp.text().catch(() => "");

@@ -124,10 +124,12 @@ export function montarSystemPrompt(args: {
       "\n</exemplos>\n"
     : "";
 
-  return `Você é a assistente virtual de pré-atendimento do ${CLINICA.nome}, uma clínica de aparelho digestivo na ${CLINICA.bairro}. Você conversa pelo WhatsApp com pessoas que acabaram de entrar em contato.
+  return `Você faz o primeiro atendimento do ${CLINICA.nome}, uma clínica de aparelho digestivo na ${CLINICA.bairro}, pelo WhatsApp, falando em nome da equipe comercial com pessoas que acabaram de entrar em contato.
 
 # Identidade
-- Você é uma assistente virtual e diz isso quando perguntada ou quando fizer sentido. NUNCA finja ser humana, médica, enfermeira ou recepcionista. Não invente nome de pessoa para você.
+- Escreva como alguém da equipe comercial escreveria: natural, sem cara de robô. Fale em nome da clínica ("nossa equipe", "aqui no Instituto"). Não diga por conta própria que é assistente virtual, robô, IA ou atendimento automático, e não assine as mensagens.
+- Não invente um nome de pessoa para você, não diga que é médica, enfermeira ou recepcionista e não invente histórias pessoais.
+- Se a pessoa perguntar a sério se está falando com um robô, uma IA ou uma pessoa, NÃO negue: responda com naturalidade, em uma linha, que este primeiro atendimento é automático e que pode passar para alguém da equipe se ela preferir. Se ela quiser, chame ${TOOL_ENCAMINHAR_HUMANO} com motivo "pedido_humano".
 - Você escreve EXATAMENTE como a equipe comercial da clínica escreve no WhatsApp (veja "Padrão de escrita da equipe" e os exemplos). Tom acolhedor, cordial e profissional, português do Brasil, tratando por "você". Não comece as mensagens com o nome da pessoa e não repita o nome a cada mensagem${nome ? ` (o primeiro nome desta pessoa é ${nome}; use no máximo uma vez, se fizer sentido)` : ""}.
 
 # Dados da clínica (pode informar)
@@ -183,6 +185,16 @@ Acolher, entender a necessidade da pessoa em poucas perguntas e conduzir ao agen
 - Quando a pessoa pergunta o valor antes de tudo, primeiro faça a pergunta de qualificação do serviço (no emagrecimento: "Você já fez algum tratamento para emagrecer ou faz acompanhamento nutricional atualmente?"; nunca escreva as palavras medicação, remédio, medicamento ou dose, nem "você tem") e, na resposta seguinte, informe o valor junto com o que a consulta inclui.
 - Objeções: achou caro → "Conseguimos parcelar também este valor, se ficar melhor para você."; mora longe → ofereça a online, dizendo que a presencial é a ideal para pesagem e avaliação mais completa.
 
+# Conversa natural (como uma pessoa conversa no WhatsApp)
+- A pessoa costuma mandar a fala em várias mensagens seguidas ("Oi" / "tudo bem?" / "queria marcar"). Leia todas as mensagens dela desde a sua última resposta como UMA fala e responda tudo numa mensagem só.
+- Primeiro responda de verdade o que ela acabou de dizer (pergunta, pedido, correção, dúvida, desabafo); depois, se fizer sentido, emende a próxima pergunta na mesma mensagem. Ignorar o que ela disse e só repetir a sua pergunta é o pior erro possível.
+- Se ela corrigir algo (dia, horário, serviço, nome), aceite na hora e siga com a correção, sem discutir.
+- Olhe a conversa acima antes de escrever: não cumprimente de novo quem já está conversando com você, não se reapresente e nunca repita uma pergunta com as mesmas palavras que já usou. Se precisar perguntar de novo, pergunte de outro jeito.
+- Não comece duas mensagens seguidas com a mesma palavra ("Perfeito." toda hora soa robótico; varie com "Certo.", "Entendo.", "Ótimo." ou vá direto ao ponto).
+- Nunca diga que já fez algo que não fez ("já agendei", "está confirmado", "já enviei para o médico").
+- Nada de instruções de robô como "responda SIM ou NÃO", "digite 1" ou "escolha uma opção".
+- Nada de exagero: no máximo uma exclamação por mensagem, sem superlativos empilhados e sem diminutivos ("cadastrinho", "perguntinha").
+
 # Agendamento
 - Quando a pessoa quiser agendar, pergunte "Qual o melhor dia e horário para você?".
 - Se ela der uma preferência vaga (um mês, uma semana, só "de manhã" ou "à tarde"), proponha UM dia e horário concretos, no formato "Pode ser no dia 03/07 (sexta-feira) às 09:45?". Use só datas da lista de dias úteis abaixo, hora cheia ou meia hora, dentro do expediente (último horário 18h30 de segunda a quinta e 17h30 na sexta). Se ela pedir outro horário, ajuste e proponha de novo.${args.calendario && args.calendario.length ? `\n- Próximos dias úteis (use exatamente estes dias da semana): ${args.calendario.join(", ")}.` : ""}
@@ -195,43 +207,72 @@ Acolher, entender a necessidade da pessoa em poucas perguntas e conduzir ao agen
 - Você tem duas ferramentas: ${TOOL_PROPOR_AGENDAMENTO} e ${TOOL_ENCAMINHAR_HUMANO}. Use-as sempre que a situação se encaixar; junto com a ferramenta, escreva também a mensagem curta que a pessoa vai ler.
 - Contexto da pessoa no CRM: funil "${args.funil || "não informado"}", etapa "${args.etapa || "não informada"}". Use só para calibrar o tom, não cite para a pessoa.
 ${exemplos}
-As mensagens a seguir são a conversa real. Responda apenas a próxima mensagem da assistente.`;
+As mensagens a seguir são a conversa real. Responda apenas a próxima mensagem da equipe.`;
 }
 
 // ---- Textos fixos (nao passam pela IA) ----
+// Os avisos que se repetem tem varias versoes, sorteadas a cada envio, para a
+// conversa nao soar como mensagem automatica. Todas foram escritas e revisadas
+// (CFM e pos-validacao); a IA nao escreve nenhuma delas.
 
+export function sortear<T>(opcoes: readonly T[], aleatorio: () => number = Math.random): T {
+  const i = Math.floor(aleatorio() * opcoes.length);
+  return opcoes[Math.min(Math.max(i, 0), opcoes.length - 1)];
+}
+
+// Consentimento (LGPD): continua dizendo que o primeiro atendimento e
+// automatico, porque o consentimento so vale informado. Sem "responda SIM".
 export function textoPedidoConsentimento(linkPolitica: string): string {
   const link = linkPolitica ? `\n\nNossa política de privacidade: ${linkPolitica}` : "";
   return (
     `Olá, tudo bem? 😊\n\n` +
-    `Obrigado pelo seu contato com o ${CLINICA.nome}! Sou a assistente virtual da clínica e vou te ajudar com o seu atendimento.\n\n` +
-    `Antes de continuar, preciso da sua autorização para tratar as informações que você compartilhar nesta conversa, inclusive informações de saúde, com a finalidade de agendar a sua consulta.${link}\n\n` +
-    `Você autoriza? Responda *SIM* ou *NÃO*. Se preferir falar direto com a nossa equipe, é só dizer.`
+    `Obrigado pelo seu contato com o ${CLINICA.nome}!\n\n` +
+    `Antes de seguirmos, preciso da sua autorização: este primeiro atendimento é feito de forma automática e, para isso, usamos as informações que você compartilhar por aqui, inclusive de saúde, só para agendar a sua consulta.${link}\n\n` +
+    `Podemos seguir? Se preferir falar direto com alguém da nossa equipe, é só me dizer.`
   );
 }
 
-export const TEXTO_CONSENTIMENTO_NEGADO =
-  "Entendo, sem problemas!\n\nNão vou continuar o atendimento automático. Já avisei a nossa equipe, que vai falar com você por aqui no horário de atendimento.";
+export const TEXTOS_CONSENTIMENTO_NEGADO = [
+  "Entendo, sem problemas.\nJá avisei a nossa equipe, que vai falar com você por aqui no horário de atendimento.",
+  "Tudo bem, sem problemas.\nAlguém da nossa equipe vai continuar o seu atendimento por aqui no horário de atendimento.",
+  "Sem problemas.\nNossa equipe já foi avisada e vai falar com você por aqui no horário de atendimento.",
+] as const;
 
 export function textoForaDoHorario(): string {
   return (
-    `Olá, tudo bem? 😊\n\nObrigado pelo seu contato com o ${CLINICA.nome}! Recebemos a sua mensagem fora do nosso horário de atendimento (${CLINICA.horarios}).\n\n` +
+    `Olá, tudo bem? 😊\n\nObrigado pelo seu contato com o ${CLINICA.nome}! No momento estamos fora do nosso horário de atendimento (${CLINICA.horarios}).\n\n` +
     `Assim que a equipe voltar, respondemos por aqui. Se for uma urgência, procure o pronto-socorro mais próximo ou ligue 192.`
   );
 }
 
-export const TEXTO_RESPOSTA_BLOQUEADA = "Perfeito.\nVou pedir para a nossa equipe te responder com todo o cuidado por aqui.";
+export const TEXTOS_RESPOSTA_BLOQUEADA = [
+  "Certo.\nVou pedir para a nossa equipe te responder sobre isso com todo o cuidado por aqui.",
+  "Entendo.\nPara te responder certinho, vou passar para a nossa equipe, que te retorna por aqui.",
+  "Certo.\nEssa eu vou deixar com a nossa equipe, que te responde por aqui em breve.",
+] as const;
 
-export const TEXTO_HANDOFF_GENERICO =
-  "Perfeito.\nVou encaminhar para a nossa equipe, que vai te responder por aqui em breve.";
+export const TEXTOS_HANDOFF_GENERICO = [
+  "Certo.\nVou passar para a nossa equipe, que vai te responder por aqui em breve.",
+  "Entendo.\nVou chamar alguém da nossa equipe para continuar com você por aqui.",
+  "Combinado.\nJá deixei com a nossa equipe, que te responde por aqui em breve.",
+] as const;
 
 // Lead escreveu de novo com a equipe ja chamada (handoff pendente): 1 vez por handoff.
-export const TEXTO_AVISO_ESPERA =
-  "Nossa equipe já foi avisada e vai te responder por aqui o quanto antes. Fico à disposição! 😊";
+export const TEXTOS_AVISO_ESPERA = [
+  "Nossa equipe já está com a sua mensagem e te responde por aqui o quanto antes.",
+  "Já avisei a nossa equipe, ela te responde por aqui em instantes.",
+  "Sua mensagem já está com a nossa equipe, que te responde por aqui em breve.",
+] as const;
 
 // Resposta quando a IA usou propor_agendamento sem escrever texto.
-export const TEXTO_AGENDAMENTO_ANOTADO =
-  "Perfeito, anotei a sua preferência de dia e horário.\nNossa equipe vai confirmar o agendamento com você por aqui.";
+export const TEXTOS_AGENDAMENTO_ANOTADO = [
+  "Certo, anotei a sua preferência de dia e horário.\nNossa equipe vai confirmar o agendamento com você por aqui.",
+  "Anotado.\nNossa equipe confirma o dia e o horário com você por aqui.",
+  "Combinado, já anotei.\nNossa equipe te confirma o agendamento por aqui.",
+] as const;
 
-export const TEXTO_ENCERRAMENTO =
-  "Como não tivemos mais retorno, vamos encerrar o atendimento por aqui.\n\nQuando quiser retomar, é só nos enviar uma mensagem que damos continuidade. Fico à disposição! 😊";
+export const TEXTOS_ENCERRAMENTO = [
+  "Como não tivemos mais retorno, vamos encerrar o atendimento por aqui.\n\nQuando quiser retomar, é só nos mandar uma mensagem que damos continuidade.",
+  "Vou encerrar o nosso atendimento por aqui, tudo bem?\n\nQuando quiser continuar, é só mandar uma mensagem que seguimos de onde paramos.",
+  "Como você não respondeu mais, vou finalizar o atendimento por enquanto.\n\nSe quiser retomar, é só escrever por aqui.",
+] as const;

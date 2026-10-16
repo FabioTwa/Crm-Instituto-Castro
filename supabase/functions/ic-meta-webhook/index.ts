@@ -1523,7 +1523,7 @@ function dispararIaPreAtendimento(
         return;
       }
       const ctl = new AbortController();
-      const t = setTimeout(() => ctl.abort(), 30000);
+      const t = setTimeout(() => ctl.abort(), 60000); // a IA espera a rajada terminar (ate 12 s) antes de responder
       const resp = await fetch(`${URL_SB}/functions/v1/ic-ia-pre-atendimento`, {
         method: "POST",
         headers: {
