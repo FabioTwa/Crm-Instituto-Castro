@@ -41,6 +41,7 @@ No Supabase, SQL Editor, um arquivo por vez:
 | `33_ic_funil_automatico.sql` | `ic_avancar_etapa(card, evento)`: card anda sozinho no funil conforme a conversa com a IA (em conversa, negociação, agendamento pendente), só para frente; gatilho de agendamento confirmado passa a levar para Visita Confirmada; chave `funil_automatico` em `crm_ia_config` para desligar; aditivo, rollback no rodapé | 18, 17 |
 | `34_ic_atendente_ve_todos.sql` | `ic_card_no_escopo`: todo usuário logado vê todos os cards (Atendente deixa de ver só os próprios); o recorte fica no escopo do perfil (tela Permissões); rollback no rodapé | 15 |
 | `35_ic_ia_exemplos_padrao_equipe.sql` | Reescreve os exemplos IC01-IC16 no padrão de escrita da equipe comercial (parágrafos, negrito do WhatsApp, "Perfeito.", proposta de dia e horário) e inclui IC17-IC19; idempotente, rollback no rodapé | 30 |
+| `36_ic_ia_exemplos_tom_leve.sql` | Deixa os exemplos IC01-IC19 com tom leve de WhatsApp (mensagens curtas, reação + uma pergunta) e inclui IC20-IC22 (com quem estou falando, sobre a clínica, informação que a IA não tem); idempotente, rollback no rodapé | 35 |
 
 Depois do 13, inserir o primeiro usuario (criado antes no Supabase Auth, mesmo
 e-mail) e o numero de WhatsApp: o bloco comentado no fim do 13 mostra como.

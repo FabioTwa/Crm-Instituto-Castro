@@ -69,7 +69,7 @@ import { chamadaInternaValida, headersInternos, tokenDoHeader, usuarioAtivo } fr
 import { iaConfig, icFlag } from "../_shared/flags.ts";
 import { canonicoTelefone, telefoneBrPlausivel } from "../_shared/telefone.ts";
 import { canalDoVendedor, type CanalEnvio, enviarTextoCanal } from "../_shared/whatsapp-envio.ts";
-import { detectarHandoff } from "../_shared/handoff-regras.ts";
+import { detectarHandoff, handoffCalaIA, PREFIXO_HANDOFF_INFORMACAO } from "../_shared/handoff-regras.ts";
 import { respostaProibida } from "../_shared/pos-validacao.ts";
 import { interpretarConsentimento } from "../_shared/consentimento.ts";
 import { dentroDoHorario, partesNoFuso, TZ_PADRAO } from "../_shared/horario.ts";
@@ -97,7 +97,7 @@ import {
 } from "../_shared/ia-prompt.ts";
 
 // Exemplos de conversa no prompt (todos os de um funil cabem; ver SQL 35).
-const MAX_EXEMPLOS = 20;
+const MAX_EXEMPLOS = 25;
 
 const LOG = "[ic-ia-pre-atendimento]";
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
@@ -200,34 +200,26 @@ class Pipeline {
     }
   }
 
-  // Quando foi aberto o handoff pendente mais antigo do card (ou null).
+  // Quando foi aberto o handoff pendente mais antigo que cala a IA (ou null).
+  // Pedido de informacao (handoffCalaIA = false) nao conta: a IA segue.
   async handoffPendenteDesde(): Promise<string | null> {
     const { data, error } = await this.sb
       .from("ia_handoffs")
-      .select("criado_em")
+      .select("criado_em, motivo, detalhe")
       .eq("cliente_crm_id", this.body.cliente_crm_id)
       .is("atendido_em", null)
       .order("criado_em", { ascending: true })
-      .limit(1);
+      .limit(20);
     if (error) {
       console.warn(LOG, "ia_handoffs consulta falhou:", error.message);
       return null;
     }
-    return data && data.length ? String(data[0].criado_em) : null;
+    const cala = (data || []).find((h: any) => handoffCalaIA({ motivo: String(h.motivo), detalhe: h.detalhe }));
+    return cala ? String((cala as any).criado_em) : null;
   }
 
   async temHandoffPendente(): Promise<boolean> {
-    const { data, error } = await this.sb
-      .from("ia_handoffs")
-      .select("id")
-      .eq("cliente_crm_id", this.body.cliente_crm_id)
-      .is("atendido_em", null)
-      .limit(1);
-    if (error) {
-      console.warn(LOG, "ia_handoffs consulta falhou:", error.message);
-      return false;
-    }
-    return !!(data && data.length);
+    return !!(await this.handoffPendenteDesde());
   }
 
   // Envia (ou simula) uma resposta da IA. Grava crm_conversas so com wamid.
@@ -443,6 +435,21 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
     }
   }
 
+  // Envio (antes do humano_assumiu, que pode mandar o aviso de espera):
+  // flag + canal (provedor, numero e credencial) do vendedor do card.
+  // Sem isso = modo sombra.
+  p.envioLigado = !fase.sombra && await icFlag(sb, "envio_whatsapp_cloud_api");
+  const vendedorId = String((card as any).vendedor_id || body.vendedor_id || "");
+  let motivoSemCanal = "card_sem_vendedor";
+  if (vendedorId) {
+    const res = await canalDoVendedor(sb, vendedorId);
+    if (res.ok) p.canal = res.canal;
+    else motivoSemCanal = res.erroBanco ? "erro_banco" : res.motivo;
+  }
+  if (!p.envioLigado || !p.canal) {
+    console.log(LOG, "modo sombra:", { config_sombra: fase.sombra, flag: p.envioLigado, provedor: p.canal?.provedor ?? null, motivo: p.canal ? null : motivoSemCanal });
+  }
+
   // 2) humano_assumiu
   // O encerramento (por inatividade ou pela equipe, SQL 32) abre conversa nova:
   // o que o vendedor disse antes dele nao cala a IA.
@@ -482,20 +489,6 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
     return { ok: true, decisao: "humano_no_controle" };
   }
   await p.log("humano_assumiu", "ia_pode_responder");
-
-  // Envio: flag + canal (provedor, numero e credencial) do vendedor do card.
-  // Sem isso = modo sombra.
-  p.envioLigado = !fase.sombra && await icFlag(sb, "envio_whatsapp_cloud_api");
-  const vendedorId = String((card as any).vendedor_id || body.vendedor_id || "");
-  let motivoSemCanal = "card_sem_vendedor";
-  if (vendedorId) {
-    const res = await canalDoVendedor(sb, vendedorId);
-    if (res.ok) p.canal = res.canal;
-    else motivoSemCanal = res.erroBanco ? "erro_banco" : res.motivo;
-  }
-  if (!p.envioLigado || !p.canal) {
-    console.log(LOG, "modo sombra:", { config_sombra: fase.sombra, flag: p.envioLigado, provedor: p.canal?.provedor ?? null, motivo: p.canal ? null : motivoSemCanal });
-  }
 
   // 3) limites
   const agora = new Date();
@@ -734,7 +727,9 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
       const motivo: MotivoHandoffDb = (["duvida_clinica", "urgencia", "reclamacao", "pedido_humano"] as string[]).includes(motivoBruto)
         ? (motivoBruto as MotivoHandoffDb)
         : "manual";
-      await p.handoff(motivo, "IA: " + String(t.input?.detalhe || motivoBruto));
+      // "outro" = informacao que a IA nao tem: avisa a equipe e segue conversando.
+      const prefixo = motivo === "manual" ? PREFIXO_HANDOFF_INFORMACAO : "IA: ";
+      await p.handoff(motivo, prefixo + String(t.input?.detalhe || motivoBruto));
       await p.log("tools", "encaminhar_humano", { motivo });
       if (!textoResposta) textoResposta = sortear(TEXTOS_HANDOFF_GENERICO);
       marcadores.handoff = motivo;

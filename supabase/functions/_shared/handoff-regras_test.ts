@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { detectarHandoff } from "./handoff-regras.ts";
+import { detectarHandoff, handoffCalaIA, PREFIXO_HANDOFF_INFORMACAO } from "./handoff-regras.ts";
 
 Deno.test("urgencia com acento e caixa alta", () => {
   assertEquals(detectarHandoff("Estou com DOR FORTE e FALTA DE AR")?.motivo, "urgencia");
@@ -38,4 +38,11 @@ Deno.test("mensagem neutra nao dispara nada", () => {
 
 Deno.test("botao nao e bot (fronteira de palavra)", () => {
   assertEquals(detectarHandoff("cliquei no botão errado"), null);
+});
+
+Deno.test("handoffCalaIA: so o pedido de informacao deixa a IA seguir", () => {
+  assertEquals(handoffCalaIA({ motivo: "manual", detalhe: PREFIXO_HANDOFF_INFORMACAO + "instagram" }), false);
+  assertEquals(handoffCalaIA({ motivo: "manual", detalhe: "limite de respostas da IA" }), true);
+  assertEquals(handoffCalaIA({ motivo: "pedido_humano", detalhe: PREFIXO_HANDOFF_INFORMACAO + "x" }), true);
+  assertEquals(handoffCalaIA({ motivo: "duvida_clinica", detalhe: null }), true);
 });
