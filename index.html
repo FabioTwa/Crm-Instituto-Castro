@@ -9015,7 +9015,6 @@ function crmAplicarEscopoQuery(q, opts) {
     opts = opts || {};
     var isAdmin = crmUserPerfil === 'Admin';
     var isSDR = crmUserPerfil === 'SDR';
-    var ui = window._crmUserInfo;
     if (isAdmin) {
         var filtroEl = document.getElementById('crm-filtro-vendedor-pro');
         var fv = filtroEl ? filtroEl.value : (window._icRespInicial || ''); // [ic] idem
@@ -9023,11 +9022,9 @@ function crmAplicarEscopoQuery(q, opts) {
     } else if (isSDR) {
         if (crmUserVendedoresIds && crmUserVendedoresIds.length > 0) q = q.in('vendedor_id', crmUserVendedoresIds);
         else if (crmUserVendedorId) q = q.eq('vendedor_id', crmUserVendedorId);
-    } else {
-        var perfilNorm = String((ui && (ui.perfil_nome || ui.perfil)) || '').toLowerCase().trim();
-        var ehAdminOuTrafego = (ui && ui.is_admin === true) || perfilNorm === 'admin' || perfilNorm === 'tr\u00e1fego' || perfilNorm === 'trafego';
-        if (ui && !ehAdminOuTrafego) q = q.eq('vendedor_id', ui.id);
     }
+    // [ic] Atendente ve todos os cards (34_ic_atendente_ve_todos.sql): na clinica
+    // os atendentes respondem por todos os atendimentos. Recorte, so pelo escopo do perfil.
     if (crmCurrentPipelineId && !opts.semFunil) q = q.eq('funil_id', crmCurrentPipelineId);
     try {
         var escopo = (typeof obterFiltrosEscopo === 'function') ? obterFiltrosEscopo('view-crm') : {};
@@ -10165,7 +10162,6 @@ window._crmRealtimeDesligando = false;
 function crmLinhaPassaVendedor(row) {
     var isAdmin = crmUserPerfil === 'Admin';
     var isSDR = crmUserPerfil === 'SDR';
-    var ui = window._crmUserInfo;
     if (isAdmin) {
         var fEl = document.getElementById('crm-filtro-vendedor-pro');
         var fv = fEl ? fEl.value : '';
@@ -10176,11 +10172,8 @@ function crmLinhaPassaVendedor(row) {
         } else if (crmUserVendedorId) {
             if (String(row.vendedor_id) !== String(crmUserVendedorId)) return false;
         }
-    } else {
-        var perfilNorm = String((ui && (ui.perfil_nome || ui.perfil)) || '').toLowerCase().trim();
-        var ehAdminOuTrafego = (ui && ui.is_admin === true) || perfilNorm === 'admin' || perfilNorm === 'tr\u00e1fego' || perfilNorm === 'trafego';
-        if (ui && !ehAdminOuTrafego && String(row.vendedor_id) !== String(ui.id)) return false;
     }
+    // [ic] Atendente ve todos os cards (34); mesma regra do crmAplicarEscopoQuery.
     try {
         var escopo = (typeof obterFiltrosEscopo === 'function') ? obterFiltrosEscopo('view-crm') : {};
         if (escopo.vendedores_ids && escopo.vendedores_ids.length > 0 && escopo.vendedores_ids.indexOf(String(row.vendedor_id)) < 0) return false;
@@ -15717,10 +15710,7 @@ async function _loadLeadsImpl(container, filtrosPreservados) {
         }
     }
     var leadsIsSDR = leadsUserPerfil === 'SDR';
-    var leadsIsVendedor = leadsUserPerfil === 'Vendedor';
-
-    // Vendedor: forcar filtro para o proprio id (nao pode mudar)
-    if (leadsIsVendedor && leadsUserId) filtroVendedor = String(leadsUserId);
+    // [ic] Atendente ve todos os leads (34) e escolhe o atendente no filtro, como os demais.
     // SDR com um unico vendedor responsavel: pre-seleciona ele na primeira carga
     if (leadsIsSDR && leadsVendedoresRespIds && leadsVendedoresRespIds.length === 1 && filtroVendedor === '' && !document.getElementById('leads-filtro-vendedor')) {
         filtroVendedor = leadsVendedoresRespIds[0];
@@ -15813,7 +15803,7 @@ async function _loadLeadsImpl(container, filtrosPreservados) {
     html += '<select class="fin-filtro-mes" id="leads-filtro-funil" aria-label="Funil" onchange="loadLeads()"><option value="">Todos os funis</option></select>';
     html += '<select class="fin-filtro-mes" id="leads-filtro-fonte" aria-label="Fonte" onchange="loadLeads()"><option value="">Todas as fontes</option></select>';
     html += '<select class="fin-filtro-mes" id="leads-filtro-status" aria-label="Etapa" onchange="loadLeads()"><option value="">Todas as etapas</option></select>';
-    if (!leadsIsVendedor) {
+    {
         html += '<select class="fin-filtro-mes" id="leads-filtro-vendedor" aria-label="Atendente" onchange="loadLeads()"><option value="">Todos os atendentes</option></select>';
     }
     html += '</div></div>';
@@ -16436,14 +16426,10 @@ async function loadAcoesDia() {
 
 async function _loadAcoesDiaImpl(container) {
     var ehAdmin = window._perfilAtualCache && window._perfilAtualCache.is_admin;
-    var meuId = null;
-    if (currentUser && currentUser.email) {
-        var rMe = await supabaseClient.from('users').select('id').eq('email', currentUser.email).maybeSingle();
-        if (rMe.data) meuId = String(rMe.data.id);
-    }
     var filtro = window._acoesVendedor;
-    if (filtro === undefined) filtro = ehAdmin ? '' : (meuId || '');
-    var alvo = filtro || (ehAdmin ? null : meuId);
+    // [ic] Atendente ve a fila de todos (34): sem filtro, todos os atendentes.
+    if (filtro === undefined) filtro = '';
+    var alvo = filtro || null;
 
     var r = await supabaseClient.rpc('crm_acoes_dia', { p_vendedor: alvo, p_limite: 100 });
     if (r.error) throw r.error;
