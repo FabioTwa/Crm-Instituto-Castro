@@ -7,7 +7,8 @@
 -- simples e proposta de dia e horario concretos ("Pode ser no dia 22/10
 -- (quinta-feira) às 11:00?"). Inclui IC17-IC19.
 --
--- Continua valendo: sem nome de medicamento (CFM 2.336/2023), sem pedir
+-- Continua valendo: sem citar medicação nem "você tem" (a pos-validacao
+-- bloqueia; CFM 2.336/2023), sem pedir
 -- documentos (LGPD) e sem "confirmado" (quem confirma e a equipe).
 -- Sem dado de paciente: os textos foram montados a partir do padrao dos prints.
 --
@@ -30,14 +31,14 @@ Fico à disposição para esclarecer todas as suas dúvidas.'),
 
 Que bom receber o seu interesse em nossa *Assessoria em Emagrecimento*!
 
-Nosso tratamento é realizado de forma personalizada, com acompanhamento médico especializado em emagrecimento, suporte nutricional e, quando indicado pelo médico, uso de medicação para potencializar os resultados de forma segura.
+Nosso tratamento é realizado de forma personalizada, com acompanhamento médico especializado em emagrecimento, suporte nutricional e, quando indicado pelo médico, os recursos mais adequados para potencializar os resultados de forma segura.
 
 O primeiro passo é agendar uma consulta com o nosso especialista. Nessa avaliação, o médico irá conhecer seu histórico, entender seus objetivos e elaborar o plano de tratamento mais adequado para você.
 
 Qual o melhor dia e horário para agendarmos a sua consulta?'),
 
   ('IC03 lead ja usa medicacao e pergunta valor',
-   'A IA já tinha perguntado se a pessoa usa medicação ou faz acompanhamento nutricional. Lead disse que sim e já tinha perguntado o valor.',
+   'A IA já tinha perguntado se a pessoa já faz algum tratamento para emagrecer ou acompanhamento nutricional. Lead disse que sim e já tinha perguntado o valor.',
 'Perfeito.
 
 O ideal é que você passe por uma consulta com um de nossos médicos especialistas, para que ele possa avaliar todo o seu histórico, o tratamento que você já faz e definir os próximos passos de forma personalizada e segura para o seu caso.
@@ -60,7 +61,7 @@ Mas conseguimos realizar a consulta online também, caso deseje desta forma.'),
   ('IC06 metro mais proximo', null,
 'Bresser-Mooca (Linha 3-Vermelha) e Vila Prudente (Linha 2-Verde).
 
-Você tem duas opções: descer na Bresser-Mooca e pegar um ônibus até aqui, que leva cerca de 10 minutos, ou descer na Vila Prudente e pegar um ônibus até aqui, que também leva cerca de 10 minutos.'),
+São duas opções: descer na Bresser-Mooca e pegar um ônibus até aqui, que leva cerca de 10 minutos, ou descer na Vila Prudente e pegar um ônibus até aqui, que também leva cerca de 10 minutos.'),
 
   ('IC07 lead pergunta como agendar e da preferencia vaga',
    'Lead quer agendar e só disse o mês. A IA propõe um dia útil e um horário concretos da lista de dias úteis.',
@@ -139,7 +140,7 @@ from (values
   ('IC17 pergunta o valor antes de tudo',
    'Lead da assessoria em emagrecimento recebeu a apresentação e respondeu só perguntando o valor.',
    'Valor?',
-'Você já fez uso alguma vez da medicação ou faz acompanhamento nutricional atualmente?',
+'Você já fez algum tratamento para emagrecer ou faz acompanhamento nutricional atualmente?',
    array['emagrecimento']),
 
   ('IC18 valor da consulta com o cirurgiao',
