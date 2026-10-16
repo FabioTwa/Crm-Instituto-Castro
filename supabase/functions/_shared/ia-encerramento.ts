@@ -50,3 +50,17 @@ export function decidirEncerramento(a: {
   if (!a.dentroDoHorario || parado >= 24 * 3600 * 1000) return "sem_mensagem";
   return "enviar";
 }
+
+// Conversa nova depois do encerramento: a IA so enxerga as mensagens trocadas
+// DEPOIS do ultimo encerramento (o assunto anterior nao volta).
+export function mensagensDaConversaAtual<T extends { criada_em: string }>(
+  mensagens: readonly T[],
+  ultimoEncerramentoEm: string | null,
+): T[] {
+  const inicio = ultimoEncerramentoEm ? Date.parse(ultimoEncerramentoEm) : NaN;
+  if (!Number.isFinite(inicio)) return [...mensagens];
+  return mensagens.filter((m) => {
+    const t = Date.parse(m.criada_em);
+    return Number.isFinite(t) && t > inicio;
+  });
+}

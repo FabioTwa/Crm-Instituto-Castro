@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { decidirEncerramento, minutosEncerramento } from "./ia-encerramento.ts";
+import { decidirEncerramento, mensagensDaConversaAtual, minutosEncerramento } from "./ia-encerramento.ts";
 
 const agora = new Date("2026-10-15T17:00:00Z");
 const ha = (min: number) => new Date(agora.getTime() - min * 60000).toISOString();
@@ -40,4 +40,15 @@ Deno.test("fora do horario ou depois de 24 h encerra sem mensagem", () => {
 
 Deno.test("desligado (0) nunca encerra", () => {
   assertEquals(decidirEncerramento({ ...base, minutos: 0, ultima: { autor: "ia", criada_em: ha(600) } }), null);
+});
+
+Deno.test("mensagensDaConversaAtual: descarta o que veio antes do encerramento", () => {
+  const msgs = [
+    { autor: "lead", criada_em: "2026-10-16T17:00:00Z" },
+    { autor: "ia", criada_em: "2026-10-16T17:01:00Z" },
+    { autor: "lead", criada_em: "2026-10-16T18:15:00Z" },
+  ];
+  assertEquals(mensagensDaConversaAtual(msgs, "2026-10-16T17:50:00Z").map((m) => m.criada_em), ["2026-10-16T18:15:00Z"]);
+  assertEquals(mensagensDaConversaAtual(msgs, null).length, 3);
+  assertEquals(mensagensDaConversaAtual(msgs, "lixo").length, 3);
 });
