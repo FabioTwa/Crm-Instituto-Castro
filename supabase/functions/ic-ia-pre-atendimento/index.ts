@@ -16,7 +16,8 @@
 //   3  limites          horario (America/Sao_Paulo; fora do horario: 1 aviso/dia/card),
 //                       max_respostas_por_conversa (atingiu: handoff 'manual'),
 //                       contado desde o ultimo encerramento por inatividade
-//   4  contexto         RPC ic_ia_contexto(card, 12)
+//   4  contexto         RPC ic_ia_contexto(card, 12), so mensagens depois do
+//                       ultimo encerramento
 //   5  consentimento    LGPD: pede, interpreta SIM/NAO, nega -> handoff + despedida
 //   6  handoff_regras   regex por CODIGO (urgencia, duvida clinica, reclamacao, humano)
 //   7  exemplos         ate 20 ia_exemplos_conversa ativos, filtrados por tag do funil
@@ -74,7 +75,7 @@ import { interpretarConsentimento } from "../_shared/consentimento.ts";
 import { dentroDoHorario, partesNoFuso, TZ_PADRAO } from "../_shared/horario.ts";
 import { faseTeste } from "../_shared/ia-teste.ts";
 import { decidirRajada } from "../_shared/rajada.ts";
-import { decidirEncerramento, ETAPA_ENCERRAMENTO, minutosEncerramento } from "../_shared/ia-encerramento.ts";
+import { decidirEncerramento, ETAPA_ENCERRAMENTO, mensagensDaConversaAtual, minutosEncerramento } from "../_shared/ia-encerramento.ts";
 import { detectarNegociacao, type EventoFunil } from "../_shared/funil-ia.ts";
 import {
   calendarioDiasUteis,
@@ -545,6 +546,8 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
   }
   const ctx = ctxRaw as Contexto;
   ctx.mensagens = Array.isArray(ctx.mensagens) ? ctx.mensagens : [];
+  // Conversa encerrada nao volta: a IA so ve o que veio depois do encerramento.
+  ctx.mensagens = mensagensDaConversaAtual(ctx.mensagens, inicioConversa);
   const ultimaDoLead = [...ctx.mensagens].reverse().find((m) => String(m.autor || "").toLowerCase() === "lead");
   const textoLead = String((ultimaDoLead && ultimaDoLead.exibicao) || "").trim();
   await p.log("contexto", "ok", {
