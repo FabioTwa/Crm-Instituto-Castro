@@ -1,7 +1,7 @@
 # IC CRM: banco de dados
 
 O banco do IC CRM e Postgres no Supabase, montado por 34 arquivos SQL numerados
-(`00_` a `34_`) que se aplicam em ordem. Os arquivos `00_` a `12_` sao o esquema
+(`00_` a `35_`) que se aplicam em ordem. Os arquivos `00_` a `12_` sao o esquema
 base: extensoes, tabelas, funcoes do nucleo do CRM, views, gatilhos, politicas
 iniciais, realtime, o varredor do webhook e parametros de exemplo. Os arquivos
 `13_` a `31_` sao as camadas do IC CRM (perfis, dinheiro, RLS, jobs, IA, agenda,
@@ -40,6 +40,7 @@ No Supabase, SQL Editor, um arquivo por vez:
 | `32_ic_ia_encerrar_conversa.sql` | `ic_encerrar_conversa(card)`: botão "Encerrar conversa" do painel do lead; fecha handoffs pendentes e marca o encerramento para a IA voltar a atender na próxima mensagem; aditivo, rollback no rodapé | 17, 15 |
 | `33_ic_funil_automatico.sql` | `ic_avancar_etapa(card, evento)`: card anda sozinho no funil conforme a conversa com a IA (em conversa, negociação, agendamento pendente), só para frente; gatilho de agendamento confirmado passa a levar para Visita Confirmada; chave `funil_automatico` em `crm_ia_config` para desligar; aditivo, rollback no rodapé | 18, 17 |
 | `34_ic_atendente_ve_todos.sql` | `ic_card_no_escopo`: todo usuário logado vê todos os cards (Atendente deixa de ver só os próprios); o recorte fica no escopo do perfil (tela Permissões); rollback no rodapé | 15 |
+| `35_ic_ia_exemplos_padrao_equipe.sql` | Reescreve os exemplos IC01-IC16 no padrão de escrita da equipe comercial (parágrafos, negrito do WhatsApp, "Perfeito.", proposta de dia e horário) e inclui IC17-IC19; idempotente, rollback no rodapé | 30 |
 
 Depois do 13, inserir o primeiro usuario (criado antes no Supabase Auth, mesmo
 e-mail) e o numero de WhatsApp: o bloco comentado no fim do 13 mostra como.

@@ -74,12 +74,42 @@ export const FERRAMENTAS = [
 
 export type ExemploConversa = { titulo?: string | null; contexto?: string | null; mensagem_lead: string; resposta_ideal: string };
 
+// Proximos dias uteis (seg-sex) a partir de uma data local, para a IA propor
+// "dia 03/07 (sexta-feira)" sem errar o dia da semana. Nao conhece feriados:
+// a equipe confirma o horario de qualquer forma.
+const NOMES_DIA = ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"];
+export function calendarioDiasUteis(ano: number, mes: number, dia: number, qtd = 15): string[] {
+  const out: string[] = [];
+  const d = new Date(Date.UTC(ano, mes - 1, dia));
+  for (let i = 0; out.length < qtd && i < qtd * 2 + 7; i++) {
+    d.setUTCDate(d.getUTCDate() + (i === 0 ? 0 : 1));
+    const ds = d.getUTCDay();
+    if (ds === 0 || ds === 6) continue;
+    out.push(`${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")} (${NOMES_DIA[ds]})`);
+  }
+  return out;
+}
+
+// Converte o markdown que o modelo as vezes escreve para a formatacao do
+// WhatsApp: **negrito** -> *negrito*, titulos "# " viram linha simples e
+// "- " no inicio da linha vira "• ". Mais de uma linha em branco vira uma so.
+export function paraWhatsApp(texto: string): string {
+  return String(texto || "")
+    .replace(/\*\*([^*\n]+)\*\*/g, "*$1*")
+    .replace(/__([^_\n]+)__/g, "*$1*")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^[-*]\s+/gm, "• ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export function montarSystemPrompt(args: {
   primeiroNome: string | null;
   funil: string | null;
   etapa: string | null;
   exemplos: ExemploConversa[];
   agoraLocal: string; // ex.: "segunda-feira, 05/10/2026 09:12"
+  calendario?: string[]; // ex.: ["19/10 (segunda-feira)", ...]
 }): string {
   const nome = (args.primeiroNome || "").trim();
   const exemplos = args.exemplos.length
@@ -98,7 +128,7 @@ export function montarSystemPrompt(args: {
 
 # Identidade
 - Você é uma assistente virtual e diz isso quando perguntada ou quando fizer sentido. NUNCA finja ser humana, médica, enfermeira ou recepcionista. Não invente nome de pessoa para você.
-- Tom: acolhedor, humanizado, aspiracional e focado em segurança. Trate a pessoa pelo primeiro nome quando souber${nome ? ` (o primeiro nome desta pessoa é ${nome})` : ""}. Português do Brasil, informal-respeitoso ("você"), sem gírias pesadas, sem excesso de emojis (no máximo um por mensagem, opcional).
+- Você escreve EXATAMENTE como a equipe comercial da clínica escreve no WhatsApp (veja "Padrão de escrita da equipe" e os exemplos). Tom acolhedor, cordial e profissional, português do Brasil, tratando por "você". Não comece as mensagens com o nome da pessoa e não repita o nome a cada mensagem${nome ? ` (o primeiro nome desta pessoa é ${nome}; use no máximo uma vez, se fizer sentido)` : ""}.
 
 # Dados da clínica (pode informar)
 - Nome: ${CLINICA.nome}. Diretor técnico: ${CLINICA.diretor}.
@@ -136,11 +166,27 @@ Acolher, entender a necessidade da pessoa em poucas perguntas e conduzir ao agen
 # Dados pessoais (LGPD)
 - Só peça: primeiro nome (se não souber), dia e horário de preferência, formato (presencial ou online) e se é convênio (qual e plano) ou particular. Nome completo, documentos e e-mail para o cadastro a equipe pede depois, na confirmação. NÃO peça CPF, data de nascimento, endereço, e-mail, peso, altura, exames, histórico de saúde, nome de remédios nem fotos. Se a pessoa enviar algo assim espontaneamente, não comente o conteúdo e siga para o agendamento ou encaminhe à equipe.
 
-# Forma das respostas
-- Curtas: até 3 frases e no máximo 1 pergunta por mensagem. Sem listas longas, sem markdown, sem títulos. É WhatsApp.
-- Uma pergunta por vez. Não repita o que a pessoa acabou de dizer.
-- Agende sempre por horário exato, nunca só por período. Se a pessoa disser só "de manhã" ou "à tarde", ofereça 2 ou 3 horários dentro do expediente (ex.: "Pode ser às 14h, 15h ou 16h?"). Use hora cheia ou meia hora; o último horário é 18h30 de segunda a quinta e 17h30 na sexta.
-- Quando a pessoa já disse dia e horário, use ${TOOL_PROPOR_AGENDAMENTO} imediatamente e diga que a equipe vai confirmar o horário por aqui.
+# Padrão de escrita da equipe (siga à risca)
+- Formatação do WhatsApp: negrito com UM asterisco de cada lado (*Assessoria em Emagrecimento*). Nunca use ** nem títulos com #. Parágrafos separados por uma linha em branco.
+- Negrito só no nome do serviço ou especialidade, em valores e nos itens-chave de uma explicação (ex.: *Honorários médicos:*, *Parte hospitalar:*, *nutricionista, cardiologista, endocrinologista e psicóloga*).
+- Apresentação de um serviço (quando a pessoa chega pelo anúncio ou diz o que procura): mensagem em parágrafos curtos, nesta ordem:
+  1) "Olá, tudo bem? 😊" (só se ainda não cumprimentou nesta conversa);
+  2) "Que bom receber o seu interesse em nossa *<serviço>*!" ou "Ficamos muito felizes em receber seu interesse na *<serviço>*.";
+  3) um parágrafo explicando como funciona o serviço;
+  4) "O primeiro passo é ..." explicando a consulta de entrada;
+  5) uma única pergunta para seguir (ex.: "Qual o melhor dia e horário para agendarmos a sua consulta?" ou "Para facilitar seu agendamento, poderia me informar qual opção você prefere: *Consulta Presencial* ou *Consulta Online*?").
+- Explicações (bariátrica pelo convênio, etapas até a cirurgia, valor com o que a consulta inclui): também em parágrafos, com tópicos "• *Item:* texto" quando forem 2 ou mais itens, e terminando com uma frase de apoio ("Nossa equipe cuidará de todo o processo..." / "Fico à disposição para agendarmos o melhor dia e horário para você.").
+- Respostas a perguntas simples são curtas e diretas, em uma ou duas linhas, sem cumprimento: "Realizamos online, sim.", "Bresser-Mooca (Linha 3-Vermelha) e Vila Prudente (Linha 2-Verde).", "R$ 500,00, com direito a retorno dentro de 30 dias.".
+- Confirmações começam com "Perfeito." ou "Entendo." e seguem na linha de baixo (ex.: "Perfeito.\nQual o melhor dia e horário para você?").
+- No máximo um emoji por mensagem: 😊 no cumprimento. Nada de gírias, exclamações em excesso ou frases de robô ("Como posso ajudar?" repetido).
+- No máximo uma pergunta por mensagem, sempre no final. Não repita o que a pessoa acabou de dizer.
+- Quando a pessoa pergunta o valor antes de tudo, primeiro faça a pergunta de qualificação do serviço (no emagrecimento: "Você já fez algum tratamento para emagrecer ou faz acompanhamento nutricional atualmente?"; nunca escreva as palavras medicação, remédio, medicamento ou dose, nem "você tem") e, na resposta seguinte, informe o valor junto com o que a consulta inclui.
+- Objeções: achou caro → "Conseguimos parcelar também este valor, se ficar melhor para você."; mora longe → ofereça a online, dizendo que a presencial é a ideal para pesagem e avaliação mais completa.
+
+# Agendamento
+- Quando a pessoa quiser agendar, pergunte "Qual o melhor dia e horário para você?".
+- Se ela der uma preferência vaga (um mês, uma semana, só "de manhã" ou "à tarde"), proponha UM dia e horário concretos, no formato "Pode ser no dia 03/07 (sexta-feira) às 09:45?". Use só datas da lista de dias úteis abaixo, hora cheia ou meia hora, dentro do expediente (último horário 18h30 de segunda a quinta e 17h30 na sexta). Se ela pedir outro horário, ajuste e proponha de novo.${args.calendario && args.calendario.length ? `\n- Próximos dias úteis (use exatamente estes dias da semana): ${args.calendario.join(", ")}.` : ""}
+- Quando a pessoa disser ou aceitar dia e horário, use ${TOOL_PROPOR_AGENDAMENTO} imediatamente e responda no padrão "Perfeito, anotei o dia 03/07 às 11:00." seguido de uma linha dizendo que a nossa equipe vai confirmar o agendamento por aqui. Nunca escreva "confirmado".
 - Se a pessoa quiser mudar o dia ou o horário de uma proposta que você já fez, chame ${TOOL_PROPOR_AGENDAMENTO} de novo com o novo dia e horário (a proposta anterior é trocada); não encaminhe para a equipe por isso.
 - Se não souber algo, diga que vai pedir para a equipe responder (e chame ${TOOL_ENCAMINHAR_HUMANO} com motivo "outro").
 - Nunca invente informações sobre a clínica além das listadas acima.
@@ -155,31 +201,37 @@ As mensagens a seguir são a conversa real. Responda apenas a próxima mensagem 
 // ---- Textos fixos (nao passam pela IA) ----
 
 export function textoPedidoConsentimento(linkPolitica: string): string {
-  const link = linkPolitica ? ` Nossa política de privacidade: ${linkPolitica}` : "";
+  const link = linkPolitica ? `\n\nNossa política de privacidade: ${linkPolitica}` : "";
   return (
-    `Olá! Aqui é a assistente virtual do ${CLINICA.nome}. 😊 Para te atender por aqui de forma automática, eu preciso da sua autorização para tratar as informações que você compartilhar nesta conversa, inclusive informações de saúde, com a finalidade de agendar a sua avaliação.${link}\n\n` +
-    `Você autoriza? Responda SIM ou NÃO. Se preferir falar direto com a nossa equipe, é só dizer.`
+    `Olá, tudo bem? 😊\n\n` +
+    `Obrigado pelo seu contato com o ${CLINICA.nome}! Sou a assistente virtual da clínica e vou te ajudar com o seu atendimento.\n\n` +
+    `Antes de continuar, preciso da sua autorização para tratar as informações que você compartilhar nesta conversa, inclusive informações de saúde, com a finalidade de agendar a sua consulta.${link}\n\n` +
+    `Você autoriza? Responda *SIM* ou *NÃO*. Se preferir falar direto com a nossa equipe, é só dizer.`
   );
 }
 
 export const TEXTO_CONSENTIMENTO_NEGADO =
-  "Tudo bem, sem problemas! Não vou continuar o atendimento automático. Já avisei a nossa equipe, que vai falar com você por aqui no horário de atendimento. Obrigada! 😊";
+  "Entendo, sem problemas!\n\nNão vou continuar o atendimento automático. Já avisei a nossa equipe, que vai falar com você por aqui no horário de atendimento.";
 
 export function textoForaDoHorario(): string {
   return (
-    `Olá! Aqui é a assistente virtual do ${CLINICA.nome}. Recebemos a sua mensagem fora do nosso horário de atendimento (${CLINICA.horarios}). ` +
+    `Olá, tudo bem? 😊\n\nObrigado pelo seu contato com o ${CLINICA.nome}! Recebemos a sua mensagem fora do nosso horário de atendimento (${CLINICA.horarios}).\n\n` +
     `Assim que a equipe voltar, respondemos por aqui. Se for uma urgência, procure o pronto-socorro mais próximo ou ligue 192.`
   );
 }
 
-export const TEXTO_RESPOSTA_BLOQUEADA = "Vou pedir para a nossa equipe te responder com cuidado, tudo bem?";
+export const TEXTO_RESPOSTA_BLOQUEADA = "Perfeito.\nVou pedir para a nossa equipe te responder com todo o cuidado por aqui.";
 
 export const TEXTO_HANDOFF_GENERICO =
-  "Vou encaminhar para a nossa equipe, que responde por aqui em breve. Obrigada pela paciência!";
+  "Perfeito.\nVou encaminhar para a nossa equipe, que vai te responder por aqui em breve.";
 
 // Lead escreveu de novo com a equipe ja chamada (handoff pendente): 1 vez por handoff.
 export const TEXTO_AVISO_ESPERA =
-  "Nossa equipe já foi avisada e vai te responder por aqui o quanto antes. Obrigada pela paciência! 😊";
+  "Nossa equipe já foi avisada e vai te responder por aqui o quanto antes. Fico à disposição! 😊";
+
+// Resposta quando a IA usou propor_agendamento sem escrever texto.
+export const TEXTO_AGENDAMENTO_ANOTADO =
+  "Perfeito, anotei a sua preferência de dia e horário.\nNossa equipe vai confirmar o agendamento com você por aqui.";
 
 export const TEXTO_ENCERRAMENTO =
-  "Como não tivemos mais retorno, vou encerrar o atendimento por aqui. Quando quiser continuar, é só mandar uma mensagem que eu te ajudo! 😊";
+  "Como não tivemos mais retorno, vamos encerrar o atendimento por aqui.\n\nQuando quiser retomar, é só nos enviar uma mensagem que damos continuidade. Fico à disposição! 😊";
