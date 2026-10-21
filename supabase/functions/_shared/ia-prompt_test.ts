@@ -69,4 +69,5 @@ Deno.test("objetivo: conduz para conhecer o Instituto e so marca consulta se a p
   assertStringIncludes(sp, "Visita para conhecer o Instituto");
   assertStringIncludes(sp, "TODA resposta termina com uma pergunta");
   assertStringIncludes(sp, "Não diga que a visita é gratuita");
+  assertStringIncludes(sp, 'Nunca chame a visita de "sem compromisso"');
 });
