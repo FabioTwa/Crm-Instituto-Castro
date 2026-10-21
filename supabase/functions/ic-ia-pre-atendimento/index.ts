@@ -78,6 +78,7 @@ import { chamadaInternaValida, headersInternos, tokenDoHeader, usuarioAtivo } fr
 import { iaConfig, icFlag } from "../_shared/flags.ts";
 import { canonicoTelefone, telefoneBrPlausivel } from "../_shared/telefone.ts";
 import { canalDoVendedor, type CanalEnvio, enviarTextoCanal } from "../_shared/whatsapp-envio.ts";
+import { segundosDigitando } from "../_shared/zapi.ts";
 import { detectarHandoff, handoffCalaIA, PREFIXO_HANDOFF_INFORMACAO } from "../_shared/handoff-regras.ts";
 import { respostaProibida } from "../_shared/pos-validacao.ts";
 import { interpretarConsentimento } from "../_shared/consentimento.ts";
@@ -127,8 +128,9 @@ type Body = { cliente_crm_id: string; conversa_id: string | null; vendedor_id: s
 // Um envio por vez (SQL 37, atender_um_por_vez): as conversas andam em paralelo
 // (cada uma esperando os 30 s da rajada e a IA pensar), mas so UMA resposta e
 // enviada de cada vez no numero. A trava ia_vez so e segurada durante o envio;
-// o prazo e a rede de seguranca se a funcao cair no meio.
-const PRAZO_VEZ_S = 30;
+// o prazo e a rede de seguranca se a funcao cair no meio (cobre 3 partes com
+// "digitando..." de ate 9 s cada, as pausas e o aviso a equipe).
+const PRAZO_VEZ_S = 90;
 // Entre as mensagens de uma resposta em partes: garante a ordem na Z-API, que
 // mostra o "digitando..." de cada uma antes de entregar.
 const PAUSA_ENTRE_MENSAGENS_MS = 1500;
@@ -179,9 +181,13 @@ class Pipeline {
       await this.log("fila", "sem_vez", { detalhe: { esperou_ms: vez.esperou_ms } });
       return false;
     }
-    if (vez.erro) await this.log("fila", "sem_trava", { motivo: vez.erro }); // SQL 37 ausente: envia assim mesmo
-    else if (vez.esperou_ms > 1000) await this.log("fila", "vez", { detalhe: { esperou_ms: vez.esperou_ms } });
-    this.vezDono = vez.ok ? dono : null;
+    if (!vez.ok) {
+      // Sem conseguir ler a trava nao envia: nunca arrisca responder duas pessoas juntas.
+      await this.log("fila", "sem_trava", { motivo: vez.erro });
+      return false;
+    }
+    if (vez.esperou_ms > 1000) await this.log("fila", "vez", { detalhe: { esperou_ms: vez.esperou_ms } });
+    this.vezDono = dono;
     this.vezProfundidade++;
     try {
       await envio();
@@ -329,7 +335,14 @@ class Pipeline {
     const canal = this.canal;
     const caixa: { r: Awaited<ReturnType<typeof enviarTextoCanal>> | null } = { r: null };
     const teveVez = await this.comVez(async () => {
+      const t0 = Date.now();
       caixa.r = await enviarTextoCanal(canal, this.para, texto, LOG, { simularDigitacao: true });
+      // A Z-API pode devolver antes de terminar o "digitando...": segura a vez
+      // ate a mensagem sair, para nunca haver duas conversas digitando juntas.
+      if (caixa.r?.ok && canal?.provedor === "zapi") {
+        const falta = segundosDigitando(texto) * 1000 + 1000 - (Date.now() - t0);
+        if (falta > 0) await new Promise((r) => setTimeout(r, falta));
+      }
     });
     const envio = caixa.r;
     if (!teveVez || !envio) {
@@ -538,16 +551,16 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
 }
 
 // Espera a vez de ENVIAR (trava ia_vez), consultando a cada 0,5 s ate
-// fila_espera_segundos (padrao 35). erro = a trava nao existe ou o banco falhou.
+// fila_espera_segundos (padrao 35). erro = ultima falha ao ler a trava (nesse caso nao envia).
 async function esperarVez(sb: SupabaseClient, dono: string, cfg: Record<string, string>): Promise<{ ok: boolean; erro: string | null; esperou_ms: number }> {
   const inicio = Date.now();
   const n = Number(cfg.fila_espera_segundos || "35");
   const limiteMs = (Number.isFinite(n) ? Math.min(60, Math.max(5, n)) : 35) * 1000;
   for (;;) {
     const { data, error } = await sb.rpc("ic_ia_pegar_vez", { p_dono: dono, p_segundos: PRAZO_VEZ_S });
-    if (error) return { ok: false, erro: error.message, esperou_ms: Date.now() - inicio };
-    if (data === true) return { ok: true, erro: null, esperou_ms: Date.now() - inicio };
-    if (Date.now() - inicio >= limiteMs) return { ok: false, erro: null, esperou_ms: Date.now() - inicio };
+    if (!error && data === true) return { ok: true, erro: null, esperou_ms: Date.now() - inicio };
+    // Erro passageiro ao ler a trava: tenta de novo ate o prazo.
+    if (Date.now() - inicio >= limiteMs) return { ok: false, erro: error ? error.message : null, esperou_ms: Date.now() - inicio };
     await new Promise((r) => setTimeout(r, 500));
   }
 }

@@ -87,7 +87,7 @@ informa valores, reserva o horário sem conflito na agenda e avisa pelo WhatsApp
 quem confirma com o lead (`aviso_agendamento_whatsapp`). Faz **um envio por
 vez** no número (`atender_um_por_vez`, trava `ia_vez`): as conversas andam juntas
 (espera e geração da resposta), mas só uma resposta sai por vez; quem não pega a
-vez em `fila_espera_segundos` vai para a equipe. Não há limite de mensagens por
+vez em `fila_espera_segundos` vai para a equipe. A vez fica presa até o "digitando…" terminar e, se a trava não puder ser lida, nada é enviado. Não há limite de mensagens por
 lead por dia (decisão de 21/10/2026). Manda cada parágrafo da resposta como uma mensagem separada, com "digitando…".
 A conversa nunca é encerrada por inatividade e, por decisão de 21/10/2026, lead
 que para de responder não recebe retomada (`followups_minutos` vazio).
