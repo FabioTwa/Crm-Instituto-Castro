@@ -45,4 +45,5 @@ Deno.test("handoffCalaIA: so o pedido de informacao deixa a IA seguir", () => {
   assertEquals(handoffCalaIA({ motivo: "manual", detalhe: "limite de respostas da IA" }), true);
   assertEquals(handoffCalaIA({ motivo: "pedido_humano", detalhe: PREFIXO_HANDOFF_INFORMACAO + "x" }), true);
   assertEquals(handoffCalaIA({ motivo: "duvida_clinica", detalhe: null }), true);
+  assertEquals(handoffCalaIA({ motivo: "agendamento_confirmado", detalhe: null }), false);
 });

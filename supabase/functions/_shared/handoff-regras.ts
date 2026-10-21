@@ -82,10 +82,12 @@ export function detectarHandoff(textoOriginal: string): Handoff | null {
 
 // Handoff aberto pela IA so porque ela nao sabia uma informacao (motivo "outro"
 // da ferramenta, gravado como 'manual' com este prefixo no detalhe): a equipe
-// foi avisada, mas a IA segue a conversa. Os demais handoffs pendentes calam a
-// IA ate a equipe atender.
+// foi avisada, mas a IA segue a conversa. Agendamento feito pela IA tambem nao
+// cala: atendimento 100% IA (decisao de 21/10/2026), ela segue respondendo o
+// lead depois de agendar. Os demais handoffs pendentes calam a IA ate a equipe atender.
 export const PREFIXO_HANDOFF_INFORMACAO = "IA (informação): ";
 
 export function handoffCalaIA(h: { motivo: string; detalhe?: string | null }): boolean {
+  if (h.motivo === "agendamento_confirmado") return false;
   return !(h.motivo === "manual" && String(h.detalhe || "").startsWith(PREFIXO_HANDOFF_INFORMACAO));
 }
