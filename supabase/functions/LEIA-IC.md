@@ -84,8 +84,12 @@ lead **até o agendamento**: responde a qualquer hora (`atender_fora_do_horario`
 espera 30 s sem mensagem nova antes de responder (`rajada_silencio_segundos`,
 teto `rajada_teto_segundos`), lê as últimas 30 mensagens (`contexto_mensagens`),
 informa valores, reserva o horário sem conflito na agenda e avisa pelo WhatsApp
-quem confirma com o lead (`aviso_agendamento_whatsapp`). A conversa nunca é
-encerrada: quando o lead para de responder, a IA retoma (`followups_minutos`).
+quem confirma com o lead (`aviso_agendamento_whatsapp`). Atende **um lead por
+vez** (`atender_um_por_vez`, trava `ia_vez`: quem não pega a vez em
+`fila_espera_segundos` volta para a fila, até 6 vezes, depois vai para a equipe)
+e manda cada parágrafo da resposta como uma mensagem separada, com "digitando…".
+A conversa nunca é encerrada por inatividade e, por decisão de 21/10/2026, lead
+que para de responder não recebe retomada (`followups_minutos` vazio).
 Se perguntarem a sério se é robô, ela confirma; não conta história de saúde
 própria (CFM 2.336/2023).
 
@@ -139,12 +143,12 @@ Outras chaves de `crm_ia_config`: `horario_inicio` ('08:00'), `horario_fim`
 e as do SQL 37 (Julie): `persona_nome`, `persona_ficha`, `rajada_silencio_segundos`,
 `rajada_teto_segundos`, `atender_fora_do_horario`, `contexto_mensagens`,
 `followups_minutos`, `followup_horario`, `aviso_agendamento_whatsapp`,
-`agenda_vagas_por_horario`.
+`agenda_vagas_por_horario`, `atender_um_por_vez`, `fila_espera_segundos`.
 
-### Retomadas (follow-up), SQL 37
+### Retomadas (follow-up), SQL 37 — desligadas
 
-`followups_minutos` ('120,1440,4320' = 2 h, 1 dia e 3 dias desde que a conversa
-parou; vazio desliga e volta o encerramento abaixo) e `followup_horario`
+`followups_minutos` (vazio = desligado, o padrão; '120,1440,4320' = 2 h, 1 dia e
+3 dias desde que a conversa parou) e `followup_horario`
 ('08:00-20:00', nunca domingo). O varredor chama `{acao:'encerrar_inativas'}`
 1x por minuto; com retomadas ligadas, a função procura cards em que a IA falou
 por último, sem handoff pendente e com consentimento concedido, e manda no
@@ -156,7 +160,7 @@ e `ia_decisoes_log` `followup/followup_enviado`. Lead ou vendedor falou por
 
 ### Encerramento por inatividade
 
-Só vale com `followups_minutos` vazio. `encerrar_apos_minutos` (padrão '60' sem linha na tabela; '0' desliga; 5 a 1440).
+Só vale com `followups_minutos` vazio (desde o SQL 37 fica em '0': nunca encerra). `encerrar_apos_minutos` (padrão '60' sem linha na tabela; '0' desliga; 5 a 1440).
 Quando a IA foi a última a falar e o lead não responde nesse prazo, a conversa é
 encerrada: dentro do horário de atendimento (e da janela de 24 h do WhatsApp)
 sai a despedida fixa `TEXTO_ENCERRAMENTO` (`payload_raw.encerramento=true`);

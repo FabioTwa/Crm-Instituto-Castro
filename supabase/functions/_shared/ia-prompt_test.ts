@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { calendarioDiasUteis, montarSystemPrompt, paraWhatsApp } from "./ia-prompt.ts";
+import { calendarioDiasUteis, montarSystemPrompt, paraWhatsApp, partesDaResposta } from "./ia-prompt.ts";
 
 Deno.test("paraWhatsApp troca markdown pela formatacao do WhatsApp", () => {
   assertEquals(paraWhatsApp("Nossa **Assessoria em Emagrecimento**!"), "Nossa *Assessoria em Emagrecimento*!");
@@ -53,4 +53,12 @@ Deno.test("persona: Julie por padrao, nome e ficha da config, sem negar ser IA",
   assert(padrao.includes("não conta história de saúde sua"));
   const outra = montarSystemPrompt({ ...base, persona: { nome: "Ana", ficha: "Gosta de música." } });
   assert(outra.includes("Você é a Ana. Gosta de música."));
+});
+
+Deno.test("partesDaResposta: um paragrafo por mensagem, lista junto, no maximo 3", () => {
+  assertEquals(partesDaResposta("Oi!"), ["Oi!"]);
+  assertEquals(partesDaResposta("Que bom!\n\nQual dia fica melhor?"), ["Que bom!", "Qual dia fica melhor?"]);
+  assertEquals(partesDaResposta("Funciona assim:\n\n• A\n• B\n\nQuer agendar?"), ["Funciona assim:\n\n• A\n• B", "Quer agendar?"]);
+  assertEquals(partesDaResposta("a\n\nb\n\nc\n\nd"), ["a", "b", "c\n\nd"]);
+  assertEquals(partesDaResposta("  \n\n "), []);
 });

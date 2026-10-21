@@ -93,6 +93,7 @@ import {
   FERRAMENTAS,
   montarSystemPrompt,
   paraWhatsApp,
+  partesDaResposta,
   sortear,
   TEXTOS_AGENDAMENTO_ANOTADO,
   TEXTOS_AVISO_ESPERA,
@@ -121,7 +122,15 @@ function limiteContexto(cfg: Record<string, string>): number {
   return Number.isFinite(n) ? Math.min(60, Math.max(5, n)) : 30;
 }
 
-type Body = { cliente_crm_id: string; conversa_id: string | null; vendedor_id: string | null; funil_id: string | null };
+type Body = { cliente_crm_id: string; conversa_id: string | null; vendedor_id: string | null; funil_id: string | null; tentativa_fila?: number };
+
+// Fila de um cliente por vez (SQL 37): prazo da trava (solta antes, no fim do
+// atendimento) e quantas vezes um lead volta para a fila antes de ir para a equipe.
+const PRAZO_VEZ_S = 90;
+// Entre as mensagens de uma resposta em partes: garante a ordem na Z-API, que
+// mostra o "digitando..." de cada uma antes de entregar.
+const PAUSA_ENTRE_MENSAGENS_MS = 1500;
+const MAX_TENTATIVAS_FILA = 6;
 
 type Contexto = {
   primeiro_nome: string | null;
@@ -236,6 +245,27 @@ class Pipeline {
 
   async temHandoffPendente(): Promise<boolean> {
     return !!(await this.handoffPendenteDesde());
+  }
+
+  // Resposta da IA em varias mensagens, como uma pessoa manda (partesDaResposta):
+  // cada uma com "digitando..." do tamanho dela. Marcadores so na primeira.
+  async enviarEmPartes(
+    texto: string,
+    etapa: string,
+    decisaoOk: string,
+    extra: Record<string, unknown> = {},
+    marcadores: Record<string, unknown> = {},
+  ): Promise<{ enviado: boolean; log_id: string | null }> {
+    const partes = partesDaResposta(texto);
+    if (partes.length <= 1) return await this.enviar(texto, etapa, decisaoOk, extra, marcadores);
+    let primeiro: { enviado: boolean; log_id: string | null } | null = null;
+    for (let i = 0; i < partes.length; i++) {
+      if (i > 0 && this.envioLigado && this.canal) await new Promise((r) => setTimeout(r, PAUSA_ENTRE_MENSAGENS_MS));
+      const r = await this.enviar(partes[i], etapa, decisaoOk, { ...extra, parte: i + 1, de: partes.length }, i === 0 ? marcadores : {});
+      if (!primeiro) primeiro = r;
+      if (!r.enviado && this.envioLigado && this.canal) break; // falhou: nao manda o resto fora de ordem
+    }
+    return primeiro || { enviado: false, log_id: null };
   }
 
   // Envia (ou simula) uma resposta da IA. Grava crm_conversas so com wamid.
@@ -455,6 +485,71 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
     }
   }
 
+  // Um cliente por vez (crm_ia_config.atender_um_por_vez, padrao true):
+  // como uma pessoa so, a IA so conversa com um lead de cada vez no numero.
+  // A vez e uma trava no banco (SQL 37, ic_ia_pegar_vez) com prazo, solta no fim.
+  if (String(cfg.atender_um_por_vez ?? "true").toLowerCase() === "false") {
+    return await rodarNaVez(sb, body, p, cfg, card, fase);
+  }
+  const dono = crypto.randomUUID();
+  const vez = await esperarVez(sb, dono, cfg);
+  if (!vez.ok) {
+    if (vez.erro) {
+      // Trava indisponivel (SQL 37 nao aplicado, erro de banco): nao segura o lead.
+      await p.log("fila", "sem_trava", { motivo: vez.erro });
+      return await rodarNaVez(sb, body, p, cfg, card, fase);
+    }
+    const tentativa = Number(body.tentativa_fila || 0) + 1;
+    if (tentativa > MAX_TENTATIVAS_FILA) {
+      await p.handoff("manual", "IA ocupada com outros atendimentos por muito tempo");
+      await p.log("fila", "desistiu", { detalhe: { tentativa } });
+      return { ok: true, decisao: "fila_desistiu" };
+    }
+    await p.log("fila", "reenfileirada", { detalhe: { tentativa, esperou_ms: vez.esperou_ms } });
+    redisparar({ ...body, tentativa_fila: tentativa });
+    return { ok: true, decisao: "fila_reenfileirada" };
+  }
+  await p.log("fila", "vez", { detalhe: { esperou_ms: vez.esperou_ms } });
+  try {
+    return await rodarNaVez(sb, body, p, cfg, card, fase);
+  } finally {
+    const { error } = await sb.rpc("ic_ia_soltar_vez", { p_dono: dono });
+    if (error) console.warn(LOG, "soltar a vez falhou (expira sozinha):", error.message);
+  }
+}
+
+// Espera a vez de atender (trava ia_vez), consultando a cada 1,5 s ate
+// fila_espera_segundos (padrao 35). erro = a trava nao existe ou o banco falhou.
+async function esperarVez(sb: SupabaseClient, dono: string, cfg: Record<string, string>): Promise<{ ok: boolean; erro: string | null; esperou_ms: number }> {
+  const inicio = Date.now();
+  const n = Number(cfg.fila_espera_segundos || "35");
+  const limiteMs = (Number.isFinite(n) ? Math.min(60, Math.max(5, n)) : 35) * 1000;
+  for (;;) {
+    const { data, error } = await sb.rpc("ic_ia_pegar_vez", { p_dono: dono, p_segundos: PRAZO_VEZ_S });
+    if (error) return { ok: false, erro: error.message, esperou_ms: Date.now() - inicio };
+    if (data === true) return { ok: true, erro: null, esperou_ms: Date.now() - inicio };
+    if (Date.now() - inicio >= limiteMs) return { ok: false, erro: null, esperou_ms: Date.now() - inicio };
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+}
+
+// Chama esta mesma funcao de novo (segundo plano) para o lead que nao pegou a
+// vez: a invocacao nova pula a rajada (o lead ja parou) e volta para a fila.
+function redisparar(body: Body): void {
+  const URL_SB = Deno.env.get("SUPABASE_URL") || "";
+  const trabalho = fetch(`${URL_SB}/functions/v1/ic-ia-pre-atendimento`, {
+    method: "POST",
+    headers: headersInternos(),
+    body: JSON.stringify(body),
+  }).then((r) => r.body?.cancel()).catch((e) => console.warn(LOG, "reenfileirar falhou:", e instanceof Error ? e.message : e));
+  const espera = (globalThis as any).EdgeRuntime?.waitUntil;
+  if (typeof espera === "function") espera.call((globalThis as any).EdgeRuntime, trabalho);
+}
+
+// Resto do pipeline, ja com a vez de atender.
+async function rodarNaVez(
+  sb: SupabaseClient, body: Body, p: Pipeline, cfg: Record<string, string>, card: any, fase: ReturnType<typeof faseTeste>,
+): Promise<Record<string, unknown>> {
   // Envio (antes do humano_assumiu, que pode mandar o aviso de espera):
   // flag + canal (provedor, numero e credencial) do vendedor do card.
   // Sem isso = modo sombra.
@@ -793,7 +888,7 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
   }
 
   // 11) envio
-  const env = await p.enviar(textoResposta, "envio", "enviada", { tools: r.tools.map((t) => t.name) }, marcadores);
+  const env = await p.enviarEmPartes(textoResposta, "envio", "enviada", { tools: r.tools.map((t) => t.name) }, marcadores);
 
   // 12) funil: o card anda sozinho, so para frente (SQL 33). Desliga com
   // crm_ia_config.funil_automatico = 'false' (o card volta a so mudar na mao).
@@ -1216,6 +1311,7 @@ Deno.serve(async (req: Request) => {
       conversa_id: body.conversa_id ? String(body.conversa_id) : null,
       vendedor_id: body.vendedor_id ? String(body.vendedor_id) : null,
       funil_id: body.funil_id ? String(body.funil_id) : null,
+      tentativa_fila: Number(body.tentativa_fila || 0) || 0,
     });
     console.log(LOG, "card", clienteId, "->", resultado.decisao || resultado.erro, `(${Date.now() - inicio} ms)`);
     return json({ ...resultado, duracao_ms: Date.now() - inicio });

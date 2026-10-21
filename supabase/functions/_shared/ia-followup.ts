@@ -1,11 +1,11 @@
-// Follow-up: a conversa com a IA nunca e encerrada. Quando o lead para de
-// responder, a IA retoma o assunto algumas vezes, com espacos cada vez maiores
-// (crm_ia_config):
+// Follow-up (opcional): quando o lead para de responder, a IA retoma o assunto
+// algumas vezes, com espacos cada vez maiores (crm_ia_config):
 //
 //   followups_minutos  minutos desde que a conversa parou (ultima mensagem da IA
 //                      que nao e follow-up) para cada retomada, separados por
-//                      virgula. Padrao "120,1440,4320" (2 h, 1 dia, 3 dias).
-//                      Vazio ou "0" desliga (volta o encerramento por inatividade).
+//                      virgula, ex.: "120,1440,4320" (2 h, 1 dia, 3 dias).
+//                      DESLIGADO por padrao (decisao de 21/10/2026: lead que nao
+//                      responde nao recebe retorno). Vazio, "0" ou sem a chave = desligado.
 //   followup_horario   janela local em que pode mandar, "HH:MM-HH:MM".
 //                      Padrao "08:00-20:00". Nunca aos domingos.
 //
@@ -14,12 +14,12 @@
 
 import { partesNoFuso, TZ_PADRAO } from "./horario.ts";
 
-export const FOLLOWUPS_PADRAO = [120, 1440, 4320];
+export const FOLLOWUPS_SUGERIDOS = [120, 1440, 4320];
 export const FOLLOWUP_HORARIO_PADRAO = "08:00-20:00";
 
 export function followupsDoConfig(cfg: Record<string, string>): number[] {
   const bruto = cfg.followups_minutos;
-  if (bruto == null) return [...FOLLOWUPS_PADRAO];
+  if (bruto == null) return [];
   const lista = String(bruto)
     .split(",")
     .map((s) => Math.floor(Number(s.trim())))

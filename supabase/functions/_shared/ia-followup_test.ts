@@ -7,8 +7,9 @@ const antes = (min: number) => new Date(agora.getTime() - min * 60000).toISOStri
 const ia = (min: number, extra: Record<string, unknown> = {}) => ({ autor: "ia", criada_em: antes(min), payload_raw: { ia: true, ...extra } });
 const lead = (min: number) => ({ autor: "lead", criada_em: antes(min), payload_raw: null });
 
-Deno.test("followupsDoConfig: padrao, lista, limites e desligado", () => {
-  assertEquals(followupsDoConfig({}), [120, 1440, 4320]);
+Deno.test("followupsDoConfig: desligado por padrao, lista e limites", () => {
+  assertEquals(followupsDoConfig({}), []);
+  assertEquals(followupsDoConfig({ followups_minutos: "120,1440,4320" }), [120, 1440, 4320]);
   assertEquals(followupsDoConfig({ followups_minutos: "1440, 60" }), [60, 1440]);
   assertEquals(followupsDoConfig({ followups_minutos: "5,99999" }), [30, 20160]);
   assertEquals(followupsDoConfig({ followups_minutos: "" }), []);
