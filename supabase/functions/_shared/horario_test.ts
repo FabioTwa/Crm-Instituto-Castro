@@ -1,5 +1,5 @@
 import { assertEquals, assert } from "jsr:@std/assert";
-import { dataLocal, dentroDoHorario, interpretarDia, interpretarHorario, partesNoFuso, proximoSlot } from "./horario.ts";
+import { dataLocal, dentroDoHorario, interpretarDia, interpretarHorario, partesNoFuso, proximoSlot, proximosSlotsLivres, slotOcupado } from "./horario.ts";
 
 const TZ = "America/Sao_Paulo";
 
@@ -100,4 +100,21 @@ Deno.test("interpretarHorario: formatos comuns", () => {
   assertEquals(interpretarHorario(""), null);
   assertEquals(interpretarHorario("25:00"), null);
   assertEquals(interpretarHorario("tarde"), null);
+});
+
+Deno.test("slotOcupado e proximosSlotsLivres pulam horarios tomados", () => {
+  // quinta 22/10/2026 10:00 em Sao Paulo = 13:00Z
+  const agora = new Date("2026-10-22T11:00:00.000Z"); // 08:00 local
+  const ocupados = [{ inicio: "2026-10-22T13:00:00.000Z", fim: "2026-10-22T13:30:00.000Z" }];
+  const pedido = new Date("2026-10-22T13:00:00.000Z");
+  assertEquals(slotOcupado(pedido, new Date(pedido.getTime() + 30 * 60000), ocupados), true);
+  assertEquals(slotOcupado(new Date("2026-10-22T13:30:00.000Z"), new Date("2026-10-22T14:00:00.000Z"), ocupados), false);
+  const livres = proximosSlotsLivres(pedido, ocupados, 2, agora).map((d) => d.toISOString());
+  assertEquals(livres, ["2026-10-22T13:30:00.000Z", "2026-10-22T14:00:00.000Z"]);
+});
+
+Deno.test("proximosSlotsLivres: depois do ultimo horario da sexta vai para segunda", () => {
+  const agora = new Date("2026-10-23T20:00:00.000Z"); // sexta 17:00 local
+  const livres = proximosSlotsLivres(agora, [], 1, agora).map((d) => d.toISOString());
+  assertEquals(livres, ["2026-10-26T11:00:00.000Z"]); // segunda 08:00
 });

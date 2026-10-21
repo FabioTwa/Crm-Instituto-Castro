@@ -79,16 +79,26 @@ Porta interna (header `x-ic-internal`): `{acao:'propor', cliente_crm_id, dia_pre
 
 Cada etapa grava uma linha em `ia_decisoes_log` (`etapa_pipeline`, `decisao`).
 
+Desde o SQL 37 a IA é a **Julie** (`persona_nome`, `persona_ficha`) e atende o
+lead **até o agendamento**: responde a qualquer hora (`atender_fora_do_horario`),
+espera 30 s sem mensagem nova antes de responder (`rajada_silencio_segundos`,
+teto `rajada_teto_segundos`), lê as últimas 30 mensagens (`contexto_mensagens`),
+informa valores, reserva o horário sem conflito na agenda e avisa pelo WhatsApp
+quem confirma com o lead (`aviso_agendamento_whatsapp`). A conversa nunca é
+encerrada: quando o lead para de responder, a IA retoma (`followups_minutos`).
+Se perguntarem a sério se é robô, ela confirma; não conta história de saúde
+própria (CFM 2.336/2023).
+
 1. **flags** — `ic_flag('ia_pre_atendimento')` e `crm_ia_config.ligada='true'`; senão `desligada`.
 2. **humano_assumiu** — há `crm_conversas` `direcao='enviada'`, `autor='vendedor'` nas últimas 24 h (equipe respondeu pelo celular: é a linha que o eco grava) → `humano_no_controle`. Com `ia_handoffs` `atendido_em is null` (equipe já chamada) e o lead escrevendo de novo: manda `TEXTO_AVISO_ESPERA` ("nossa equipe já foi avisada…") **uma vez por handoff** (`decisao='aviso_espera'`), depois fica em silêncio até a equipe atender ou clicar em Encerrar conversa.
-3. **limites** — fora de `horario_inicio`/`horario_fim` (America/Sao_Paulo; sexta até 18h; fim de semana sempre fora): manda o aviso fixo no máximo 1 vez por dia por card (`payload_raw.fora_horario=true`) e encerra. `max_respostas_por_conversa` atingido (conta `ia_decisoes_log.resposta_enviada=true` do card desde o último encerramento por inatividade) → handoff `manual` "limite de respostas da IA".
-4. **contexto** — RPC `ic_ia_contexto(card, 12)`.
+3. **limites** — só com `atender_fora_do_horario='false'`: fora de `horario_inicio`/`horario_fim` (America/Sao_Paulo; sexta até 18h; fim de semana sempre fora): manda o aviso fixo no máximo 1 vez por dia por card (`payload_raw.fora_horario=true`) e encerra. `max_respostas_por_conversa` atingido (conta `ia_decisoes_log.resposta_enviada=true` do card desde o último encerramento por inatividade) → handoff `manual` "limite de respostas da IA".
+4. **contexto** — RPC `ic_ia_contexto(card, contexto_mensagens)` (padrão 30).
 5. **consentimento** — `ia_consentimentos`: pendente e nunca pedido → envia o texto de consentimento (constante em `_shared/ia-prompt.ts`, com `IC_POLITICA_PRIVACIDADE_URL`) e grava `texto_apresentado`; pendente e já pedido → `interpretarConsentimento` (SIM/NÃO/ambíguo): NÃO → `negado` + handoff `consentimento_negado` + despedida; SIM → `concedido`, segue; ambíguo → não responde.
 6. **handoff_regras** — `detectarHandoff` (código, antes da IA): urgência (resposta fixa orientando PS/192), dúvida clínica, reclamação, pedido de humano. Grava `ia_handoffs`.
 7. **exemplos** — até 12 `ia_exemplos_conversa` ativos, preferindo os cujas `tags` casam com o nome do funil.
 8. **claude** — `POST https://api.anthropic.com/v1/messages` (`anthropic-version: 2023-06-01`), modelo `crm_ia_config.modelo` (padrão `claude-sonnet-5-5`), `max_tokens` = `crm_ia_config.max_tokens` (padrão 1024), `output_config.effort='low'`, tools `propor_agendamento` e `encaminhar_humano` (`strict:true`, `tool_choice auto`), `AbortController` 25 s. Mensagens do contexto mapeadas lead→user, vendedor/ia→assistant com mesclagem de consecutivas.
 9. **pos_validacao** — `respostaProibida` (medicamentos, mg, dose, garantias, "você tem"/"você está com" afirmativos, diagnóstico, receita): bateu → `bloqueada_pos_validacao`, handoff `erro_ia`, resposta fixa neutra.
-10. **tools** — `encaminhar_humano` → handoff com o motivo; `propor_agendamento` → `ic-agendamento` `{acao:'propor'}`; se voltar `confirmado:true` grava handoff `agendamento_confirmado` (verificando pendente para não duplicar com o gatilho do banco).
+10. **tools** — antes: se o lead mandou mensagem nova enquanto a IA pensava, esta invocação desiste (`rajada/absorvida_depois_da_ia`) e a da mensagem nova responde tudo junto. `encaminhar_humano` → handoff com o motivo; `propor_agendamento` (serviço, dia, horário, nome completo, formato, pagamento) → `ic-agendamento` `{acao:'propor'}` reserva o horário (status `pendente`; recusa horário com `agenda_vagas_por_horario` agendamentos e devolve 2 sugestões, que viram a resposta). Reservou: handoff `agendamento_confirmado` (a equipe assume) e aviso no WhatsApp de cada número de `aviso_agendamento_whatsapp` (`tools/aviso_equipe_enviado`; vazio = `aviso_equipe_sem_numero`).
 11. **envio** — `_shared/whatsapp-envio.ts → enviarTextoCanal` (Meta ou Gupshup, pelo provedor do número); grava `crm_conversas` `autor='ia'`, `direcao='enviada'`, `zapi_message_id`=wamid, `payload_raw={ia:true, modelo, decisao_log_id}`.
 12. **funil** — RPC `ic_avancar_etapa` (SQL 33), só para frente e nunca em fechado/perdido/cliente antigo: IA respondeu de verdade → `em_conversa`; lead perguntou valor, preço, convênio, parcelamento, online/presencial (`_shared/funil-ia.ts → detectarNegociacao`) → `negociacao` / `negociacao_quente`; IA propôs horário → `agendamento_pendente` / `avaliacao_inicial`. Funil sem a etapa: nada muda. Cada movimento grava `crm_historico` tipo `automatico` (autor "Assistente virtual") e `ia_decisoes_log` `funil/etapa_avancada`. Desligar: `crm_ia_config.funil_automatico='false'`. A confirmação do agendamento pela equipe (gatilho do SQL 18, agora via a mesma RPC) leva a `visita_confirmada` / `consulta_agendada` / `avaliacao_inicial`.
 
@@ -125,11 +135,28 @@ Ordem recomendada: `ia_transcricao_audio` → `ia_pre_atendimento` + `ligada`
 → `agendamento_google`. As flags têm cache de 60 s nas funções.
 
 Outras chaves de `crm_ia_config`: `horario_inicio` ('08:00'), `horario_fim`
-('19:00'), `max_respostas_por_conversa` ('6'), `modelo`, `max_tokens`.
+('19:00'), `max_respostas_por_conversa` ('80' desde o SQL 37), `modelo`, `max_tokens`,
+e as do SQL 37 (Julie): `persona_nome`, `persona_ficha`, `rajada_silencio_segundos`,
+`rajada_teto_segundos`, `atender_fora_do_horario`, `contexto_mensagens`,
+`followups_minutos`, `followup_horario`, `aviso_agendamento_whatsapp`,
+`agenda_vagas_por_horario`.
+
+### Retomadas (follow-up), SQL 37
+
+`followups_minutos` ('120,1440,4320' = 2 h, 1 dia e 3 dias desde que a conversa
+parou; vazio desliga e volta o encerramento abaixo) e `followup_horario`
+('08:00-20:00', nunca domingo). O varredor chama `{acao:'encerrar_inativas'}`
+1x por minuto; com retomadas ligadas, a função procura cards em que a IA falou
+por último, sem handoff pendente e com consentimento concedido, e manda no
+máximo 3 por rodada. A própria IA escreve a retomada lendo a conversa (sem
+ferramentas, com pós-validação); se falhar, vai um texto fixo de
+`_shared/ia-followup.ts`. Cada retomada grava `crm_conversas.payload_raw.followup=true`
+e `ia_decisoes_log` `followup/followup_enviado`. Lead ou vendedor falou por
+último: nada. Depois da última retomada a IA espera o lead.
 
 ### Encerramento por inatividade
 
-`encerrar_apos_minutos` (padrão '60' sem linha na tabela; '0' desliga; 5 a 1440).
+Só vale com `followups_minutos` vazio. `encerrar_apos_minutos` (padrão '60' sem linha na tabela; '0' desliga; 5 a 1440).
 Quando a IA foi a última a falar e o lead não responde nesse prazo, a conversa é
 encerrada: dentro do horário de atendimento (e da janela de 24 h do WhatsApp)
 sai a despedida fixa `TEXTO_ENCERRAMENTO` (`payload_raw.encerramento=true`);

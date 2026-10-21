@@ -1,4 +1,4 @@
-import { assertEquals } from "jsr:@std/assert@1";
+import { assert, assertEquals } from "jsr:@std/assert@1";
 import { calendarioDiasUteis, montarSystemPrompt, paraWhatsApp } from "./ia-prompt.ts";
 
 Deno.test("paraWhatsApp troca markdown pela formatacao do WhatsApp", () => {
@@ -43,4 +43,14 @@ Deno.test("sortear escolhe dentro da lista", async () => {
   assertEquals(sortear(["a", "b", "c"], () => 0), "a");
   assertEquals(sortear(["a", "b", "c"], () => 0.999), "c");
   assertEquals(sortear(["a", "b", "c"], () => 1), "c");
+});
+
+Deno.test("persona: Julie por padrao, nome e ficha da config, sem negar ser IA", () => {
+  const base = { primeiroNome: null, funil: null, etapa: null, exemplos: [], agoraLocal: "quarta-feira, 21/10/2026 15:00" };
+  const padrao = montarSystemPrompt(base);
+  assert(padrao.includes("Você é a Julie"));
+  assert(padrao.includes("NÃO negue"));
+  assert(padrao.includes("não conta história de saúde sua"));
+  const outra = montarSystemPrompt({ ...base, persona: { nome: "Ana", ficha: "Gosta de música." } });
+  assert(outra.includes("Você é a Ana. Gosta de música."));
 });

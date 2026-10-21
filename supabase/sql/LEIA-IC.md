@@ -1,7 +1,7 @@
 # IC CRM: banco de dados
 
-O banco do IC CRM e Postgres no Supabase, montado por 34 arquivos SQL numerados
-(`00_` a `35_`) que se aplicam em ordem. Os arquivos `00_` a `12_` sao o esquema
+O banco do IC CRM e Postgres no Supabase, montado por 38 arquivos SQL numerados
+(`00_` a `37_`) que se aplicam em ordem. Os arquivos `00_` a `12_` sao o esquema
 base: extensoes, tabelas, funcoes do nucleo do CRM, views, gatilhos, politicas
 iniciais, realtime, o varredor do webhook e parametros de exemplo. Os arquivos
 `13_` a `31_` sao as camadas do IC CRM (perfis, dinheiro, RLS, jobs, IA, agenda,
@@ -42,6 +42,7 @@ No Supabase, SQL Editor, um arquivo por vez:
 | `34_ic_atendente_ve_todos.sql` | `ic_card_no_escopo`: todo usuário logado vê todos os cards (Atendente deixa de ver só os próprios); o recorte fica no escopo do perfil (tela Permissões); rollback no rodapé | 15 |
 | `35_ic_ia_exemplos_padrao_equipe.sql` | Reescreve os exemplos IC01-IC16 no padrão de escrita da equipe comercial (parágrafos, negrito do WhatsApp, "Perfeito.", proposta de dia e horário) e inclui IC17-IC19; idempotente, rollback no rodapé | 30 |
 | `36_ic_ia_exemplos_tom_leve.sql` | Deixa os exemplos IC01-IC19 com tom leve de WhatsApp (mensagens curtas, reação + uma pergunta) e inclui IC20-IC22 (com quem estou falando, sobre a clínica, informação que a IA não tem); idempotente, rollback no rodapé | 35 |
+| `37_ic_ia_julie_atendimento_completo.sql` | Julie: a IA atende até o agendamento. Chaves de `crm_ia_config` (persona, espera de 30 s, atende a qualquer hora, retomadas 2 h/1 dia/3 dias, contexto de 30 mensagens, aviso do agendamento por WhatsApp, vagas por horário), desliga o encerramento por inatividade, `max_respostas_por_conversa` 80 e exemplos IC08/IC16/IC20/IC22 no tom da Julie; idempotente, rollback no rodapé | 36 |
 
 Depois do 13, inserir o primeiro usuario (criado antes no Supabase Auth, mesmo
 e-mail) e o numero de WhatsApp: o bloco comentado no fim do 13 mostra como.

@@ -175,3 +175,44 @@ export function proximoSlot(
   const inicio = dataLocal(d.ano, d.mes, d.dia, Math.floor(padrao / 60), padrao % 60, tz);
   return { inicio, fim: new Date(inicio.getTime() + 30 * 60000) };
 }
+
+// Conflito de agenda: [inicio, fim) de um slot ja tem `vagas` agendamentos
+// cruzando? (vagas = quantas consultas cabem no mesmo horario; padrao 1.)
+export function slotOcupado(inicio: Date, fim: Date, ocupados: ReadonlyArray<{ inicio: string; fim: string }>, vagas = 1): boolean {
+  const a = inicio.getTime(), b = fim.getTime();
+  const cruzam = ocupados.filter((o) => {
+    const oi = Date.parse(o.inicio), of = Date.parse(o.fim);
+    return Number.isFinite(oi) && Number.isFinite(of) && oi < b && of > a;
+  }).length;
+  return cruzam >= Math.max(1, vagas);
+}
+
+// Proximos slots de 30 min livres a partir de um instante, no expediente
+// (seg-qui 08:00-18:30, sex 08:00-17:30, ultimo inicio), pulando os ocupados.
+// Usado para sugerir outro horario quando o pedido ja esta tomado.
+export function proximosSlotsLivres(
+  depoisDe: Date,
+  ocupados: ReadonlyArray<{ inicio: string; fim: string }>,
+  qtd = 2,
+  agoraUTC: Date = new Date(),
+  tz: string = TZ_PADRAO,
+  vagas = 1,
+): Date[] {
+  const out: Date[] = [];
+  const minimo = Math.max(depoisDe.getTime(), agoraUTC.getTime() + 60 * 60000); // nunca daqui a menos de 1 h
+  const p = partesNoFuso(new Date(minimo), tz);
+  let d = { ano: p.ano, mes: p.mes, dia: p.dia };
+  for (let i = 0; i < 21 && out.length < qtd; i++) {
+    const diaSemana = partesNoFuso(dataLocal(d.ano, d.mes, d.dia, 12, 0, tz), tz).diaSemana;
+    if (diaSemana >= 1 && diaSemana <= 5) {
+      for (let min = 8 * 60; min <= ultimoInicio(diaSemana) && out.length < qtd; min += 30) {
+        const inicio = dataLocal(d.ano, d.mes, d.dia, Math.floor(min / 60), min % 60, tz);
+        if (inicio.getTime() < minimo) continue;
+        const fim = new Date(inicio.getTime() + 30 * 60000);
+        if (!slotOcupado(inicio, fim, ocupados, vagas)) out.push(inicio);
+      }
+    }
+    d = somarDias(d.ano, d.mes, d.dia, 1);
+  }
+  return out;
+}
