@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "jsr:@std/assert@1";
+import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import { calendarioDiasUteis, montarSystemPrompt, paraWhatsApp, partesDaResposta } from "./ia-prompt.ts";
 
 Deno.test("paraWhatsApp troca markdown pela formatacao do WhatsApp", () => {
@@ -61,4 +61,13 @@ Deno.test("partesDaResposta: um paragrafo por mensagem, lista junto, no maximo 3
   assertEquals(partesDaResposta("Funciona assim:\n\n• A\n• B\n\nQuer agendar?"), ["Funciona assim:\n\n• A\n• B", "Quer agendar?"]);
   assertEquals(partesDaResposta("a\n\nb\n\nc\n\nd"), ["a", "b", "c\n\nd"]);
   assertEquals(partesDaResposta("  \n\n "), []);
+});
+
+Deno.test("objetivo: conduz para conhecer o Instituto e so marca consulta se a pessoa quiser", () => {
+  const sp = montarSystemPrompt({ primeiroNome: null, funil: null, etapa: null, exemplos: [], agoraLocal: "x" });
+  assertStringIncludes(sp, "VIR CONHECER O INSTITUTO");
+  assertStringIncludes(sp, "Visita para conhecer o Instituto");
+  assertStringIncludes(sp, "TODA resposta termina com uma pergunta");
+  assertStringIncludes(sp, "Não diga que a visita é gratuita");
+  assertStringIncludes(sp, 'Nunca chame a visita de "sem compromisso"');
 });
