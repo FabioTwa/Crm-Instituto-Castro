@@ -482,7 +482,7 @@ async function acaoPropor(sb: SupabaseClient, body: any): Promise<Response> {
       .update({
         inicio: slot.inicio.toISOString(),
         fim: slot.fim.toISOString(),
-        titulo: "Avaliação — " + servico,
+        titulo: /^visita/i.test(servico) ? servico : "Avaliação — " + servico,
         observacoes: obs ? "Agendado pela IA. " + obs : "Agendado pela IA.",
         atualizado_em: new Date().toISOString(),
       })
@@ -503,7 +503,7 @@ async function acaoPropor(sb: SupabaseClient, body: any): Promise<Response> {
       funil_id: (card as any).funil_id || null,
       responsavel_id: (card as any).vendedor_id || null,
       responsavel_nome: (card as any).vendedor_nome || null,
-      titulo: "Avaliação — " + servico,
+      titulo: /^visita/i.test(servico) ? servico : "Avaliação — " + servico,
       inicio: slot.inicio.toISOString(),
       fim: slot.fim.toISOString(),
       status: "pendente",
