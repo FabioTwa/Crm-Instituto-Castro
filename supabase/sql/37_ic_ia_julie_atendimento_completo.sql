@@ -15,7 +15,6 @@
 --   fila_espera_segundos 35        as conversas andam juntas, mas nunca sai
 --                                  resposta para duas pessoas ao mesmo tempo;
 --                                  sem a vez nesse prazo, a equipe e avisada
---   max_mensagens_por_dia 40       mensagens da IA por lead por dia (SP)
 --   max_respostas_por_conversa 80  a IA conduz a conversa inteira
 --   contexto_mensagens 30          a IA le as ultimas 30 mensagens (antes 12)
 --   aviso_agendamento_whatsapp     numero(s) de quem confirma o agendamento
@@ -45,7 +44,6 @@ insert into public.crm_ia_config (chave, valor, descricao) values
   ('aviso_agendamento_whatsapp', '5511972663460', 'IC: WhatsApp de quem confirma os agendamentos da IA (um ou mais, separados por virgula). 5511972663460 = teste no lugar do Kaique'),
   ('atender_um_por_vez', 'true', 'IC: true = um envio por vez no numero (trava ia_vez)'),
   ('fila_espera_segundos', '35', 'IC: quanto uma resposta espera a vez de ser enviada (5 a 60)'),
-  ('max_mensagens_por_dia', '40', 'IC: maximo de mensagens da IA para o mesmo lead por dia'),
   ('agenda_vagas_por_horario', '1', 'IC: quantas consultas cabem no mesmo horario da agenda')
 on conflict (chave) do nothing;
 
@@ -129,8 +127,7 @@ where titulo = 'IC22 informacao que a IA nao tem';
 -- drop table if exists public.ia_vez;
 -- delete from public.crm_ia_config where chave in ('persona_nome','persona_ficha','rajada_silencio_segundos',
 --   'rajada_teto_segundos','atender_fora_do_horario','followups_minutos','followup_horario','contexto_mensagens',
---   'aviso_agendamento_whatsapp','agenda_vagas_por_horario','atender_um_por_vez','fila_espera_segundos',
---   'max_mensagens_por_dia');
+--   'aviso_agendamento_whatsapp','agenda_vagas_por_horario','atender_um_por_vez','fila_espera_segundos');
 -- update public.crm_ia_config set valor = '60' where chave = 'encerrar_apos_minutos';
 -- update public.crm_ia_config set valor = '30' where chave = 'max_respostas_por_conversa';
 -- e rodar de novo o 36_ic_ia_exemplos_tom_leve.sql (exemplos IC08, IC16, IC20, IC22).

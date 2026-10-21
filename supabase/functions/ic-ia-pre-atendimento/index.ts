@@ -133,18 +133,6 @@ const PRAZO_VEZ_S = 30;
 // mostra o "digitando..." de cada uma antes de entregar.
 const PAUSA_ENTRE_MENSAGENS_MS = 1500;
 
-// Limite de mensagens da IA por lead por dia (crm_ia_config.max_mensagens_por_dia).
-function maxMensagensPorDia(cfg: Record<string, string>): number {
-  const n = Math.floor(Number(cfg.max_mensagens_por_dia || "40"));
-  return Number.isFinite(n) && n > 0 ? Math.min(n, 500) : 40;
-}
-
-// Inicio do dia de hoje em Sao Paulo (UTC-3 fixo), em ISO.
-function inicioDoDiaSp(agora: Date): string {
-  const hoje = partesNoFuso(agora, TZ_PADRAO);
-  return new Date(Date.UTC(hoje.ano, hoje.mes - 1, hoje.dia, 3, 0, 0)).toISOString();
-}
-
 type Contexto = {
   primeiro_nome: string | null;
   funil: string | null;
@@ -304,9 +292,7 @@ class Pipeline {
     extra: Record<string, unknown> = {},
     marcadores: Record<string, unknown> = {},
   ): Promise<{ enviado: boolean; log_id: string | null }> {
-    // Perto do limite diario: junta as partes para caber no que sobrou.
-    const restante = await this.mensagensRestantesHoje();
-    const partes = partesDaResposta(texto, Math.max(1, Math.min(3, restante)));
+    const partes = partesDaResposta(texto);
     if (partes.length <= 1) return await this.enviar(partes[0] || texto, etapa, decisaoOk, extra, marcadores);
     let primeiro: { enviado: boolean; log_id: string | null } | null = null;
     const teveVez = await this.comVez(async () => {
@@ -319,20 +305,6 @@ class Pipeline {
     });
     if (!teveVez) await this.handoff("manual", "IA nao conseguiu a vez de enviar a resposta");
     return primeiro || { enviado: false, log_id: null };
-  }
-
-  // Quantas mensagens a IA ainda pode mandar hoje (dia de Sao Paulo) para este
-  // lead: crm_ia_config.max_mensagens_por_dia (padrao 40). Erro de leitura = sem corte.
-  async mensagensRestantesHoje(): Promise<number> {
-    const max = maxMensagensPorDia(this.cfg);
-    const { count, error } = await this.sb
-      .from("crm_conversas")
-      .select("id", { count: "exact", head: true })
-      .eq("cliente_crm_id", this.body.cliente_crm_id)
-      .eq("autor", "ia")
-      .gte("criada_em", inicioDoDiaSp(new Date()));
-    if (error) return max;
-    return Math.max(0, max - (count || 0));
   }
 
   // Envia (ou simula) uma resposta da IA. Grava crm_conversas so com wamid.
@@ -678,15 +650,7 @@ async function rodarNaVez(
     await p.log("limites", "limite_respostas", { motivo: `${respostasDadas}/${maxRespostas}` });
     return { ok: true, decisao: "limite_respostas" };
   }
-  // Limite diario de mensagens por lead (max_mensagens_por_dia, padrao 40):
-  // chegou nele, a IA para por hoje e a equipe fica sabendo.
-  const restantesHoje = await p.mensagensRestantesHoje();
-  if (restantesHoje <= 0) {
-    await p.handoff("manual", `limite de ${maxMensagensPorDia(cfg)} mensagens da IA por dia`);
-    await p.log("limites", "limite_diario", { detalhe: { max: maxMensagensPorDia(cfg) } });
-    return { ok: true, decisao: "limite_diario" };
-  }
-  await p.log("limites", "ok", { detalhe: { respostas: respostasDadas || 0, max: maxRespostas, restantes_hoje: restantesHoje } });
+  await p.log("limites", "ok", { detalhe: { respostas: respostasDadas || 0, max: maxRespostas } });
 
   // 4) contexto
   const { data: ctxRaw, error: errCtx } = await sb.rpc("ic_ia_contexto", {
