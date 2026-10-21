@@ -40,8 +40,12 @@ delete from public.crm_entrada_falhas;
 delete from public.crm_mescla_log;
 delete from public.crm_mescla_retrato;
 -- crm_historico, crm_eventos_jornada, acoes_dia e leads_distribuicao_log
--- saem junto (on delete cascade).
+-- saem junto (on delete cascade). O gatilho que bloqueia apagar lead fica
+-- desligado so durante este delete e volta logo em seguida (decisao do Fabio,
+-- 21/10/2026: apagar de vez).
+alter table public.clientes_crm disable trigger trg_bloquear_hard_delete;
 delete from public.clientes_crm;
+alter table public.clientes_crm enable trigger trg_bloquear_hard_delete;
 update public.ia_vez set dono = null, ate = null where id = 1;
 
 commit;
