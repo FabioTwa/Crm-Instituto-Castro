@@ -11,9 +11,11 @@
 --   followup_horario  08:00-20:00    nao recebe retorno (decisao 21/10/2026);
 --                                  '120,1440,4320' liga 2 h / 1 dia / 3 dias
 --   encerrar_apos_minutos 0        conversa nunca e encerrada por inatividade
---   atender_um_por_vez true        a IA conversa com UM lead por vez (trava
---   fila_espera_segundos 35        ia_vez); quem espera mais que isso volta
---                                  para a fila (ate 6 vezes, depois equipe)
+--   atender_um_por_vez true        UM envio por vez no numero (trava ia_vez):
+--   fila_espera_segundos 35        as conversas andam juntas, mas nunca sai
+--                                  resposta para duas pessoas ao mesmo tempo;
+--                                  sem a vez nesse prazo, a equipe e avisada
+--   max_mensagens_por_dia 40       mensagens da IA por lead por dia (SP)
 --   max_respostas_por_conversa 80  a IA conduz a conversa inteira
 --   contexto_mensagens 30          a IA le as ultimas 30 mensagens (antes 12)
 --   aviso_agendamento_whatsapp     numero(s) de quem confirma o agendamento
@@ -41,19 +43,20 @@ insert into public.crm_ia_config (chave, valor, descricao) values
   ('followup_horario', '08:00-20:00', 'IC: janela local das retomadas (nunca domingo)'),
   ('contexto_mensagens', '30', 'IC: quantas mensagens da conversa a IA le (5 a 60)'),
   ('aviso_agendamento_whatsapp', '5511972663460', 'IC: WhatsApp de quem confirma os agendamentos da IA (um ou mais, separados por virgula). 5511972663460 = teste no lugar do Kaique'),
-  ('atender_um_por_vez', 'true', 'IC: true = a IA conversa com um lead por vez (trava ia_vez)'),
-  ('fila_espera_segundos', '35', 'IC: quanto um lead espera a vez antes de voltar para a fila (5 a 60)'),
+  ('atender_um_por_vez', 'true', 'IC: true = um envio por vez no numero (trava ia_vez)'),
+  ('fila_espera_segundos', '35', 'IC: quanto uma resposta espera a vez de ser enviada (5 a 60)'),
+  ('max_mensagens_por_dia', '40', 'IC: maximo de mensagens da IA para o mesmo lead por dia'),
   ('agenda_vagas_por_horario', '1', 'IC: quantas consultas cabem no mesmo horario da agenda')
 on conflict (chave) do nothing;
 
--- Trava "um lead por vez": uma linha so. dono = invocacao que esta atendendo,
+-- Trava "um envio por vez": uma linha so. dono = invocacao que esta atendendo,
 -- ate = prazo (se a funcao cair, a trava expira sozinha).
 create table if not exists public.ia_vez (
   id    integer primary key default 1 check (id = 1),
   dono  text,
   ate   timestamptz
 );
-comment on table public.ia_vez is 'IC: trava da IA para atender um lead por vez (ic_ia_pegar_vez / ic_ia_soltar_vez). So service_role.';
+comment on table public.ia_vez is 'IC: trava da IA para enviar uma resposta por vez (ic_ia_pegar_vez / ic_ia_soltar_vez). So service_role.';
 insert into public.ia_vez (id) values (1) on conflict (id) do nothing;
 alter table public.ia_vez enable row level security;
 revoke all on public.ia_vez from public, anon, authenticated;
@@ -78,7 +81,7 @@ begin
   return n > 0;
 end;
 $$;
-comment on function public.ic_ia_pegar_vez(text, integer) is 'IC: pega a vez de a IA atender (um lead por vez). true = pegou; a trava expira em p_segundos.';
+comment on function public.ic_ia_pegar_vez(text, integer) is 'IC: pega a vez de a IA enviar (um envio por vez). true = pegou; a trava expira em p_segundos.';
 
 create or replace function public.ic_ia_soltar_vez(p_dono text)
 returns void
@@ -126,7 +129,8 @@ where titulo = 'IC22 informacao que a IA nao tem';
 -- drop table if exists public.ia_vez;
 -- delete from public.crm_ia_config where chave in ('persona_nome','persona_ficha','rajada_silencio_segundos',
 --   'rajada_teto_segundos','atender_fora_do_horario','followups_minutos','followup_horario','contexto_mensagens',
---   'aviso_agendamento_whatsapp','agenda_vagas_por_horario','atender_um_por_vez','fila_espera_segundos');
+--   'aviso_agendamento_whatsapp','agenda_vagas_por_horario','atender_um_por_vez','fila_espera_segundos',
+--   'max_mensagens_por_dia');
 -- update public.crm_ia_config set valor = '60' where chave = 'encerrar_apos_minutos';
 -- update public.crm_ia_config set valor = '30' where chave = 'max_respostas_por_conversa';
 -- e rodar de novo o 36_ic_ia_exemplos_tom_leve.sql (exemplos IC08, IC16, IC20, IC22).

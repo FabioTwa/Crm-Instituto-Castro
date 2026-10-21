@@ -84,10 +84,12 @@ lead **até o agendamento**: responde a qualquer hora (`atender_fora_do_horario`
 espera 30 s sem mensagem nova antes de responder (`rajada_silencio_segundos`,
 teto `rajada_teto_segundos`), lê as últimas 30 mensagens (`contexto_mensagens`),
 informa valores, reserva o horário sem conflito na agenda e avisa pelo WhatsApp
-quem confirma com o lead (`aviso_agendamento_whatsapp`). Atende **um lead por
-vez** (`atender_um_por_vez`, trava `ia_vez`: quem não pega a vez em
-`fila_espera_segundos` volta para a fila, até 6 vezes, depois vai para a equipe)
-e manda cada parágrafo da resposta como uma mensagem separada, com "digitando…".
+quem confirma com o lead (`aviso_agendamento_whatsapp`). Faz **um envio por
+vez** no número (`atender_um_por_vez`, trava `ia_vez`): as conversas andam juntas
+(espera e geração da resposta), mas só uma resposta sai por vez; quem não pega a
+vez em `fila_espera_segundos` vai para a equipe. Manda no máximo
+`max_mensagens_por_dia` (40) mensagens por lead por dia (fuso de São Paulo);
+atingido o limite, abre handoff `manual`. Manda cada parágrafo da resposta como uma mensagem separada, com "digitando…".
 A conversa nunca é encerrada por inatividade e, por decisão de 21/10/2026, lead
 que para de responder não recebe retomada (`followups_minutos` vazio).
 Se perguntarem a sério se é robô, ela confirma; não conta história de saúde
@@ -95,7 +97,7 @@ própria (CFM 2.336/2023).
 
 1. **flags** — `ic_flag('ia_pre_atendimento')` e `crm_ia_config.ligada='true'`; senão `desligada`.
 2. **humano_assumiu** — há `crm_conversas` `direcao='enviada'`, `autor='vendedor'` nas últimas 24 h (equipe respondeu pelo celular: é a linha que o eco grava) → `humano_no_controle`. Com `ia_handoffs` `atendido_em is null` (equipe já chamada) e o lead escrevendo de novo: manda `TEXTO_AVISO_ESPERA` ("nossa equipe já foi avisada…") **uma vez por handoff** (`decisao='aviso_espera'`), depois fica em silêncio até a equipe atender ou clicar em Encerrar conversa.
-3. **limites** — só com `atender_fora_do_horario='false'`: fora de `horario_inicio`/`horario_fim` (America/Sao_Paulo; sexta até 18h; fim de semana sempre fora): manda o aviso fixo no máximo 1 vez por dia por card (`payload_raw.fora_horario=true`) e encerra. `max_respostas_por_conversa` atingido (conta `ia_decisoes_log.resposta_enviada=true` do card desde o último encerramento por inatividade) → handoff `manual` "limite de respostas da IA".
+3. **limites** — só com `atender_fora_do_horario='false'`: fora de `horario_inicio`/`horario_fim` (America/Sao_Paulo; sexta até 18h; fim de semana sempre fora): manda o aviso fixo no máximo 1 vez por dia por card (`payload_raw.fora_horario=true`) e encerra. `max_respostas_por_conversa` atingido (conta `ia_decisoes_log.resposta_enviada=true` do card desde o último encerramento por inatividade) → handoff `manual` "limite de respostas da IA". `max_mensagens_por_dia` atingido (conta `crm_conversas` `autor='ia'` do card desde 00:00 em São Paulo) → handoff `manual`, `decisao='limite_diario'`.
 4. **contexto** — RPC `ic_ia_contexto(card, contexto_mensagens)` (padrão 30).
 5. **consentimento** — `ia_consentimentos`: pendente e nunca pedido → envia o texto de consentimento (constante em `_shared/ia-prompt.ts`, com `IC_POLITICA_PRIVACIDADE_URL`) e grava `texto_apresentado`; pendente e já pedido → `interpretarConsentimento` (SIM/NÃO/ambíguo): NÃO → `negado` + handoff `consentimento_negado` + despedida; SIM → `concedido`, segue; ambíguo → não responde.
 6. **handoff_regras** — `detectarHandoff` (código, antes da IA): urgência (resposta fixa orientando PS/192), dúvida clínica, reclamação, pedido de humano. Grava `ia_handoffs`.

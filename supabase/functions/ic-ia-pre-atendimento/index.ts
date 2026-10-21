@@ -122,15 +122,28 @@ function limiteContexto(cfg: Record<string, string>): number {
   return Number.isFinite(n) ? Math.min(60, Math.max(5, n)) : 30;
 }
 
-type Body = { cliente_crm_id: string; conversa_id: string | null; vendedor_id: string | null; funil_id: string | null; tentativa_fila?: number };
+type Body = { cliente_crm_id: string; conversa_id: string | null; vendedor_id: string | null; funil_id: string | null };
 
-// Fila de um cliente por vez (SQL 37): prazo da trava (solta antes, no fim do
-// atendimento) e quantas vezes um lead volta para a fila antes de ir para a equipe.
-const PRAZO_VEZ_S = 90;
+// Um envio por vez (SQL 37, atender_um_por_vez): as conversas andam em paralelo
+// (cada uma esperando os 30 s da rajada e a IA pensar), mas so UMA resposta e
+// enviada de cada vez no numero. A trava ia_vez so e segurada durante o envio;
+// o prazo e a rede de seguranca se a funcao cair no meio.
+const PRAZO_VEZ_S = 30;
 // Entre as mensagens de uma resposta em partes: garante a ordem na Z-API, que
 // mostra o "digitando..." de cada uma antes de entregar.
 const PAUSA_ENTRE_MENSAGENS_MS = 1500;
-const MAX_TENTATIVAS_FILA = 6;
+
+// Limite de mensagens da IA por lead por dia (crm_ia_config.max_mensagens_por_dia).
+function maxMensagensPorDia(cfg: Record<string, string>): number {
+  const n = Math.floor(Number(cfg.max_mensagens_por_dia || "40"));
+  return Number.isFinite(n) && n > 0 ? Math.min(n, 500) : 40;
+}
+
+// Inicio do dia de hoje em Sao Paulo (UTC-3 fixo), em ISO.
+function inicioDoDiaSp(agora: Date): string {
+  const hoje = partesNoFuso(agora, TZ_PADRAO);
+  return new Date(Date.UTC(hoje.ano, hoje.mes - 1, hoje.dia, 3, 0, 0)).toISOString();
+}
 
 type Contexto = {
   primeiro_nome: string | null;
@@ -155,9 +168,44 @@ class Pipeline {
   envioLigado = false;
   canal: CanalEnvio | null = null;
   para = "";
+  cfg: Record<string, string> = {};
+  private vezDono: string | null = null;
+  private vezProfundidade = 0;
   constructor(sb: SupabaseClient, body: Body) {
     this.sb = sb;
     this.body = body;
+  }
+
+  // Roda `envio` com a vez de enviar (um envio por vez no numero). Reentrante:
+  // as partes de uma resposta e o aviso a equipe saem na mesma vez.
+  // false = nao conseguiu a vez a tempo (nada foi enviado).
+  async comVez(envio: () => Promise<void>): Promise<boolean> {
+    if (String(this.cfg.atender_um_por_vez ?? "true").toLowerCase() === "false" || this.vezProfundidade > 0) {
+      this.vezProfundidade++;
+      try { await envio(); } finally { this.vezProfundidade--; }
+      return true;
+    }
+    const dono = crypto.randomUUID();
+    const vez = await esperarVez(this.sb, dono, this.cfg);
+    if (!vez.ok && !vez.erro) {
+      await this.log("fila", "sem_vez", { detalhe: { esperou_ms: vez.esperou_ms } });
+      return false;
+    }
+    if (vez.erro) await this.log("fila", "sem_trava", { motivo: vez.erro }); // SQL 37 ausente: envia assim mesmo
+    else if (vez.esperou_ms > 1000) await this.log("fila", "vez", { detalhe: { esperou_ms: vez.esperou_ms } });
+    this.vezDono = vez.ok ? dono : null;
+    this.vezProfundidade++;
+    try {
+      await envio();
+    } finally {
+      this.vezProfundidade--;
+      if (this.vezDono) {
+        const { error } = await this.sb.rpc("ic_ia_soltar_vez", { p_dono: this.vezDono });
+        if (error) console.warn(LOG, "soltar a vez falhou (expira sozinha):", error.message);
+        this.vezDono = null;
+      }
+    }
+    return true;
   }
 
   async log(
@@ -256,16 +304,35 @@ class Pipeline {
     extra: Record<string, unknown> = {},
     marcadores: Record<string, unknown> = {},
   ): Promise<{ enviado: boolean; log_id: string | null }> {
-    const partes = partesDaResposta(texto);
-    if (partes.length <= 1) return await this.enviar(texto, etapa, decisaoOk, extra, marcadores);
+    // Perto do limite diario: junta as partes para caber no que sobrou.
+    const restante = await this.mensagensRestantesHoje();
+    const partes = partesDaResposta(texto, Math.max(1, Math.min(3, restante)));
+    if (partes.length <= 1) return await this.enviar(partes[0] || texto, etapa, decisaoOk, extra, marcadores);
     let primeiro: { enviado: boolean; log_id: string | null } | null = null;
-    for (let i = 0; i < partes.length; i++) {
-      if (i > 0 && this.envioLigado && this.canal) await new Promise((r) => setTimeout(r, PAUSA_ENTRE_MENSAGENS_MS));
-      const r = await this.enviar(partes[i], etapa, decisaoOk, { ...extra, parte: i + 1, de: partes.length }, i === 0 ? marcadores : {});
-      if (!primeiro) primeiro = r;
-      if (!r.enviado && this.envioLigado && this.canal) break; // falhou: nao manda o resto fora de ordem
-    }
+    const teveVez = await this.comVez(async () => {
+      for (let i = 0; i < partes.length; i++) {
+        if (i > 0 && this.envioLigado && this.canal) await new Promise((r) => setTimeout(r, PAUSA_ENTRE_MENSAGENS_MS));
+        const r = await this.enviar(partes[i], etapa, decisaoOk, { ...extra, parte: i + 1, de: partes.length }, i === 0 ? marcadores : {});
+        if (!primeiro) primeiro = r;
+        if (!r.enviado && this.envioLigado && this.canal) break; // falhou: nao manda o resto fora de ordem
+      }
+    });
+    if (!teveVez) await this.handoff("manual", "IA nao conseguiu a vez de enviar a resposta");
     return primeiro || { enviado: false, log_id: null };
+  }
+
+  // Quantas mensagens a IA ainda pode mandar hoje (dia de Sao Paulo) para este
+  // lead: crm_ia_config.max_mensagens_por_dia (padrao 40). Erro de leitura = sem corte.
+  async mensagensRestantesHoje(): Promise<number> {
+    const max = maxMensagensPorDia(this.cfg);
+    const { count, error } = await this.sb
+      .from("crm_conversas")
+      .select("id", { count: "exact", head: true })
+      .eq("cliente_crm_id", this.body.cliente_crm_id)
+      .eq("autor", "ia")
+      .gte("criada_em", inicioDoDiaSp(new Date()));
+    if (error) return max;
+    return Math.max(0, max - (count || 0));
   }
 
   // Envia (ou simula) uma resposta da IA. Grava crm_conversas so com wamid.
@@ -287,7 +354,16 @@ class Pipeline {
     }
     // Sem assinatura: a IA fala em nome da equipe; o nome so aparece quando um
     // atendente assume (ic-whatsapp-send). "Digitando..." antes, onde o provedor tem.
-    const envio = await enviarTextoCanal(this.canal, this.para, texto, LOG, { simularDigitacao: true });
+    const canal = this.canal;
+    const caixa: { r: Awaited<ReturnType<typeof enviarTextoCanal>> | null } = { r: null };
+    const teveVez = await this.comVez(async () => {
+      caixa.r = await enviarTextoCanal(canal, this.para, texto, LOG, { simularDigitacao: true });
+    });
+    const envio = caixa.r;
+    if (!teveVez || !envio) {
+      await this.handoff("manual", "IA nao conseguiu a vez de enviar a resposta");
+      return { enviado: false, log_id: null };
+    }
     if (!envio.ok) {
       const log_id = await this.log(etapa, "erro_envio", {
         modelo: this.modelo,
@@ -427,6 +503,7 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
   const flagIa = await icFlag(sb, "ia_pre_atendimento");
   const cfg = await iaConfig(sb);
   p.modelo = cfg.modelo || "claude-sonnet-5-5";
+  p.cfg = cfg;
   if (!flagIa || String(cfg.ligada).toLowerCase() !== "true") {
     await p.log("flags", "desligada", { detalhe: { flag: flagIa, config_ligada: cfg.ligada } });
     return { ok: true, decisao: "desligada" };
@@ -485,40 +562,10 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
     }
   }
 
-  // Um cliente por vez (crm_ia_config.atender_um_por_vez, padrao true):
-  // como uma pessoa so, a IA so conversa com um lead de cada vez no numero.
-  // A vez e uma trava no banco (SQL 37, ic_ia_pegar_vez) com prazo, solta no fim.
-  if (String(cfg.atender_um_por_vez ?? "true").toLowerCase() === "false") {
-    return await rodarNaVez(sb, body, p, cfg, card, fase);
-  }
-  const dono = crypto.randomUUID();
-  const vez = await esperarVez(sb, dono, cfg);
-  if (!vez.ok) {
-    if (vez.erro) {
-      // Trava indisponivel (SQL 37 nao aplicado, erro de banco): nao segura o lead.
-      await p.log("fila", "sem_trava", { motivo: vez.erro });
-      return await rodarNaVez(sb, body, p, cfg, card, fase);
-    }
-    const tentativa = Number(body.tentativa_fila || 0) + 1;
-    if (tentativa > MAX_TENTATIVAS_FILA) {
-      await p.handoff("manual", "IA ocupada com outros atendimentos por muito tempo");
-      await p.log("fila", "desistiu", { detalhe: { tentativa } });
-      return { ok: true, decisao: "fila_desistiu" };
-    }
-    await p.log("fila", "reenfileirada", { detalhe: { tentativa, esperou_ms: vez.esperou_ms } });
-    redisparar({ ...body, tentativa_fila: tentativa });
-    return { ok: true, decisao: "fila_reenfileirada" };
-  }
-  await p.log("fila", "vez", { detalhe: { esperou_ms: vez.esperou_ms } });
-  try {
-    return await rodarNaVez(sb, body, p, cfg, card, fase);
-  } finally {
-    const { error } = await sb.rpc("ic_ia_soltar_vez", { p_dono: dono });
-    if (error) console.warn(LOG, "soltar a vez falhou (expira sozinha):", error.message);
-  }
+  return await rodarNaVez(sb, body, p, cfg, card, fase);
 }
 
-// Espera a vez de atender (trava ia_vez), consultando a cada 1,5 s ate
+// Espera a vez de ENVIAR (trava ia_vez), consultando a cada 0,5 s ate
 // fila_espera_segundos (padrao 35). erro = a trava nao existe ou o banco falhou.
 async function esperarVez(sb: SupabaseClient, dono: string, cfg: Record<string, string>): Promise<{ ok: boolean; erro: string | null; esperou_ms: number }> {
   const inicio = Date.now();
@@ -529,24 +576,11 @@ async function esperarVez(sb: SupabaseClient, dono: string, cfg: Record<string, 
     if (error) return { ok: false, erro: error.message, esperou_ms: Date.now() - inicio };
     if (data === true) return { ok: true, erro: null, esperou_ms: Date.now() - inicio };
     if (Date.now() - inicio >= limiteMs) return { ok: false, erro: null, esperou_ms: Date.now() - inicio };
-    await new Promise((r) => setTimeout(r, 1500));
+    await new Promise((r) => setTimeout(r, 500));
   }
 }
 
-// Chama esta mesma funcao de novo (segundo plano) para o lead que nao pegou a
-// vez: a invocacao nova pula a rajada (o lead ja parou) e volta para a fila.
-function redisparar(body: Body): void {
-  const URL_SB = Deno.env.get("SUPABASE_URL") || "";
-  const trabalho = fetch(`${URL_SB}/functions/v1/ic-ia-pre-atendimento`, {
-    method: "POST",
-    headers: headersInternos(),
-    body: JSON.stringify(body),
-  }).then((r) => r.body?.cancel()).catch((e) => console.warn(LOG, "reenfileirar falhou:", e instanceof Error ? e.message : e));
-  const espera = (globalThis as any).EdgeRuntime?.waitUntil;
-  if (typeof espera === "function") espera.call((globalThis as any).EdgeRuntime, trabalho);
-}
-
-// Resto do pipeline, ja com a vez de atender.
+// Resto do pipeline (depois da rajada).
 async function rodarNaVez(
   sb: SupabaseClient, body: Body, p: Pipeline, cfg: Record<string, string>, card: any, fase: ReturnType<typeof faseTeste>,
 ): Promise<Record<string, unknown>> {
@@ -644,7 +678,15 @@ async function rodarNaVez(
     await p.log("limites", "limite_respostas", { motivo: `${respostasDadas}/${maxRespostas}` });
     return { ok: true, decisao: "limite_respostas" };
   }
-  await p.log("limites", "ok", { detalhe: { respostas: respostasDadas || 0, max: maxRespostas } });
+  // Limite diario de mensagens por lead (max_mensagens_por_dia, padrao 40):
+  // chegou nele, a IA para por hoje e a equipe fica sabendo.
+  const restantesHoje = await p.mensagensRestantesHoje();
+  if (restantesHoje <= 0) {
+    await p.handoff("manual", `limite de ${maxMensagensPorDia(cfg)} mensagens da IA por dia`);
+    await p.log("limites", "limite_diario", { detalhe: { max: maxMensagensPorDia(cfg) } });
+    return { ok: true, decisao: "limite_diario" };
+  }
+  await p.log("limites", "ok", { detalhe: { respostas: respostasDadas || 0, max: maxRespostas, restantes_hoje: restantesHoje } });
 
   // 4) contexto
   const { data: ctxRaw, error: errCtx } = await sb.rpc("ic_ia_contexto", {
@@ -976,6 +1018,7 @@ async function encerrarInativas(sb: SupabaseClient): Promise<Record<string, unkn
       .limit(1);
     const p = new Pipeline(sb, { cliente_crm_id: String(card.id), conversa_id: null, vendedor_id: card.vendedor_id, funil_id: card.funil_id });
     p.modelo = cfg.modelo || "claude-sonnet-5-5";
+  p.cfg = cfg;
     p.card = card;
     p.para = para;
     const decisao = decidirEncerramento({
@@ -1051,12 +1094,15 @@ async function avisarEquipeAgendamento(p: Pipeline, cfg: Record<string, string>,
     await p.log("tools", "aviso_equipe_simulado", { detalhe: { para: numeros.length, texto } });
     return;
   }
-  for (const numero of numeros) {
-    const env = await enviarTextoCanal(p.canal, numero, texto, LOG);
-    await p.log("tools", env.ok ? "aviso_equipe_enviado" : "aviso_equipe_falhou", {
-      detalhe: { agendamento_id: r.agendamento_id, status: env.ok ? null : env.status },
-    });
-  }
+  const canal = p.canal;
+  await p.comVez(async () => {
+    for (const numero of numeros) {
+      const env = await enviarTextoCanal(canal, numero, texto, LOG);
+      await p.log("tools", env.ok ? "aviso_equipe_enviado" : "aviso_equipe_falhou", {
+        detalhe: { agendamento_id: r.agendamento_id, status: env.ok ? null : env.status },
+      });
+    }
+  });
 }
 
 // Retoma as conversas em que a IA falou por ultimo e o lead parou de responder
@@ -1103,6 +1149,7 @@ async function retomarInativas(sb: SupabaseClient, cfg: Record<string, string>, 
 
     const p = new Pipeline(sb, { cliente_crm_id: String(card.id), conversa_id: null, vendedor_id: card.vendedor_id, funil_id: card.funil_id });
     p.modelo = cfg.modelo || "claude-sonnet-5-5";
+  p.cfg = cfg;
     p.card = card;
     p.para = para;
     if (await p.temHandoffPendente()) continue;
@@ -1267,6 +1314,7 @@ async function encerrarPelaEquipe(req: Request, sb: SupabaseClient, body: any): 
 
   const p = new Pipeline(sb, { cliente_crm_id: clienteId, conversa_id: null, vendedor_id: (card as any).vendedor_id, funil_id: (card as any).funil_id });
   p.modelo = cfg.modelo || "claude-sonnet-5-5";
+  p.cfg = cfg;
   p.card = card;
   p.para = para;
   p.envioLigado = !fase.sombra && (await icFlag(sb, "envio_whatsapp_cloud_api"));
@@ -1311,7 +1359,6 @@ Deno.serve(async (req: Request) => {
       conversa_id: body.conversa_id ? String(body.conversa_id) : null,
       vendedor_id: body.vendedor_id ? String(body.vendedor_id) : null,
       funil_id: body.funil_id ? String(body.funil_id) : null,
-      tentativa_fila: Number(body.tentativa_fila || 0) || 0,
     });
     console.log(LOG, "card", clienteId, "->", resultado.decisao || resultado.erro, `(${Date.now() - inicio} ms)`);
     return json({ ...resultado, duracao_ms: Date.now() - inicio });
