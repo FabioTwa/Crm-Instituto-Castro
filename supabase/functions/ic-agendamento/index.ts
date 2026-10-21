@@ -10,8 +10,10 @@
 //      {acao:'google_oauth_callback', code, state}      troca code por refresh_token e guarda cifrado
 //      GET ?acao=google_oauth_callback&code=&state=     (o Google redireciona para ca; redireciona ao IC_APP_URL)
 //  (b) INTERNA (header x-ic-internal = IC_INTERNAL_SECRET):
-//      {acao:'propor', cliente_crm_id, dia_preferido, periodo, horario_preferido?, servico, observacao}
-//        -> cria agendamentos status 'pendente', origem 'ia' (ou troca o horario da proposta pendente da IA). NAO confirma. {ok, confirmado:false, agendamento_id}
+//      {acao:'propor', cliente_crm_id, dia_preferido, periodo, horario_preferido?, servico, observacao, nome_completo?, formato?, pagamento?}
+//        -> reserva o horario: agendamentos status 'pendente', origem 'ia' (ou troca o horario da reserva pendente da IA).
+//           A equipe confirma com o lead. {ok, confirmado:false, agendamento_id, inicio, fim}
+//           Horario ja tomado (agenda_vagas_por_horario): {ok:false, erro:'horario_ocupado', sugestoes:[iso, iso]}
 //
 // PUBLICAR: supabase functions deploy ic-agendamento --no-verify-jwt
 //   Por que --no-verify-jwt aqui? O callback OAuth chega do Google sem JWT do
@@ -42,7 +44,7 @@ import { corsHeaders, erroGenerico, json } from "../_shared/http.ts";
 import { chamadaInternaValida, ehAdmin, usuarioAtivo, type UsuarioAtivo } from "../_shared/auth.ts";
 import { icFlag } from "../_shared/flags.ts";
 import { assinarToken, cifrar, decifrar, verificarToken } from "../_shared/crypto.ts";
-import { proximoSlot, TZ_PADRAO } from "../_shared/horario.ts";
+import { proximoSlot, proximosSlotsLivres, slotOcupado, TZ_PADRAO } from "../_shared/horario.ts";
 import { canonicoTelefone } from "../_shared/telefone.ts";
 
 const LOG = "[ic-agendamento]";
@@ -398,8 +400,35 @@ async function googleOauthCallback(sb: SupabaseClient, code: string, state: stri
   return { ok: true, email };
 }
 
+// Agendamentos que ocupam a agenda perto do horario pedido (3 semanas a partir
+// do dia anterior), exceto o proprio. null = erro de leitura (nao arrisca reservar).
+async function horariosOcupados(sb: SupabaseClient, perto: Date, excetoId: string | null): Promise<Array<{ inicio: string; fim: string }> | null> {
+  let q = sb
+    .from("agendamentos")
+    .select("id, inicio, fim")
+    .in("status", ["pendente", ...STATUS_SINCRONIZA])
+    .gte("fim", new Date(perto.getTime() - 24 * 3600 * 1000).toISOString())
+    .lte("inicio", new Date(perto.getTime() + 21 * 24 * 3600 * 1000).toISOString())
+    .limit(1000);
+  if (excetoId) q = q.neq("id", excetoId);
+  const { data, error } = await q;
+  if (error) {
+    console.error(LOG, "leitura da agenda falhou:", error.message);
+    return null;
+  }
+  return ((data as any[]) || []).map((a) => ({ inicio: String(a.inicio), fim: String(a.fim || a.inicio) }));
+}
+
+// crm_ia_config.agenda_vagas_por_horario: quantas consultas cabem no mesmo
+// horario (padrao 1).
+async function vagasPorHorario(sb: SupabaseClient): Promise<number> {
+  const { data } = await sb.from("crm_ia_config").select("valor").eq("chave", "agenda_vagas_por_horario").maybeSingle();
+  const n = Math.floor(Number((data as any)?.valor ?? "1"));
+  return Number.isFinite(n) && n >= 1 ? Math.min(n, 20) : 1;
+}
+
 // ---------------------------------------------------------------------------
-// Acao INTERNA: proposta da IA (nunca confirma)
+// Acao INTERNA: agendamento feito pela IA (status pendente: a equipe confirma com o lead)
 // ---------------------------------------------------------------------------
 async function acaoPropor(sb: SupabaseClient, body: any): Promise<Response> {
   const clienteId = String(body.cliente_crm_id || "").trim();
@@ -416,7 +445,12 @@ async function acaoPropor(sb: SupabaseClient, body: any): Promise<Response> {
     String(body.dia_preferido || ""), periodo, new Date(), TZ_PADRAO, String(body.horario_preferido || "").slice(0, 10),
   );
   const servico = String(body.servico || "Avaliação").trim().slice(0, 120);
-  const obs = String(body.observacao || "").trim().slice(0, 300);
+  const obs = [
+    body.nome_completo ? "Nome: " + String(body.nome_completo).trim().slice(0, 120) : "",
+    body.formato ? "Formato: " + String(body.formato).trim().slice(0, 40) : "",
+    body.pagamento ? "Pagamento: " + String(body.pagamento).trim().slice(0, 120) : "",
+    String(body.observacao || "").trim().slice(0, 300),
+  ].filter(Boolean).join(". ");
 
   // Ja existe proposta pendente da IA para este card? Nao duplica: troca o
   // horario dela (o lead mudou de ideia antes da equipe confirmar).
@@ -429,15 +463,27 @@ async function acaoPropor(sb: SupabaseClient, body: any): Promise<Response> {
     .gte("inicio", new Date().toISOString())
     .order("inicio", { ascending: true })
     .limit(1);
-  if (jaTem && jaTem.length) {
-    const idExistente = String((jaTem[0] as any).id);
+  const idProprio = jaTem && jaTem.length ? String((jaTem[0] as any).id) : null;
+
+  // Horario ja tomado na agenda da clinica (pendente ou confirmado, de qualquer
+  // card)? Nao reserva: devolve os proximos livres para a IA oferecer.
+  const ocupados = await horariosOcupados(sb, slot.inicio, idProprio);
+  const vagas = await vagasPorHorario(sb);
+  if (ocupados === null) return json({ ok: false, erro: "agenda_indisponivel" }, 500);
+  if (slotOcupado(slot.inicio, slot.fim, ocupados, vagas)) {
+    const sugestoes = proximosSlotsLivres(slot.inicio, ocupados, 2, new Date(), TZ_PADRAO, vagas).map((d) => d.toISOString());
+    return json({ ok: false, erro: "horario_ocupado", inicio: slot.inicio.toISOString(), sugestoes });
+  }
+
+  if (idProprio) {
+    const idExistente = idProprio;
     const { error: errUpd } = await sb
       .from("agendamentos")
       .update({
         inicio: slot.inicio.toISOString(),
         fim: slot.fim.toISOString(),
         titulo: "Avaliação — " + servico,
-        observacoes: obs ? "Proposta da IA. " + obs : "Proposta da IA.",
+        observacoes: obs ? "Agendado pela IA. " + obs : "Agendado pela IA.",
         atualizado_em: new Date().toISOString(),
       })
       .eq("id", idExistente)
@@ -463,7 +509,7 @@ async function acaoPropor(sb: SupabaseClient, body: any): Promise<Response> {
       status: "pendente",
       tipo: "avaliacao",
       telefone_lead: telefone || null,
-      observacoes: obs ? "Proposta da IA. " + obs : "Proposta da IA.",
+      observacoes: obs ? "Agendado pela IA. " + obs : "Agendado pela IA.",
       origem: "ia",
       google_sync_status: "desligado",
       criado_por: "ia",

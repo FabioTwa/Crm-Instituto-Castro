@@ -821,6 +821,13 @@ async function carregarVendedores(supabase: Supa): Promise<string | null> {
   vendedorPorGupshupNumero = porNumero;
   vendedorPorZapiInstancia = porZapi;
   vendedorPorZapiNumero = porZapiNumero;
+  // Quem recebe o aviso de agendamento da IA (SQL 37) tambem e da casa: o eco
+  // do aviso nao pode virar card de lead.
+  const { data: aviso } = await supabase.from("crm_ia_config").select("valor").eq("chave", "aviso_agendamento_whatsapp").maybeSingle();
+  for (const parte of String((aviso as any)?.valor || "").split(/[,;\n]/)) {
+    const c = canonicoTelefone(parte.trim());
+    if (c) numeros.add(c);
+  }
   numerosDaCasa = numeros;
   vendedorCacheEm = Date.now();
   return null;
@@ -1523,7 +1530,7 @@ function dispararIaPreAtendimento(
         return;
       }
       const ctl = new AbortController();
-      const t = setTimeout(() => ctl.abort(), 60000); // a IA espera a rajada terminar (ate 12 s) antes de responder
+      const t = setTimeout(() => ctl.abort(), 140000); // a IA espera a rajada terminar (ate 60 s, SQL 37) antes de responder
       const resp = await fetch(`${URL_SB}/functions/v1/ic-ia-pre-atendimento`, {
         method: "POST",
         headers: {
@@ -1559,7 +1566,7 @@ function dispararEncerramentoInativas(supabase: Supa): void {
       const segredo = Deno.env.get("IC_INTERNAL_SECRET") || "";
       if (!URL_SB || !segredo) return;
       const ctl = new AbortController();
-      const t = setTimeout(() => ctl.abort(), 25000);
+      const t = setTimeout(() => ctl.abort(), 120000); // retomadas: a IA escreve ate 3 por rodada
       const resp = await fetch(`${URL_SB}/functions/v1/ic-ia-pre-atendimento`, {
         method: "POST",
         headers: {

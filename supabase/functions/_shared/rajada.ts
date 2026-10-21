@@ -5,9 +5,22 @@
 // (mensagensParaClaude ja junta as mensagens seguidas do lead).
 // Logica pura (sem banco) para ser testavel.
 
-export const RAJADA_SILENCIO_MS = 3000; // sem mensagem nova por 3 s = terminou
-export const RAJADA_TETO_MS = 12000; // nunca segura a resposta mais que isso
+export const RAJADA_SILENCIO_MS = 30000; // sem mensagem nova por 30 s = terminou
+export const RAJADA_TETO_MS = 60000; // nunca segura a resposta mais que isso
 export const RAJADA_PASSO_MS = 700;
+
+// crm_ia_config.rajada_silencio_segundos (padrao 30, 1..60) e
+// rajada_teto_segundos (padrao 60, >= silencio, ate 90). O teto fica abaixo do
+// limite de tempo da Edge Function (150 s), que ainda chama a IA e envia.
+export function rajadaDoConfig(cfg: Record<string, string>): { silencioMs: number; tetoMs: number } {
+  const num = (v: unknown, padrao: number) => {
+    const n = Number(String(v ?? "").trim());
+    return String(v ?? "").trim() !== "" && Number.isFinite(n) ? n : padrao;
+  };
+  const silencio = Math.min(60, Math.max(1, num(cfg.rajada_silencio_segundos, RAJADA_SILENCIO_MS / 1000)));
+  const teto = Math.min(90, Math.max(silencio, num(cfg.rajada_teto_segundos, RAJADA_TETO_MS / 1000)));
+  return { silencioMs: Math.round(silencio * 1000), tetoMs: Math.round(teto * 1000) };
+}
 
 export type DecisaoRajada =
   | { acao: "responder" }
