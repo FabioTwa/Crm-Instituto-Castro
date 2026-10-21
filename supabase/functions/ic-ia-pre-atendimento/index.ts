@@ -12,8 +12,8 @@
 // ATENDIMENTO ATE O AGENDAMENTO (SQL 37): a IA ("Julie", crm_ia_config.persona_*)
 // responde a qualquer hora, informa valores, reserva o horario (ic-agendamento
 // 'propor', status pendente, sem conflito na agenda) e avisa pelo WhatsApp quem
-// confirma com o lead (aviso_agendamento_whatsapp). Depois de agendar, a equipe
-// assume (handoff agendamento_confirmado).
+// confirma com o lead (aviso_agendamento_whatsapp). Depois de agendar, abre o
+// handoff agendamento_confirmado (a equipe confirma), mas a IA segue respondendo.
 // Publicar: supabase functions deploy ic-ia-pre-atendimento --no-verify-jwt
 //
 // PIPELINE (cada etapa grava uma linha em ia_decisoes_log com etapa_pipeline e decisao):

@@ -48,6 +48,10 @@ Depois do 13, inserir o primeiro usuario (criado antes no Supabase Auth, mesmo
 e-mail) e o numero de WhatsApp: o bloco comentado no fim do 13 mostra como.
 `users.pw` recebe `'supabase_auth'`, nunca senha.
 
+## Manutencao (fora da ordem)
+
+`manutencao/apagar-dados-de-teste.sql`: apaga os leads, conversas, agendamentos e logs gerados nos testes, mantendo usuarios, funis, numeros e a configuracao da IA. So homologacao (para se houver mais de 500 leads). Sem volta. Remover quando o IC entrar em producao.
+
 ## Contratos (nomes que o front ja usa)
 
 ### Tabelas novas
