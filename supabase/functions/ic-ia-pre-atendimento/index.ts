@@ -83,7 +83,7 @@ import { canalDoVendedor, type CanalEnvio, enviarTextoCanal } from "../_shared/w
 import { segundosDigitando } from "../_shared/zapi.ts";
 import { detectarHandoff, handoffCalaIA, RESPOSTA_URGENCIA } from "../_shared/handoff-regras.ts";
 import { respostaProibida } from "../_shared/pos-validacao.ts";
-import { interpretarConsentimento } from "../_shared/consentimento.ts";
+import { interpretarConsentimento, MAX_LEMBRETES_CONSENTIMENTO, pedidoDeConversaAnterior } from "../_shared/consentimento.ts";
 import { dentroDoHorario, partesNoFuso, TZ_PADRAO } from "../_shared/horario.ts";
 import { faseTeste } from "../_shared/ia-teste.ts";
 import { decidirRajada, rajadaDoConfig } from "../_shared/rajada.ts";
@@ -104,6 +104,7 @@ import {
   TEXTOS_CONSENTIMENTO_NEGADO,
   TEXTOS_ENCERRAMENTO,
   TEXTOS_ERRO_TEMPORARIO,
+  TEXTOS_LEMBRETE_CONSENTIMENTO,
   TEXTOS_RESPOSTA_BLOQUEADA,
   textoForaDoHorario,
   textoHorarioOcupado,
@@ -712,6 +713,21 @@ async function rodarNaVez(
     cons = novo;
     statusCons = "pendente";
   }
+  if (statusCons === "pendente" && cons && cons.texto_apresentado && pedidoDeConversaAnterior(cons.criado_em, inicioMs)) {
+    // Pedido feito numa conversa ja encerrada: a pessoa voltou do zero. Pede
+    // de novo (registro novo, o antigo fica no historico).
+    const { data: novo, error: errNovo } = await sb
+      .from("ia_consentimentos")
+      .insert({ cliente_crm_id: body.cliente_crm_id, telefone_norm: p.para, status: "pendente" })
+      .select("id, status, texto_apresentado")
+      .maybeSingle();
+    if (errNovo || !novo) {
+      console.error(LOG, "ia_consentimentos (novo pedido) falhou:", errNovo ? errNovo.message : "sem retorno");
+    } else {
+      await p.log("consentimento", "pedido_de_novo_conversa_nova");
+      cons = novo;
+    }
+  }
   if (statusCons === "pendente") {
     const jaPediu = !!(cons && cons.texto_apresentado);
     if (!jaPediu) {
@@ -750,6 +766,21 @@ async function rodarNaVez(
         await p.log("consentimento", "ambiguo_com_regra", { motivo: hdCons.termo });
         await p.enviar(fixoCons, "envio", "enviada_fixa", { origem: "consentimento", motivo: hdCons.motivo });
         return { ok: true, decisao: "regra_" + hdCons.motivo };
+      }
+      // Nem sim nem nao (ex.: a pessoa ja conta o que precisa): nunca deixa sem
+      // resposta. Acolhe e pede o ok de novo, ate MAX_LEMBRETES_CONSENTIMENTO
+      // vezes nesta conversa.
+      let qLembretes = sb
+        .from("ia_decisoes_log")
+        .select("id", { count: "exact", head: true })
+        .eq("cliente_crm_id", body.cliente_crm_id)
+        .eq("etapa_pipeline", "consentimento")
+        .eq("decisao", "lembrete_enviado");
+      if (inicioConversa) qLembretes = qLembretes.gt("criado_em", inicioConversa);
+      const { count: lembretes } = await qLembretes;
+      if ((lembretes || 0) < MAX_LEMBRETES_CONSENTIMENTO) {
+        await p.enviar(sortear(TEXTOS_LEMBRETE_CONSENTIMENTO), "consentimento", "lembrete_enviado");
+        return { ok: true, decisao: "consentimento_lembrete" };
       }
       await p.log("consentimento", "ambiguo");
       return { ok: true, decisao: "consentimento_ambiguo" };

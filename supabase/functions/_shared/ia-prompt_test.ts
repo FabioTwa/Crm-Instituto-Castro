@@ -1,5 +1,6 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
-import { calendarioDiasUteis, montarSystemPrompt, paraWhatsApp, partesDaResposta } from "./ia-prompt.ts";
+import { calendarioDiasUteis, montarSystemPrompt, paraWhatsApp, partesDaResposta, TEXTOS_LEMBRETE_CONSENTIMENTO } from "./ia-prompt.ts";
+import { respostaProibida } from "./pos-validacao.ts";
 
 Deno.test("paraWhatsApp troca markdown pela formatacao do WhatsApp", () => {
   assertEquals(paraWhatsApp("Nossa **Assessoria em Emagrecimento**!"), "Nossa *Assessoria em Emagrecimento*!");
@@ -101,4 +102,12 @@ Deno.test("ligacoes: acolhe quem quis ligar e segue por mensagem, sem prometer r
   assertStringIncludes(sp, "# Ligações");
   assertStringIncludes(sp, "por aqui eu não consigo atender ligação");
   assertStringIncludes(sp, "Nunca prometa que alguém vai ligar para ela.");
+});
+
+Deno.test("lembrete de consentimento: acolhe, pede o ok e passa na pos-validacao", () => {
+  for (const t of TEXTOS_LEMBRETE_CONSENTIMENTO) {
+    assertStringIncludes(t, "atendimento automático");
+    assertStringIncludes(t, "?");
+    assertEquals(respostaProibida(t), null);
+  }
 });
