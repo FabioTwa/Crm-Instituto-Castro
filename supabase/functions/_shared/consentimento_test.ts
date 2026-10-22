@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { interpretarConsentimento } from "./consentimento.ts";
+import { interpretarConsentimento, pedidoDeConversaAnterior } from "./consentimento.ts";
 
 Deno.test("'sim, pode' -> sim", () => {
   assertEquals(interpretarConsentimento("sim, pode"), "sim");
@@ -42,4 +42,16 @@ Deno.test("resposta a 'Podemos seguir?' conta como autorizacao", () => {
   assertEquals(interpretarConsentimento("pode seguir"), "sim");
   assertEquals(interpretarConsentimento("pode continuar sim"), "sim");
   assertEquals(interpretarConsentimento("não podemos"), "nao");
+});
+
+Deno.test("pedido feito antes do encerramento da conversa vale como pedido antigo", () => {
+  const inicio = Date.parse("2026-10-21T20:25:22Z");
+  assertEquals(pedidoDeConversaAnterior("2026-10-15T20:35:46Z", inicio), true);
+  assertEquals(pedidoDeConversaAnterior("2026-10-22T18:53:56Z", inicio), false);
+  assertEquals(pedidoDeConversaAnterior("2026-10-15T20:35:46Z", NaN), false);
+  assertEquals(pedidoDeConversaAnterior(null, inicio), false);
+});
+
+Deno.test("pedido de consulta no lugar do sim/nao fica ambiguo (vira lembrete)", () => {
+  assertEquals(interpretarConsentimento("Olá, boa tarde. Gostaria de marcar uma consulta!"), "ambiguo");
 });

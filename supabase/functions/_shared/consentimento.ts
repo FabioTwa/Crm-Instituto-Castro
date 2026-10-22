@@ -26,3 +26,18 @@ export function interpretarConsentimento(texto: string): Consentimento {
   // "sim, mas nao agora" / "nao sei se pode" -> humano decide; a IA nao responde.
   return "ambiguo";
 }
+
+// Pedido de autorizacao feito numa conversa que ja foi encerrada: a pessoa
+// voltou depois e nao esta respondendo aquele pedido antigo, entao ele deve
+// ser feito de novo (senao a primeira mensagem dela cai como "ambigua" e
+// fica sem resposta).
+export function pedidoDeConversaAnterior(pedidoEm: string | null | undefined, inicioConversaMs: number): boolean {
+  if (!Number.isFinite(inicioConversaMs)) return false;
+  const pedidoMs = Date.parse(String(pedidoEm || ""));
+  return Number.isFinite(pedidoMs) && pedidoMs < inicioConversaMs;
+}
+
+// Quantos lembretes acolhedores a IA manda por conversa quando a resposta ao
+// pedido nao e sim nem nao. Depois disso fica em silencio (sem consentimento
+// a IA nao pode conduzir o atendimento).
+export const MAX_LEMBRETES_CONSENTIMENTO = 2;

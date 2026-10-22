@@ -312,6 +312,14 @@ export const TEXTOS_CONSENTIMENTO_NEGADO = [
   "Tudo bem! Obrigada pelo contato. Se mudar de ideia, é só me chamar por aqui.",
 ] as const;
 
+// Resposta ao pedido de autorizacao que nao foi sim nem nao (ex.: a pessoa ja
+// conta o que precisa). Acolhe, mostra que entendeu e pede o ok de novo.
+export const TEXTOS_LEMBRETE_CONSENTIMENTO = [
+  "Que bom te ver por aqui! 😊 Já vou te ajudar com isso.\n\nSó preciso antes do seu ok para seguir com este primeiro atendimento automático, usando as informações que você compartilhar por aqui só para cuidar do seu agendamento. Posso seguir?",
+  "Claro, vou te ajudar com isso! 😊\n\nAntes, só preciso confirmar com você: posso seguir com este primeiro atendimento automático, usando o que você me contar por aqui só para cuidar do seu agendamento?",
+  "Entendi, pode deixar que eu te ajudo! 😊\n\nSó me confirma uma coisinha antes: posso seguir com este primeiro atendimento automático, usando as informações que você compartilhar aqui só para o seu agendamento?",
+] as const;
+
 export function textoForaDoHorario(): string {
   return (
     `Olá, tudo bem? 😊\n\nObrigado pelo seu contato com o ${CLINICA.nome}! No momento estamos fora do nosso horário de atendimento (${CLINICA.horarios}).\n\n` +
