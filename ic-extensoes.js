@@ -367,22 +367,87 @@
     function icDataBR(iso) { try { return new Date(iso).toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' }); } catch (e) { return iso; } }
     function icHoraBR(iso) { try { return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }); } catch (e) { return ''; } }
 
+    // Visualização: lista (por dia) ou calendário (dia, semana ou mês, no estilo do Google Agenda).
+    // A escolha fica no navegador; se o armazenamento estiver bloqueado, vale o padrão (lista / semana).
+    var IC_AG_MODOS = { lista: 'Lista', calendario: 'Calendário' };
+    var IC_AG_VISOES = { dia: 'Dia', semana: 'Semana', mes: 'Mês' };
+    var IC_CAL_HORA_PX = 48;
+    function icAgLerPref(chave, validos, padrao) {
+        try { var v = localStorage.getItem(chave); if (v && validos[v]) return v; } catch (e) { /* storage bloqueado */ }
+        return padrao;
+    }
+    function icAgGravarPref(chave, valor) { try { localStorage.setItem(chave, valor); } catch (e) { /* storage bloqueado */ } }
+    function icIsoLocal(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+    function icDataDeIso(iso) { var p = String(iso).split('-'); return new Date(+p[0], +p[1] - 1, +p[2]); }
+    function icSomarDias(d, n) { var x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate() + n); return x; }
+
+    // Intervalo visível do calendário: o dia, a semana (domingo a sábado) ou as semanas que cobrem o mês.
+    function icCalIntervalo(visao, cursor) {
+        if (visao === 'dia') return { ini: cursor, dias: 1 };
+        if (visao === 'semana') return { ini: icSomarDias(cursor, -cursor.getDay()), dias: 7 };
+        var primeiro = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+        var ultimo = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0);
+        var ini = icSomarDias(primeiro, -primeiro.getDay());
+        var fim = icSomarDias(ultimo, 6 - ultimo.getDay());
+        return { ini: ini, dias: Math.round((fim - ini) / 86400000) + 1 };
+    }
+    function icCalTitulo(visao, cursor, iv) {
+        if (visao === 'mes') { var t = cursor.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }); return t.charAt(0).toUpperCase() + t.slice(1); }
+        if (visao === 'dia') return cursor.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+        var fim = icSomarDias(iv.ini, 6);
+        if (iv.ini.getMonth() === fim.getMonth()) return iv.ini.getDate() + ' a ' + fim.getDate() + ' de ' + fim.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+        return iv.ini.toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' }) + ' a ' + fim.toLocaleDateString('pt-BR', { day: 'numeric', month: 'short', year: 'numeric' });
+    }
+
+    window.icAgMudarModo = function (modo) { if (!IC_AG_MODOS[modo]) return; window._icAgFiltros.modo = modo; icAgGravarPref('ic_ag_modo', modo); icLoadAgendamentos(); };
+    window.icAgMudarVisao = function (visao) { if (!IC_AG_VISOES[visao]) return; window._icAgFiltros.visao = visao; icAgGravarPref('ic_ag_visao', visao); icLoadAgendamentos(); };
+    window.icAgNavegar = function (passo) {
+        var f = window._icAgFiltros, d = icDataDeIso(f.cursor || icHojeISO(0));
+        if (passo === 0) d = icDataDeIso(icHojeISO(0));
+        else if (f.visao === 'mes') d = new Date(d.getFullYear(), d.getMonth() + passo, 1);
+        else d = icSomarDias(d, passo * (f.visao === 'dia' ? 1 : 7));
+        f.cursor = icIsoLocal(d);
+        icLoadAgendamentos();
+    };
+    window.icAgIrParaDia = function (iso) { var f = window._icAgFiltros; f.cursor = iso; f.visao = 'dia'; icAgGravarPref('ic_ag_visao', 'dia'); icLoadAgendamentos(); };
+
     window.icLoadAgendamentos = async function () {
         if (typeof checarAcessoTela === 'function' && !checarAcessoTela('view-agendamentos')) return;
         var c = document.getElementById('agendamentos-content');
         if (!c) return;
+        if (typeof closeModal === 'function') closeModal('modal-ic-ag-detalhe');
         c.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div></div>';
         var f = window._icAgFiltros;
         if (!f.de) f.de = icHojeISO(0);
         if (!f.ate) f.ate = icHojeISO(14);
+        if (!f.modo) f.modo = icAgLerPref('ic_ag_modo', IC_AG_MODOS, 'lista');
+        if (!f.visao) f.visao = icAgLerPref('ic_ag_visao', IC_AG_VISOES, window.innerWidth < 768 ? 'dia' : 'semana');
+        if (!f.cursor) f.cursor = icHojeISO(0);
+        var cal = f.modo === 'calendario';
+        var cursor = icDataDeIso(f.cursor), iv = icCalIntervalo(f.visao, cursor);
+        // O banco filtra por data; no calendário pede um dia a mais de cada lado e o recorte é feito
+        // pela hora local, para um horário do fim da noite não cair no dia errado.
+        var pDe = cal ? icIsoLocal(icSomarDias(iv.ini, -1)) : f.de;
+        var pAte = cal ? icIsoLocal(icSomarDias(iv.ini, iv.dias)) : f.ate;
         var ehAdmin = window._perfilAtualCache && window._perfilAtualCache.is_admin;
-        var r = await supabaseClient.rpc('ic_agendamentos_lista', { p_de: f.de, p_ate: f.ate, p_responsavel: f.responsavel || null, p_status: f.status || null });
+        var r = await supabaseClient.rpc('ic_agendamentos_lista', { p_de: pDe, p_ate: pAte, p_responsavel: f.responsavel || null, p_status: f.status || null });
         var h = '<div class="page-header"><h1>Agendamentos</h1><div class="header-actions">'
               + '<button class="btn btn-secondary" onclick="icSincronizarPendentes()" title="Reenvia ao Google Agenda os agendamentos que ainda não sincronizaram">' + icon('refresh-cw', 14) + ' Sincronizar</button>'
               + '</div></div>';
         h += '<div class="ic-toolbar" role="toolbar" aria-label="Filtros de Agendamentos">';
-        h += '<div class="ic-tb-item ic-tb-data"><span class="ic-tb-prefixo">De</span><input type="date" aria-label="Data inicial" value="' + f.de + '" onchange="window._icAgFiltros.de=this.value;icLoadAgendamentos()"></div>';
-        h += '<div class="ic-tb-item ic-tb-data"><span class="ic-tb-prefixo">Até</span><input type="date" aria-label="Data final" value="' + f.ate + '" onchange="window._icAgFiltros.ate=this.value;icLoadAgendamentos()"></div>';
+        h += '<div class="ic-tb-item ic-ag-alternar" role="group" aria-label="Formato de visualização">'
+           + Object.keys(IC_AG_MODOS).map(function (k) { return '<button type="button" class="users-tab-btn' + (f.modo === k ? ' active' : '') + '" aria-pressed="' + (f.modo === k) + '" onclick="icAgMudarModo(\'' + k + '\')">' + icon(k === 'lista' ? 'list' : 'calendar-days', 14) + ' ' + IC_AG_MODOS[k] + '</button>'; }).join('') + '</div>';
+        if (cal) {
+            h += '<div class="ic-tb-item ic-cal-nav"><button type="button" class="ic-tb-btn" onclick="icAgNavegar(0)">Hoje</button>'
+               + '<button type="button" class="ic-cal-seta" aria-label="Anterior" onclick="icAgNavegar(-1)">' + icon('chevron-left', 18) + '</button>'
+               + '<button type="button" class="ic-cal-seta" aria-label="Próximo" onclick="icAgNavegar(1)">' + icon('chevron-right', 18) + '</button>'
+               + '<span class="ic-cal-titulo">' + escapeHtml(icCalTitulo(f.visao, cursor, iv)) + '</span></div>';
+            h += '<div class="ic-tb-item ic-tb-periodo"><select aria-label="Visão do calendário" onchange="icAgMudarVisao(this.value)">'
+               + Object.keys(IC_AG_VISOES).map(function (k) { return '<option value="' + k + '"' + (f.visao === k ? ' selected' : '') + '>' + IC_AG_VISOES[k] + '</option>'; }).join('') + '</select></div>';
+        } else {
+            h += '<div class="ic-tb-item ic-tb-data"><span class="ic-tb-prefixo">De</span><input type="date" aria-label="Data inicial" value="' + f.de + '" onchange="window._icAgFiltros.de=this.value;icLoadAgendamentos()"></div>';
+            h += '<div class="ic-tb-item ic-tb-data"><span class="ic-tb-prefixo">Até</span><input type="date" aria-label="Data final" value="' + f.ate + '" onchange="window._icAgFiltros.ate=this.value;icLoadAgendamentos()"></div>';
+        }
         h += '<div class="ic-tb-item ic-tb-periodo"><select aria-label="Status" onchange="window._icAgFiltros.status=this.value;icLoadAgendamentos()"><option value="">Todos os status</option>'
            + Object.keys(IC_STATUS_AG).map(function (k) { return '<option value="' + k + '"' + (f.status === k ? ' selected' : '') + '>' + IC_STATUS_AG[k] + '</option>'; }).join('') + '</select></div>';
         if (ehAdmin) {
@@ -394,7 +459,11 @@
             c.innerHTML = h; return;
         }
         var itens = r.data || [];
-        if (!itens.length) {
+        window._icAgItens = {};
+        itens.forEach(function (a) { window._icAgItens[a.id] = a; });
+        if (cal) {
+            h += f.visao === 'mes' ? icCalMesHtml(itens, cursor, iv) : icCalGradeHtml(itens, iv);
+        } else if (!itens.length) {
             h += '<div class="ic-vazio-grande">' + icon('calendar', 36) + '<h3>Nenhum agendamento no período</h3><p>Agende a partir do card do lead (botão "Agendar") ou aguarde as propostas da assistente virtual.</p></div>';
         } else {
             var porDia = {};
@@ -406,7 +475,120 @@
             });
         }
         c.innerHTML = h;
+        if (cal && f.visao !== 'mes') {
+            // Como no Google Agenda: abre rolado no começo do expediente (ou no primeiro horário marcado, se for antes).
+            var corpo = c.querySelector('.ic-cal-rolagem');
+            if (corpo) corpo.scrollTop = Math.max(0, (Math.min(7, icCalPrimeiraHora(itens, iv)) - 0.5) * IC_CAL_HORA_PX);
+        }
         if (ehAdmin) icPopularResponsaveis('ic-ag-filtro-resp', f.responsavel, true);
+        if (window.lucide && lucide.createIcons) { try { lucide.createIcons(); } catch (e) {} }
+    };
+
+    // Agendamentos de cada dia do intervalo, pela data local do início.
+    function icCalPorDia(itens, iv) {
+        var mapa = {};
+        for (var i = 0; i < iv.dias; i++) mapa[icIsoLocal(icSomarDias(iv.ini, i))] = [];
+        itens.forEach(function (a) { var k = icIsoLocal(new Date(a.inicio)); if (mapa[k]) mapa[k].push(a); });
+        Object.keys(mapa).forEach(function (k) { mapa[k].sort(function (x, y) { return new Date(x.inicio) - new Date(y.inicio); }); });
+        return mapa;
+    }
+    function icCalPrimeiraHora(itens, iv) {
+        var mapa = icCalPorDia(itens, iv), menor = 24;
+        Object.keys(mapa).forEach(function (k) { mapa[k].forEach(function (a) { menor = Math.min(menor, new Date(a.inicio).getHours()); }); });
+        return menor;
+    }
+    function icCalEvClasse(a) { return 'ic-cal-ev ic-cal-ev-' + (IC_STATUS_AG[a.status] ? a.status : 'pendente'); }
+
+    // Grade de horários (Dia ou Semana): uma coluna por dia, 24 h, eventos posicionados pelo horário.
+    // Eventos que se sobrepõem dividem a largura da coluna, como no Google Agenda.
+    function icCalGradeHtml(itens, iv) {
+        var mapa = icCalPorDia(itens, iv), hojeIso = icHojeISO(0), agora = new Date();
+        // O cabeçalho dos dias fica fixo dentro da mesma área de rolagem, para as colunas nunca desalinharem da grade.
+        var h = '<div class="ic-cal ic-cal-grade" style="--ic-cal-dias:' + iv.dias + ';--ic-cal-hora:' + IC_CAL_HORA_PX + 'px"><div class="ic-cal-rolagem">';
+        h += '<div class="ic-cal-cab"><div class="ic-cal-gutter"></div>';
+        Object.keys(mapa).forEach(function (k) {
+            var d = icDataDeIso(k);
+            h += '<button type="button" class="ic-cal-cab-dia' + (k === hojeIso ? ' hoje' : '') + '" onclick="icAgIrParaDia(\'' + k + '\')" title="Ver o dia">'
+               + '<span>' + d.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '').toUpperCase() + '</span><b>' + d.getDate() + '</b></button>';
+        });
+        h += '</div><div class="ic-cal-corpo"><div class="ic-cal-horas">';
+        for (var hr = 0; hr < 24; hr++) h += '<div class="ic-cal-hora"><span>' + (hr ? String(hr).padStart(2, '0') + ':00' : '') + '</span></div>';
+        h += '</div>';
+        Object.keys(mapa).forEach(function (k) {
+            h += '<div class="ic-cal-col' + (k === hojeIso ? ' hoje' : '') + '">';
+            icCalColunas(mapa[k]).forEach(function (p) {
+                var a = p.a, ini = new Date(a.inicio), fim = a.fim ? new Date(a.fim) : new Date(ini.getTime() + 1800000);
+                var minIni = ini.getHours() * 60 + ini.getMinutes();
+                var dur = Math.max(20, Math.min(24 * 60 - minIni, (fim - ini) / 60000));
+                var estilo = 'top:' + (minIni / 60 * IC_CAL_HORA_PX) + 'px;height:' + (dur / 60 * IC_CAL_HORA_PX - 2) + 'px;left:calc(' + (p.col / p.total * 100) + '% + 1px);width:calc(' + (100 / p.total) + '% - 3px)';
+                h += '<button type="button" class="' + icCalEvClasse(a) + (dur < 45 ? ' curto' : '') + '" style="' + estilo + '" onclick="icAgAbrirDetalhe(\'' + a.id + '\')" title="' + escapeHtml((a.nome || 'Lead') + ' · ' + icHoraBR(a.inicio)) + '">'
+                   + '<b>' + escapeHtml(a.nome || 'Lead') + '</b><span>' + icHoraBR(a.inicio) + (a.fim ? ' – ' + icHoraBR(a.fim) : '') + '</span>'
+                   + (dur >= 60 && a.titulo ? '<span>' + escapeHtml(a.titulo) + '</span>' : '') + '</button>';
+            });
+            if (k === hojeIso) h += '<div class="ic-cal-agora" style="top:' + ((agora.getHours() * 60 + agora.getMinutes()) / 60 * IC_CAL_HORA_PX) + 'px"></div>';
+            h += '</div>';
+        });
+        h += '</div></div></div>';
+        if (!itens.length) h += '<p class="ic-cal-vazio">Nenhum agendamento neste período.</p>';
+        return h;
+    }
+    // Distribui em colunas os eventos de um dia que se sobrepõem (grupos de sobreposição).
+    function icCalColunas(lista) {
+        var res = [], grupo = [], fimGrupo = 0, colunasFim = [];
+        function fecharGrupo() { var n = colunasFim.length; grupo.forEach(function (p) { p.total = n; res.push(p); }); grupo = []; colunasFim = []; }
+        lista.forEach(function (a) {
+            var ini = new Date(a.inicio).getTime(), fim = a.fim ? new Date(a.fim).getTime() : ini + 1800000;
+            fim = Math.max(fim, ini + 20 * 60000);
+            if (grupo.length && ini >= fimGrupo) fecharGrupo();
+            var col = colunasFim.findIndex(function (f) { return f <= ini; });
+            if (col < 0) { col = colunasFim.length; colunasFim.push(fim); } else colunasFim[col] = fim;
+            grupo.push({ a: a, col: col });
+            fimGrupo = grupo.length === 1 ? fim : Math.max(fimGrupo, fim);
+        });
+        if (grupo.length) fecharGrupo();
+        return res;
+    }
+
+    // Mês: uma célula por dia, até 3 agendamentos visíveis e "+N mais" (abre o dia).
+    function icCalMesHtml(itens, cursor, iv) {
+        var mapa = icCalPorDia(itens, iv), hojeIso = icHojeISO(0);
+        var h = '<div class="ic-cal ic-cal-mes"><div class="ic-cal-mes-cab">';
+        for (var i = 0; i < 7; i++) h += '<span>' + icSomarDias(iv.ini, i).toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '').toUpperCase() + '</span>';
+        h += '</div><div class="ic-cal-mes-grade">';
+        Object.keys(mapa).forEach(function (k) {
+            var d = icDataDeIso(k), lista = mapa[k];
+            h += '<div class="ic-cal-mes-dia' + (d.getMonth() !== cursor.getMonth() ? ' fora' : '') + (k === hojeIso ? ' hoje' : '') + '">';
+            h += '<button type="button" class="ic-cal-mes-num" onclick="icAgIrParaDia(\'' + k + '\')" aria-label="Ver ' + escapeHtml(icDataBR(k + 'T12:00:00')) + '">' + d.getDate() + '</button>';
+            lista.slice(0, 3).forEach(function (a) {
+                h += '<button type="button" class="ic-cal-mes-ev ic-cal-ev-' + (IC_STATUS_AG[a.status] ? a.status : 'pendente') + '" onclick="icAgAbrirDetalhe(\'' + a.id + '\')" title="' + escapeHtml((a.nome || 'Lead') + ' · ' + (a.titulo || '')) + '">'
+                   + '<span class="ic-cal-ponto"></span><span>' + icHoraBR(a.inicio) + '</span> <b>' + escapeHtml(a.nome || 'Lead') + '</b></button>';
+            });
+            if (lista.length > 3) h += '<button type="button" class="ic-cal-mes-mais" onclick="icAgIrParaDia(\'' + k + '\')">+' + (lista.length - 3) + ' mais</button>';
+            h += '</div>';
+        });
+        h += '</div></div>';
+        return h;
+    }
+
+    // Detalhe de um agendamento do calendário: o mesmo cartão da lista (com Confirmar, Cancelar etc.) num modal.
+    window.icAgAbrirDetalhe = function (id) {
+        var a = (window._icAgItens || {})[id];
+        if (!a) return;
+        var m = document.getElementById('modal-ic-ag-detalhe');
+        if (!m) {
+            m = document.createElement('div');
+            m.className = 'modal-overlay';
+            m.id = 'modal-ic-ag-detalhe';
+            m.innerHTML = '<div class="modal-card ic-ag-detalhe"><div class="modal-header"><h2 id="ic-ag-detalhe-titulo"></h2><button class="modal-close" aria-label="Fechar" onclick="closeModal(\'modal-ic-ag-detalhe\')">&times;</button></div><div id="ic-ag-detalhe-corpo"></div></div>';
+            m.addEventListener('click', function (ev) {
+                // Fora do cartão fecha; o link do nome abre o card do lead e também fecha.
+                if (ev.target === m || ev.target.closest('a')) closeModal('modal-ic-ag-detalhe');
+            });
+            document.body.appendChild(m);
+        }
+        document.getElementById('ic-ag-detalhe-titulo').textContent = icDataBR(a.inicio);
+        document.getElementById('ic-ag-detalhe-corpo').innerHTML = icAgendaItemHtml(a);
+        openModal('modal-ic-ag-detalhe');
         if (window.lucide && lucide.createIcons) { try { lucide.createIcons(); } catch (e) {} }
     };
 

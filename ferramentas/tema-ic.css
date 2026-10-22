@@ -396,3 +396,76 @@
             .ic-toolbar .ic-tb-item:not(.ic-tb-horas), .ic-toolbar > select { flex: 1 1 100% !important; }
             .ic-toolbar .ic-tb-horas { flex: 1 1 100%; }
         }
+        /* ===== AGENDAMENTOS: alternar Lista/Calendário e calendário no estilo do Google Agenda (dia, semana, mês) ===== */
+        .ic-toolbar .ic-ag-alternar { gap: 0; }
+        .ic-toolbar .ic-ag-alternar .users-tab-btn { display: inline-flex; align-items: center; gap: 6px; }
+        .ic-toolbar .ic-ag-alternar .users-tab-btn:first-child { border-radius: 30px 0 0 30px; }
+        .ic-toolbar .ic-ag-alternar .users-tab-btn:last-child { border-radius: 0 30px 30px 0; margin-left: -2px; }
+        .ic-toolbar .ic-cal-nav { gap: 4px; }
+        .ic-toolbar .ic-cal-nav + .ic-tb-periodo { flex: 0 1 130px; min-width: 110px; }
+        .ic-cal-seta { width: 36px; height: 36px; border: 0; border-radius: 50%; background: transparent; color: var(--ic-primary); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+        .ic-cal-seta:hover { background: var(--ic-secondary-soft); }
+        .ic-cal-titulo { font-family: 'Manrope', sans-serif; font-size: 18px; font-weight: 600; color: var(--ic-primary); margin-left: 6px; white-space: nowrap; }
+        .ic-cal { background: var(--ic-white); border: 2px solid var(--ic-border); border-radius: 10px; overflow: hidden; }
+        .ic-cal-vazio { font-size: 13px; color: var(--ic-muted); margin-top: 10px; }
+        /* Grade de horários (Dia/Semana) */
+        .ic-cal { --ic-cal-linha: color-mix(in srgb, var(--ic-border-strong) 40%, transparent); }
+        .ic-cal-rolagem { max-height: 680px; overflow: auto; }
+        .ic-cal-cab, .ic-cal-corpo { display: grid; grid-template-columns: 56px repeat(var(--ic-cal-dias), minmax(96px, 1fr)); min-width: calc(56px + var(--ic-cal-dias) * 96px); }
+        .ic-cal-cab { position: sticky; top: 0; z-index: 4; background: var(--ic-white); border-bottom: 2px solid var(--ic-border); }
+        .ic-cal-cab-dia { border: 0; background: transparent; padding: 8px 4px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 2px; font-family: 'Manrope', sans-serif; }
+        .ic-cal-cab-dia span { font-size: 11px; font-weight: 600; letter-spacing: .5px; color: var(--ic-muted); }
+        .ic-cal-cab-dia b { font-size: 22px; font-weight: 500; color: var(--ic-primary); width: 40px; height: 40px; line-height: 40px; border-radius: 50%; }
+        .ic-cal-cab-dia:hover b { background: var(--ic-bg-ice); }
+        .ic-cal-cab-dia.hoje span { color: var(--ic-accent); }
+        .ic-cal-cab-dia.hoje b { background: var(--ic-accent); color: var(--ic-white); }
+        .ic-cal-corpo { position: relative; }
+        .ic-cal-hora { height: var(--ic-cal-hora); position: relative; }
+        .ic-cal-hora span { position: absolute; top: -7px; right: 8px; font-size: 10px; color: var(--ic-muted); }
+        .ic-cal-col { position: relative; height: calc(24 * var(--ic-cal-hora)); border-left: 1px solid var(--ic-cal-linha);
+            background-image: linear-gradient(to bottom, var(--ic-cal-linha) 1px, transparent 1px); background-size: 100% var(--ic-cal-hora); }
+        .ic-cal-col.hoje { background-color: var(--ic-bg-ice); }
+        .ic-cal-ev { position: absolute; box-sizing: border-box; overflow: hidden; border: 0; border-left: 4px solid var(--ic-accent); border-radius: 6px; padding: 3px 6px; text-align: left; cursor: pointer;
+            display: flex; flex-direction: column; gap: 1px; font-size: 11px; line-height: 1.3; z-index: 1; box-shadow: 0 1px 2px #0E0E2514; }
+        .ic-cal-ev b { font-family: 'Manrope', sans-serif; font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ic-cal-ev span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ic-cal-ev.curto { flex-direction: row; gap: 6px; align-items: center; }
+        .ic-cal-ev:hover { filter: brightness(.96); z-index: 2; }
+        .ic-cal-agora { position: absolute; left: 0; right: 0; height: 2px; background: var(--ic-danger); z-index: 3; pointer-events: none; }
+        .ic-cal-agora::before { content: ''; position: absolute; left: -6px; top: -5px; width: 12px; height: 12px; border-radius: 50%; background: var(--ic-danger); }
+        /* Cores por status (as mesmas dos selos da lista) */
+        .ic-cal-ev-pendente { background: var(--ic-star-soft); border-left-color: var(--ic-star); color: var(--ic-primary); }
+        .ic-cal-ev-confirmado { background: var(--ic-accent); border-left-color: var(--ic-accent-dark); color: var(--ic-white); }
+        .ic-cal-ev-cancelado { background: var(--ic-danger-soft); border-left-color: var(--ic-danger); color: var(--ic-danger); text-decoration: line-through; opacity: .75; }
+        .ic-cal-ev-realizado { background: var(--ic-green-soft); border-left-color: var(--ic-green); color: var(--ic-primary); }
+        .ic-cal-ev-faltou { background: var(--ic-bg-ice); border-left-color: var(--ic-muted); color: var(--ic-muted); }
+        /* Mês */
+        .ic-cal-mes-cab, .ic-cal-mes-grade { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+        .ic-cal-mes-cab span { text-align: center; padding: 8px 0 4px; font-family: 'Manrope', sans-serif; font-size: 11px; font-weight: 600; letter-spacing: .5px; color: var(--ic-muted); }
+        .ic-cal-mes-dia { min-height: 112px; min-width: 0; border-top: 1px solid var(--ic-cal-linha); border-left: 1px solid var(--ic-cal-linha); padding: 4px; display: flex; flex-direction: column; gap: 2px; }
+        .ic-cal-mes-dia:nth-child(7n+1) { border-left: 0; }
+        .ic-cal-mes-dia.fora .ic-cal-mes-num { color: var(--ic-muted); opacity: .6; }
+        .ic-cal-mes-num { align-self: center; width: 28px; height: 28px; border: 0; border-radius: 50%; background: transparent; font-family: 'Manrope', sans-serif; font-size: 12px; font-weight: 600; color: var(--ic-primary); cursor: pointer; }
+        .ic-cal-mes-num:hover { background: var(--ic-bg-ice); }
+        .ic-cal-mes-dia.hoje .ic-cal-mes-num { background: var(--ic-accent); color: var(--ic-white); opacity: 1; }
+        .ic-cal-mes-ev { border: 0; border-radius: 4px; padding: 2px 4px; text-align: left; cursor: pointer; font-size: 11px; display: flex; align-items: center; gap: 4px; min-width: 0;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: transparent !important; color: var(--ic-primary) !important; text-decoration: none; opacity: 1; }
+        .ic-cal-mes-ev:hover { background: var(--ic-bg-ice) !important; }
+        .ic-cal-mes-ev b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+        .ic-cal-mes-ev.ic-cal-ev-cancelado b { text-decoration: line-through; color: var(--ic-muted); }
+        .ic-cal-ponto { flex: 0 0 8px; width: 8px; height: 8px; border-radius: 50%; background: var(--ic-accent); }
+        .ic-cal-ev-pendente .ic-cal-ponto { background: var(--ic-star); }
+        .ic-cal-ev-cancelado .ic-cal-ponto { background: var(--ic-danger); }
+        .ic-cal-ev-realizado .ic-cal-ponto { background: var(--ic-green); }
+        .ic-cal-ev-faltou .ic-cal-ponto { background: var(--ic-muted); }
+        .ic-cal-mes-mais { border: 0; background: transparent; text-align: left; padding: 2px 4px; font-size: 11px; font-weight: 700; color: var(--ic-secondary); cursor: pointer; border-radius: 4px; }
+        .ic-cal-mes-mais:hover { background: var(--ic-bg-ice); }
+        /* Detalhe do agendamento (modal): o cartão da lista em coluna única */
+        .ic-ag-detalhe .ic-agenda-item { grid-template-columns: 70px 1fr; border: 0; padding: 4px 0 0; margin: 0; }
+        .ic-ag-detalhe .ic-agenda-acoes { grid-column: 1 / -1; justify-content: flex-start; }
+        @media (max-width: 768px) {
+            .ic-cal-titulo { font-size: 15px; }
+            .ic-cal-mes-dia { min-height: 72px; }
+            .ic-cal-mes-ev span, .ic-cal-mes-ev b { display: none; }
+            .ic-cal-mes-ev { justify-content: center; }
+        }
