@@ -13,26 +13,28 @@
 // responde a qualquer hora, informa valores, reserva o horario (ic-agendamento
 // 'propor', status pendente, sem conflito na agenda) e avisa pelo WhatsApp quem
 // confirma com o lead (aviso_agendamento_whatsapp). Depois de agendar, abre o
-// handoff agendamento_confirmado (a equipe confirma), mas a IA segue respondendo.
+// handoff agendamento_confirmado (so historico), e a IA segue respondendo.
+// ATENDIMENTO 100% AUTONOMO (22/10/2026): nao existe atendente. A IA nunca diz
+// que vai passar para a equipe; so a recusa do consentimento (LGPD) a cala.
 // Publicar: supabase functions deploy ic-ia-pre-atendimento --no-verify-jwt
 //
 // PIPELINE (cada etapa grava uma linha em ia_decisoes_log com etapa_pipeline e decisao):
 //   1  flags            ic_flag('ia_pre_atendimento') e crm_ia_config.ligada='true'
 //   2  humano_assumiu   vendedor respondeu nas ultimas 24 h (e depois do ultimo
-//                       encerramento) -> fim; ia_handoffs pendente -> aviso de
-//                       espera UMA vez por handoff (TEXTOS_AVISO_ESPERA), depois fim
+//                       encerramento) -> fim; consentimento negado pendente -> fim
 //   3  limites          horario (so com atender_fora_do_horario='false': 1 aviso/dia/card),
 //                       max_respostas_por_conversa (atingiu: handoff 'manual'),
 //                       contado desde o ultimo encerramento por inatividade
 //   4  contexto         RPC ic_ia_contexto(card, contexto_mensagens=30), so mensagens depois do
 //                       ultimo encerramento
 //   5  consentimento    LGPD: pede, interpreta SIM/NAO, nega -> handoff + despedida
-//   6  handoff_regras   regex por CODIGO (urgencia, duvida clinica, reclamacao, humano)
+//   6  handoff_regras   regex por CODIGO: urgencia e duvida clinica -> texto fixo (CFM);
+//                       reclamacao e pedido de humano -> so log, a IA conduz
 //   7  exemplos         ate 20 ia_exemplos_conversa ativos, filtrados por tag do funil
-//   8  claude           Messages API (fetch), tools propor_agendamento / encaminhar_humano
+//   8  claude           Messages API (fetch), tools propor_agendamento / cancelar_agendamento
 //   9  pos_validacao    filtro regex CFM na resposta do modelo
 //      (antes das tools: mensagem nova do lead durante a IA -> desiste, a nova responde)
-//   10 tools            executa as ferramentas (ic-agendamento 'propor' + aviso a equipe, handoffs)
+//   10 tools            executa as ferramentas (ic-agendamento 'propor'/'cancelar' + aviso a equipe)
 //   11 envio            provedor do numero (_shared/whatsapp-envio.ts: Meta ou Gupshup) + crm_conversas autor 'ia'
 //   12 funil            RPC ic_avancar_etapa (SQL 33): card anda so para frente
 //                       (conversa -> em_conversa; lead pergunta valor/convenio/formato
@@ -79,14 +81,14 @@ import { iaConfig, icFlag } from "../_shared/flags.ts";
 import { canonicoTelefone, telefoneBrPlausivel } from "../_shared/telefone.ts";
 import { canalDoVendedor, type CanalEnvio, enviarTextoCanal } from "../_shared/whatsapp-envio.ts";
 import { segundosDigitando } from "../_shared/zapi.ts";
-import { detectarHandoff, handoffCalaIA, PREFIXO_HANDOFF_INFORMACAO } from "../_shared/handoff-regras.ts";
+import { detectarHandoff, handoffCalaIA, RESPOSTA_URGENCIA } from "../_shared/handoff-regras.ts";
 import { respostaProibida } from "../_shared/pos-validacao.ts";
 import { interpretarConsentimento } from "../_shared/consentimento.ts";
 import { dentroDoHorario, partesNoFuso, TZ_PADRAO } from "../_shared/horario.ts";
 import { faseTeste } from "../_shared/ia-teste.ts";
 import { decidirRajada, rajadaDoConfig } from "../_shared/rajada.ts";
 import { decidirFollowup, followupsDoConfig, instrucaoFollowup, podeMandarFollowup, textoFollowupFixo } from "../_shared/ia-followup.ts";
-import { dataHoraLocal, numerosAviso, textoAvisoAgendamento } from "../_shared/aviso-agendamento.ts";
+import { dataHoraLocal, numerosAviso, textoAvisoAgendamento, textoAvisoCancelamento } from "../_shared/aviso-agendamento.ts";
 import { decidirEncerramento, ETAPA_ENCERRAMENTO, mensagensDaConversaAtual, minutosEncerramento } from "../_shared/ia-encerramento.ts";
 import { detectarNegociacao, type EventoFunil } from "../_shared/funil-ia.ts";
 import {
@@ -97,15 +99,16 @@ import {
   partesDaResposta,
   sortear,
   TEXTOS_AGENDAMENTO_ANOTADO,
-  TEXTOS_AVISO_ESPERA,
+  TEXTOS_AGENDAMENTO_FALHOU,
+  TEXTOS_CANCELAMENTO_FALHOU,
   TEXTOS_CONSENTIMENTO_NEGADO,
   TEXTOS_ENCERRAMENTO,
-  TEXTOS_HANDOFF_GENERICO,
+  TEXTOS_ERRO_TEMPORARIO,
   TEXTOS_RESPOSTA_BLOQUEADA,
   textoForaDoHorario,
   textoHorarioOcupado,
   textoPedidoConsentimento,
-  TOOL_ENCAMINHAR_HUMANO,
+  TOOL_CANCELAR_AGENDAMENTO,
   TOOL_PROPOR_AGENDAMENTO,
   type ExemploConversa,
 } from "../_shared/ia-prompt.ts";
@@ -268,7 +271,7 @@ class Pipeline {
   }
 
   // Quando foi aberto o handoff pendente mais antigo que cala a IA (ou null).
-  // Pedido de informacao (handoffCalaIA = false) nao conta: a IA segue.
+  // So a recusa do consentimento cala (handoffCalaIA); os outros sao historico.
   async handoffPendenteDesde(): Promise<string | null> {
     const { data, error } = await this.sb
       .from("ia_handoffs")
@@ -281,7 +284,7 @@ class Pipeline {
       console.warn(LOG, "ia_handoffs consulta falhou:", error.message);
       return null;
     }
-    const cala = (data || []).find((h: any) => handoffCalaIA({ motivo: String(h.motivo), detalhe: h.detalhe }));
+    const cala = (data || []).find((h: any) => handoffCalaIA({ motivo: String(h.motivo) }));
     return cala ? String((cala as any).criado_em) : null;
   }
 
@@ -605,22 +608,9 @@ async function rodarNaVez(
   }
   const handoffDesde = await p.handoffPendenteDesde();
   if (handoffDesde) {
-    // Equipe ja chamada e o lead escreveu de novo: avisa UMA vez por handoff
-    // que a equipe vai responder, para o lead nao ficar sem retorno.
-    const { data: avisos } = await sb
-      .from("ia_decisoes_log")
-      .select("id")
-      .eq("cliente_crm_id", body.cliente_crm_id)
-      .eq("etapa_pipeline", "humano_assumiu")
-      .eq("decisao", "aviso_espera")
-      .gte("criado_em", handoffDesde)
-      .limit(1);
-    if (!avisos || !avisos.length) {
-      const env = await p.enviar(sortear(TEXTOS_AVISO_ESPERA), "humano_assumiu", "aviso_espera", { origem: "handoff_pendente" });
-      return { ok: true, decisao: env.enviado ? "aviso_espera" : "simulada_envio_desligado" };
-    }
-    await p.log("humano_assumiu", "humano_no_controle", { motivo: "handoff pendente (aviso de espera ja enviado)" });
-    return { ok: true, decisao: "humano_no_controle" };
+    // So a recusa do atendimento automatizado chega aqui (handoffCalaIA): silencio.
+    await p.log("humano_assumiu", "consentimento_negado_pendente");
+    return { ok: true, decisao: "consentimento_negado" };
   }
   await p.log("humano_assumiu", "ia_pode_responder");
 
@@ -751,14 +741,15 @@ async function rodarNaVez(
       return { ok: true, decisao: "consentimento_negado" };
     }
     if (resp === "ambiguo") {
-      // "Prefiro falar com alguém" no lugar do sim/não: a mensagem de
-      // autorização oferece isso, então passa para a equipe.
+      // Urgencia ou duvida clinica no lugar do sim/nao: texto fixo (CFM), sem
+      // registrar consentimento.
       const hdCons = detectarHandoff(textoLead);
-      if (hdCons) {
-        await p.handoff(hdCons.motivo, `regra '${hdCons.termo}' na resposta ao consentimento`);
-        await p.log("consentimento", "ambiguo_com_handoff", { motivo: hdCons.termo });
-        await p.enviar(hdCons.resposta_fixa || sortear(TEXTOS_HANDOFF_GENERICO), "envio", "enviada_fixa", { origem: "consentimento", motivo: hdCons.motivo });
-        return { ok: true, decisao: "handoff_" + hdCons.motivo };
+      const fixoCons = hdCons ? textoFixoRegra(hdCons.motivo) : null;
+      if (hdCons && fixoCons) {
+        if (hdCons.motivo === "urgencia") await p.handoff("urgencia", `regra '${hdCons.termo}' na resposta ao consentimento`);
+        await p.log("consentimento", "ambiguo_com_regra", { motivo: hdCons.termo });
+        await p.enviar(fixoCons, "envio", "enviada_fixa", { origem: "consentimento", motivo: hdCons.motivo });
+        return { ok: true, decisao: "regra_" + hdCons.motivo };
       }
       await p.log("consentimento", "ambiguo");
       return { ok: true, decisao: "consentimento_ambiguo" };
@@ -773,13 +764,16 @@ async function rodarNaVez(
 
   // 6) handoff_regras (codigo, antes da IA)
   const hd = detectarHandoff(textoLead);
-  if (hd) {
-    await p.handoff(hd.motivo, `regra '${hd.termo}'`);
+  const fixo = hd ? textoFixoRegra(hd.motivo) : null;
+  if (hd && fixo) {
+    // Urgencia fica registrada em ia_handoffs (historico no CRM; nao cala a IA).
+    if (hd.motivo === "urgencia") await p.handoff("urgencia", `regra '${hd.termo}'`);
     await p.log("handoff_regras", hd.motivo, { motivo: hd.termo });
-    if (hd.resposta_fixa) await p.enviar(hd.resposta_fixa, "envio", "enviada_fixa", { origem: "handoff_regras", motivo: hd.motivo });
-    return { ok: true, decisao: "handoff_" + hd.motivo };
+    await p.enviar(fixo, "envio", "enviada_fixa", { origem: "handoff_regras", motivo: hd.motivo });
+    return { ok: true, decisao: "regra_" + hd.motivo };
   }
-  await p.log("handoff_regras", "nenhuma");
+  // Reclamacao e pedido de humano: a IA conduz (prompt), so fica no log.
+  await p.log("handoff_regras", hd ? hd.motivo + "_ia_conduz" : "nenhuma", hd ? { motivo: hd.termo } : {});
 
   // 7) exemplos
   let exemplos: ExemploConversa[] = [];
@@ -838,7 +832,7 @@ async function rodarNaVez(
       latencia_ms: r.latencia_ms, dados_enviados_resumo: resumo,
     });
     await p.handoff("erro_ia", "falha na chamada do modelo: " + (r.erro || r.stop_reason));
-    await p.enviar(sortear(TEXTOS_RESPOSTA_BLOQUEADA), "envio", "enviada_fixa", { origem: "erro_ia" });
+    await p.enviar(sortear(TEXTOS_ERRO_TEMPORARIO), "envio", "enviada_fixa", { origem: "erro_ia" });
     return { ok: true, decisao: "erro_ia" };
   }
   await p.log("claude", "respondeu", {
@@ -868,18 +862,7 @@ async function rodarNaVez(
   // 10) tools
   const marcadores: Record<string, unknown> = {};
   for (const t of r.tools) {
-    if (t.name === TOOL_ENCAMINHAR_HUMANO) {
-      const motivoBruto = String(t.input?.motivo || "outro");
-      const motivo: MotivoHandoffDb = (["duvida_clinica", "urgencia", "reclamacao", "pedido_humano"] as string[]).includes(motivoBruto)
-        ? (motivoBruto as MotivoHandoffDb)
-        : "manual";
-      // "outro" = informacao que a IA nao tem: avisa a equipe e segue conversando.
-      const prefixo = motivo === "manual" ? PREFIXO_HANDOFF_INFORMACAO : "IA: ";
-      await p.handoff(motivo, prefixo + String(t.input?.detalhe || motivoBruto));
-      await p.log("tools", "encaminhar_humano", { motivo });
-      if (!textoResposta) textoResposta = sortear(TEXTOS_HANDOFF_GENERICO);
-      marcadores.handoff = motivo;
-    } else if (t.name === TOOL_PROPOR_AGENDAMENTO) {
+    if (t.name === TOOL_PROPOR_AGENDAMENTO) {
       const resultado = await proporAgendamento(body.cliente_crm_id, t.input || {});
       await p.log("tools", resultado.ok ? "propor_agendamento" : "propor_agendamento_falhou", {
         motivo: resultado.ok ? null : resultado.erro, detalhe: { agendamento_id: resultado.agendamento_id, inicio: resultado.inicio, atualizado: resultado.atualizado },
@@ -887,15 +870,29 @@ async function rodarNaVez(
       if (resultado.ok) {
         if (!textoResposta) textoResposta = sortear(TEXTOS_AGENDAMENTO_ANOTADO);
         marcadores.agendamento_id = resultado.agendamento_id;
-        // Agendou: a equipe assume a partir daqui (confirma com o lead).
+        // Agendou: fica o handoff agendamento_confirmado (historico no CRM; a IA segue).
         await p.handoff("agendamento_confirmado", `IA agendou ${resultado.inicio ? dataHoraLocal(resultado.inicio) : ""} (agendamento ${resultado.agendamento_id})`);
         await avisarEquipeAgendamento(p, cfg, t.input || {}, resultado);
       } else if (resultado.erro === "horario_ocupado") {
         // A IA ja tinha escrito "reservado": troca pelo aviso com horarios livres.
         textoResposta = textoHorarioOcupado(resultado.sugestoes.map((iso) => dataHoraLocal(iso)));
       } else {
-        await p.handoff("manual", "IA nao conseguiu agendar: " + (resultado.erro || "erro"));
-        textoResposta = sortear(TEXTOS_HANDOFF_GENERICO);
+        // A IA ja tinha escrito "reservado": troca por um pedido de outro horario.
+        textoResposta = sortear(TEXTOS_AGENDAMENTO_FALHOU);
+      }
+    } else if (t.name === TOOL_CANCELAR_AGENDAMENTO) {
+      // O lead manteve a decisao depois de a IA acolher e tentar manter ou remarcar.
+      const motivoCancel = String(t.input?.motivo || "").trim().slice(0, 200);
+      const cancel = await cancelarAgendamentoDoLead(body.cliente_crm_id, motivoCancel);
+      await p.log("tools", cancel.ok ? "cancelar_agendamento" : "cancelar_agendamento_falhou", {
+        motivo: cancel.ok ? null : cancel.erro, detalhe: { agendamento_id: cancel.agendamento_id, inicio: cancel.inicio },
+      });
+      if (cancel.ok) {
+        marcadores.cancelado_id = cancel.agendamento_id;
+        await avisarEquipeCancelamento(p, cfg, cancel, motivoCancel);
+      } else if (cancel.erro !== "sem_agendamento") {
+        // A IA ja tinha escrito "cancelei": nao afirma o que nao aconteceu.
+        textoResposta = sortear(TEXTOS_CANCELAMENTO_FALHOU);
       }
     } else {
       await p.log("tools", "ferramenta_desconhecida", { motivo: t.name });
@@ -1235,6 +1232,78 @@ async function proporAgendamento(
     console.error(LOG, "ic-agendamento propor excecao:", e instanceof Error ? e.message : e);
     return { ...FALHA_AGENDAMENTO, erro: "excecao" };
   }
+}
+
+// Texto fixo das regras por codigo (CFM): urgencia e duvida clinica nao passam
+// pela IA. Reclamacao e pedido de humano devolvem null (a IA conduz).
+function textoFixoRegra(motivo: string): string | null {
+  if (motivo === "urgencia") return RESPOSTA_URGENCIA;
+  if (motivo === "duvida_clinica") return sortear(TEXTOS_RESPOSTA_BLOQUEADA);
+  return null;
+}
+
+// Cancelamento pedido pelo lead: ic-agendamento {acao:'cancelar'} (porta interna).
+type ResultadoCancelamento = { ok: boolean; agendamento_id: string | null; inicio: string | null; titulo: string; erro: string | null };
+async function cancelarAgendamentoDoLead(clienteId: string, motivo: string): Promise<ResultadoCancelamento> {
+  const falha = (erro: string): ResultadoCancelamento => ({ ok: false, agendamento_id: null, inicio: null, titulo: "", erro });
+  try {
+    const URL_SB = Deno.env.get("SUPABASE_URL") || "";
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 10000);
+    const resp = await fetch(`${URL_SB}/functions/v1/ic-agendamento`, {
+      method: "POST",
+      headers: headersInternos(),
+      body: JSON.stringify({ acao: "cancelar", cliente_crm_id: clienteId, motivo }),
+      signal: ctl.signal,
+    });
+    clearTimeout(t);
+    const data: any = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data || data.ok === false) {
+      if (data?.erro !== "sem_agendamento") console.error(LOG, "ic-agendamento cancelar falhou:", resp.status, JSON.stringify(data).slice(0, 200));
+      return falha(data && data.erro ? String(data.erro) : `http_${resp.status}`);
+    }
+    return {
+      ok: true,
+      agendamento_id: data.agendamento_id ? String(data.agendamento_id) : null,
+      inicio: data.inicio ? String(data.inicio) : null,
+      titulo: String(data.titulo || ""),
+      erro: null,
+    };
+  } catch (e) {
+    console.error(LOG, "ic-agendamento cancelar excecao:", e instanceof Error ? e.message : e);
+    return falha("excecao");
+  }
+}
+
+// Avisa no WhatsApp de quem confirma os agendamentos (mesmos numeros do aviso de agendamento).
+async function avisarEquipeCancelamento(p: Pipeline, cfg: Record<string, string>, r: ResultadoCancelamento, motivo: string): Promise<void> {
+  const numeros = numerosAviso(cfg.aviso_agendamento_whatsapp);
+  if (!numeros.length) {
+    await p.log("tools", "aviso_equipe_sem_numero");
+    return;
+  }
+  const appUrl = (Deno.env.get("IC_APP_URL") || "").replace(/\/+$/, "");
+  const texto = textoAvisoCancelamento({
+    nome: String(p.card?.nome || "").trim(),
+    telefone: p.para,
+    titulo: r.titulo,
+    inicioIso: r.inicio || "",
+    motivo: motivo || null,
+    linkCrm: appUrl || null,
+  });
+  if (!p.envioLigado || !p.canal) {
+    await p.log("tools", "aviso_cancelamento_simulado", { detalhe: { para: numeros.length, texto } });
+    return;
+  }
+  const canal = p.canal;
+  await p.comVez(async () => {
+    for (const numero of numeros) {
+      const env = await enviarTextoCanal(canal, numero, texto, LOG);
+      await p.log("tools", env.ok ? "aviso_cancelamento_enviado" : "aviso_cancelamento_falhou", {
+        detalhe: { agendamento_id: r.agendamento_id, status: env.ok ? null : env.status },
+      });
+    }
+  });
 }
 
 // Botao "Encerrar conversa" (painel do lead e card completo), chamado pelo FRONT

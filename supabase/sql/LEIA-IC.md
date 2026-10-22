@@ -1,7 +1,7 @@
 # IC CRM: banco de dados
 
-O banco do IC CRM e Postgres no Supabase, montado por 38 arquivos SQL numerados
-(`00_` a `37_`) que se aplicam em ordem. Os arquivos `00_` a `12_` sao o esquema
+O banco do IC CRM e Postgres no Supabase, montado por 39 arquivos SQL numerados
+(`00_` a `38_`) que se aplicam em ordem. Os arquivos `00_` a `12_` sao o esquema
 base: extensoes, tabelas, funcoes do nucleo do CRM, views, gatilhos, politicas
 iniciais, realtime, o varredor do webhook e parametros de exemplo. Os arquivos
 `13_` a `31_` sao as camadas do IC CRM (perfis, dinheiro, RLS, jobs, IA, agenda,
@@ -43,6 +43,7 @@ No Supabase, SQL Editor, um arquivo por vez:
 | `35_ic_ia_exemplos_padrao_equipe.sql` | Reescreve os exemplos IC01-IC16 no padrão de escrita da equipe comercial (parágrafos, negrito do WhatsApp, "Perfeito.", proposta de dia e horário) e inclui IC17-IC19; idempotente, rollback no rodapé | 30 |
 | `36_ic_ia_exemplos_tom_leve.sql` | Deixa os exemplos IC01-IC19 com tom leve de WhatsApp (mensagens curtas, reação + uma pergunta) e inclui IC20-IC22 (com quem estou falando, sobre a clínica, informação que a IA não tem); idempotente, rollback no rodapé | 35 |
 | `37_ic_ia_julie_atendimento_completo.sql` | Julie: a IA atende até o agendamento. Chaves de `crm_ia_config` (persona, espera de 30 s, atende a qualquer hora, um envio por vez, contexto de 30 mensagens, aviso do agendamento por WhatsApp, vagas por horário; retomadas desligadas), trava `ia_vez` com `ic_ia_pegar_vez`/`ic_ia_soltar_vez` (só service_role), encerramento por inatividade desligado, `max_respostas_por_conversa` 80 e exemplos IC08/IC16/IC20/IC22 no tom da Julie; idempotente, rollback no rodapé | 36 |
+| `38_ic_ia_atendimento_autonomo.sql` | Atendimento 100% autônomo: exemplos IC08/IC15/IC16 sem "a equipe confirma/responde" e IC23-IC25 de cancelamento (acolhe e pergunta o motivo, responde ao medo e convida a manter, respeita quem continua decidido); idempotente, rollback no rodapé | 37 |
 
 Depois do 13, inserir o primeiro usuario (criado antes no Supabase Auth, mesmo
 e-mail) e o numero de WhatsApp: o bloco comentado no fim do 13 mostra como.

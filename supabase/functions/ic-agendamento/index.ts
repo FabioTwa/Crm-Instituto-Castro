@@ -14,6 +14,10 @@
 //        -> reserva o horario: agendamentos status 'pendente', origem 'ia' (ou troca o horario da reserva pendente da IA).
 //           A equipe confirma com o lead. {ok, confirmado:false, agendamento_id, inicio, fim}
 //           Horario ja tomado (agenda_vagas_por_horario): {ok:false, erro:'horario_ocupado', sugestoes:[iso, iso]}
+//      {acao:'cancelar', cliente_crm_id, motivo?}
+//        -> o lead desistiu (a IA acolheu e tentou manter antes): cancela o proximo horario pendente ou
+//           confirmado do card e apaga o evento do Google. {ok, agendamento_id, inicio, titulo}
+//           Sem horario marcado: {ok:false, erro:'sem_agendamento'}
 //
 // PUBLICAR: supabase functions deploy ic-agendamento --no-verify-jwt
 //   Por que --no-verify-jwt aqui? O callback OAuth chega do Google sem JWT do
@@ -524,6 +528,47 @@ async function acaoPropor(sb: SupabaseClient, body: any): Promise<Response> {
 }
 
 // ---------------------------------------------------------------------------
+// Acao INTERNA: cancelamento pedido pelo lead na conversa com a IA
+// ---------------------------------------------------------------------------
+async function acaoCancelar(sb: SupabaseClient, body: any): Promise<Response> {
+  const clienteId = String(body.cliente_crm_id || "").trim();
+  if (!clienteId) return json({ ok: false, erro: "payload_invalido" }, 400);
+  // O proximo horario ativo do card (inclui o que comecou ha pouco: o lead pode
+  // avisar em cima da hora).
+  const { data: lista, error } = await sb
+    .from("agendamentos")
+    .select("id, inicio, titulo, observacoes")
+    .eq("cliente_crm_id", clienteId)
+    .in("status", ["pendente", "confirmado"])
+    .gte("inicio", new Date(Date.now() - 2 * 3600 * 1000).toISOString())
+    .order("inicio", { ascending: true })
+    .limit(1);
+  if (error) {
+    console.error(LOG, "leitura (cancelar) falhou:", error.message);
+    return json({ ok: false, erro: "consulta_falhou" }, 500);
+  }
+  const alvo = lista && lista.length ? (lista[0] as any) : null;
+  if (!alvo) return json({ ok: false, erro: "sem_agendamento" }, 404);
+
+  const { error: errSt } = await sb.rpc("ic_agendamento_status", { p_id: alvo.id, p_status: "cancelado" });
+  if (errSt) {
+    console.error(LOG, "ic_agendamento_status (cancelar) falhou:", errSt.message);
+    return json({ ok: false, erro: "status_falhou" }, 500);
+  }
+  const motivo = String(body.motivo || "").trim().slice(0, 200);
+  const nota = "Cancelado pelo lead na conversa com a IA" + (motivo ? ": " + motivo : "") + ".";
+  const { error: errObs } = await sb
+    .from("agendamentos")
+    .update({ observacoes: [String(alvo.observacoes || "").trim(), nota].filter(Boolean).join(" "), atualizado_em: new Date().toISOString() })
+    .eq("id", alvo.id);
+  if (errObs) console.error(LOG, "observacao (cancelar) falhou:", errObs.message);
+
+  const ag = await carregarAgendamento(sb, String(alvo.id));
+  if (ag) await cancelarGoogle(sb, ag);
+  return json({ ok: true, agendamento_id: alvo.id, inicio: alvo.inicio, titulo: alvo.titulo || "" });
+}
+
+// ---------------------------------------------------------------------------
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -562,6 +607,10 @@ Deno.serve(async (req: Request) => {
     if (acao === "propor") {
       if (!chamadaInternaValida(req)) return json({ ok: false, erro: "nao_autorizado" }, 401);
       return await acaoPropor(sb, body);
+    }
+    if (acao === "cancelar") {
+      if (!chamadaInternaValida(req)) return json({ ok: false, erro: "nao_autorizado" }, 401);
+      return await acaoCancelar(sb, body);
     }
 
     // Porta do front.

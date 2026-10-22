@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { detectarHandoff, handoffCalaIA, PREFIXO_HANDOFF_INFORMACAO } from "./handoff-regras.ts";
+import { detectarHandoff, handoffCalaIA } from "./handoff-regras.ts";
 
 Deno.test("urgencia com acento e caixa alta", () => {
   assertEquals(detectarHandoff("Estou com DOR FORTE e FALTA DE AR")?.motivo, "urgencia");
@@ -40,10 +40,9 @@ Deno.test("botao nao e bot (fronteira de palavra)", () => {
   assertEquals(detectarHandoff("cliquei no botão errado"), null);
 });
 
-Deno.test("handoffCalaIA: so o pedido de informacao deixa a IA seguir", () => {
-  assertEquals(handoffCalaIA({ motivo: "manual", detalhe: PREFIXO_HANDOFF_INFORMACAO + "instagram" }), false);
-  assertEquals(handoffCalaIA({ motivo: "manual", detalhe: "limite de respostas da IA" }), true);
-  assertEquals(handoffCalaIA({ motivo: "pedido_humano", detalhe: PREFIXO_HANDOFF_INFORMACAO + "x" }), true);
-  assertEquals(handoffCalaIA({ motivo: "duvida_clinica", detalhe: null }), true);
-  assertEquals(handoffCalaIA({ motivo: "agendamento_confirmado", detalhe: null }), false);
+Deno.test("handoffCalaIA: so a recusa do atendimento automatizado cala a IA", () => {
+  assertEquals(handoffCalaIA({ motivo: "consentimento_negado" }), true);
+  for (const motivo of ["manual", "pedido_humano", "duvida_clinica", "urgencia", "reclamacao", "erro_ia", "agendamento_confirmado"]) {
+    assertEquals(handoffCalaIA({ motivo }), false);
+  }
 });

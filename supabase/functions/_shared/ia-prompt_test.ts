@@ -25,7 +25,7 @@ Deno.test("system prompt leva o calendario quando informado", () => {
 Deno.test("textos fixos variados passam na pos-validacao e nao falam em robo", async () => {
   const { respostaProibida } = await import("./pos-validacao.ts");
   const m = await import("./ia-prompt.ts");
-  const listas = [m.TEXTOS_AGENDAMENTO_ANOTADO, m.TEXTOS_AVISO_ESPERA, m.TEXTOS_CONSENTIMENTO_NEGADO, m.TEXTOS_ENCERRAMENTO, m.TEXTOS_HANDOFF_GENERICO, m.TEXTOS_RESPOSTA_BLOQUEADA];
+  const listas = [m.TEXTOS_AGENDAMENTO_ANOTADO, m.TEXTOS_AGENDAMENTO_FALHOU, m.TEXTOS_CONSENTIMENTO_NEGADO, m.TEXTOS_ENCERRAMENTO, m.TEXTOS_RESPOSTA_BLOQUEADA];
   for (const lista of listas) {
     assertEquals(lista.length >= 3, true);
     for (const t of lista) {
@@ -70,4 +70,28 @@ Deno.test("objetivo: conduz para conhecer o Instituto e so marca consulta se a p
   assertStringIncludes(sp, "TODA resposta termina com uma pergunta");
   assertStringIncludes(sp, "Não diga que a visita é gratuita");
   assertStringIncludes(sp, 'Nunca chame a visita de "sem compromisso"');
+});
+
+Deno.test("atendimento 100% autonomo: nenhum texto fixo nem o prompt promete equipe ou atendente", async () => {
+  const m = await import("./ia-prompt.ts");
+  const { RESPOSTA_URGENCIA } = await import("./handoff-regras.ts");
+  const fixos = [
+    ...m.TEXTOS_AGENDAMENTO_ANOTADO, ...m.TEXTOS_AGENDAMENTO_FALHOU, ...m.TEXTOS_CANCELAMENTO_FALHOU, ...m.TEXTOS_CONSENTIMENTO_NEGADO,
+    ...m.TEXTOS_ENCERRAMENTO, ...m.TEXTOS_ERRO_TEMPORARIO, ...m.TEXTOS_RESPOSTA_BLOQUEADA, RESPOSTA_URGENCIA,
+    m.textoPedidoConsentimento(""), m.textoForaDoHorario(),
+  ];
+  for (const t of fixos) assertEquals(/equipe|atendente|te retorna|vai retornar/i.test(t), false, t);
+  const sp = montarSystemPrompt({ primeiroNome: null, funil: null, etapa: null, exemplos: [], agoraLocal: "x" });
+  assertEquals(sp.includes("encaminhar_humano"), false);
+  assertStringIncludes(sp, "O atendimento é 100% seu");
+  assertEquals(m.FERRAMENTAS.map((f) => f.name).sort(), ["cancelar_agendamento", "propor_agendamento"]);
+});
+
+Deno.test("cancelamento: acolhe, pergunta o motivo e tenta manter antes de cancelar", () => {
+  const sp = montarSystemPrompt({ primeiroNome: null, funil: null, etapa: null, exemplos: [], agoraLocal: "x" });
+  assertStringIncludes(sp, "# Cancelamento ou desistência");
+  assertStringIncludes(sp, "NÃO cancele de primeira");
+  assertStringIncludes(sp, "pergunte o motivo");
+  assertStringIncludes(sp, "No máximo duas tentativas");
+  assertStringIncludes(sp, "chame cancelar_agendamento");
 });
