@@ -1,6 +1,10 @@
-// Regras de handoff por CODIGO, aplicadas sobre a ultima mensagem do lead ANTES
-// de qualquer chamada a IA. Resolucao CFM 2.336/2023: duvida clinica, urgencia e
-// reclamacao nunca passam pela IA; vao para a equipe humana.
+// Regras por CODIGO, aplicadas sobre a ultima mensagem do lead ANTES de qualquer
+// chamada a IA. Atendimento 100% autonomo (decisao de 22/10/2026): nao existe
+// atendente, entao nada aqui passa a conversa para uma pessoa nem cala a IA.
+// Resolucao CFM 2.336/2023: urgencia e duvida clinica nao passam pela IA e
+// recebem um texto fixo (urgencia: pronto-socorro/192; duvida clinica: so o
+// medico avalia, convite para a visita). Reclamacao e pedido de humano so ficam
+// no log: a IA conduz pelas regras do prompt.
 //
 // LIMITACAO CONHECIDA: regex nao entende contexto. Ha uma guarda simples de
 // negacao ("nao e urgente", "sem dor forte") que evita os falsos-positivos mais
@@ -14,22 +18,11 @@ export type MotivoHandoff =
   | "reclamacao"
   | "pedido_humano";
 
-export type Handoff = { motivo: MotivoHandoff; termo: string; resposta_fixa: string | null };
+export type Handoff = { motivo: MotivoHandoff; termo: string };
 
 export const RESPOSTA_URGENCIA =
-  "Entendi, e sinto muito que você esteja passando por isso. Como assistente virtual não consigo avaliar situações de urgência: " +
-  "se os sintomas forem intensos, procure o pronto-socorro mais próximo ou ligue 192 (SAMU) agora. " +
-  "Já avisei a nossa equipe, que vai entrar em contato com você o quanto antes.";
-
-export const RESPOSTA_DUVIDA_CLINICA =
-  "Obrigado por compartilhar. Essa é uma dúvida que só a nossa equipe médica pode responder com segurança, " +
-  "então vou encaminhar para que alguém te retorne por aqui. Enquanto isso, posso te ajudar com informações sobre a clínica ou agendar uma avaliação.";
-
-export const RESPOSTA_RECLAMACAO =
-  "Sinto muito pela experiência. Vou encaminhar agora para a nossa equipe, que vai te responder pessoalmente por aqui.";
-
-export const RESPOSTA_PEDIDO_HUMANO =
-  "Claro! Vou chamar alguém da nossa equipe para continuar com você por aqui. Só um momento.";
+  "Sinto muito que você esteja passando por isso. Por aqui eu não consigo avaliar uma situação de urgência, então, " +
+  "se os sintomas estiverem fortes, procure o pronto-socorro mais próximo ou ligue 192 (SAMU) agora, tá? Cuide-se!";
 
 // Guarda de negacao: se logo antes do termo (ate duas palavras de distancia)
 // houver "nao e", "nao esta", "nao foi", "nao tenho", "sem", "nenhum", o termo
@@ -66,28 +59,23 @@ export function detectarHandoff(textoOriginal: string): Handoff | null {
   if (!t) return null;
 
   let termo = ocorrenciaNaoNegada(t, RE_URGENCIA);
-  if (termo) return { motivo: "urgencia", termo, resposta_fixa: RESPOSTA_URGENCIA };
+  if (termo) return { motivo: "urgencia", termo };
 
   termo = ocorrenciaNaoNegada(t, RE_DUVIDA_CLINICA);
-  if (termo) return { motivo: "duvida_clinica", termo, resposta_fixa: RESPOSTA_DUVIDA_CLINICA };
+  if (termo) return { motivo: "duvida_clinica", termo };
 
   termo = ocorrenciaNaoNegada(t, RE_RECLAMACAO);
-  if (termo) return { motivo: "reclamacao", termo, resposta_fixa: RESPOSTA_RECLAMACAO };
+  if (termo) return { motivo: "reclamacao", termo };
 
   termo = ocorrenciaNaoNegada(t, RE_PEDIDO_HUMANO);
-  if (termo) return { motivo: "pedido_humano", termo, resposta_fixa: RESPOSTA_PEDIDO_HUMANO };
+  if (termo) return { motivo: "pedido_humano", termo };
 
   return null;
 }
 
-// Handoff aberto pela IA so porque ela nao sabia uma informacao (motivo "outro"
-// da ferramenta, gravado como 'manual' com este prefixo no detalhe): a equipe
-// foi avisada, mas a IA segue a conversa. Agendamento feito pela IA tambem nao
-// cala: atendimento 100% IA (decisao de 21/10/2026), ela segue respondendo o
-// lead depois de agendar. Os demais handoffs pendentes calam a IA ate a equipe atender.
-export const PREFIXO_HANDOFF_INFORMACAO = "IA (informação): ";
-
-export function handoffCalaIA(h: { motivo: string; detalhe?: string | null }): boolean {
-  if (h.motivo === "agendamento_confirmado") return false;
-  return !(h.motivo === "manual" && String(h.detalhe || "").startsWith(PREFIXO_HANDOFF_INFORMACAO));
+// Atendimento 100% autonomo: so a recusa do atendimento automatizado (LGPD)
+// deixa a IA em silencio. Os demais registros em ia_handoffs (urgencia,
+// agendamento) sao so historico para o CRM.
+export function handoffCalaIA(h: { motivo: string }): boolean {
+  return h.motivo === "consentimento_negado";
 }

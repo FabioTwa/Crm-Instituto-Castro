@@ -61,3 +61,27 @@ export function textoAvisoAgendamento(a: {
   if (a.linkCrm) linhas.push(a.linkCrm);
   return linhas.join("\n");
 }
+
+// Aviso para a equipe quando a IA cancela um horario a pedido do lead (depois de
+// acolher e tentar manter ou remarcar).
+export function textoAvisoCancelamento(a: {
+  nome: string;
+  telefone: string;
+  titulo: string;
+  inicioIso: string;
+  motivo?: string | null;
+  linkCrm?: string | null;
+}): string {
+  const linhas = [
+    "❌ *Agendamento cancelado pelo lead*",
+    "",
+    `*Nome:* ${a.nome || "-"}`,
+    `*WhatsApp:* ${telefoneLegivel(a.telefone)}`,
+    `*Agendamento:* ${a.titulo || "-"}`,
+    `*Data:* ${dataHoraLocal(a.inicioIso)}`,
+  ];
+  if (a.motivo) linhas.push(`*Motivo:* ${a.motivo}`);
+  linhas.push("", "O horário já foi liberado na agenda do CRM.");
+  if (a.linkCrm) linhas.push(a.linkCrm);
+  return linhas.join("\n");
+}
