@@ -95,3 +95,10 @@ Deno.test("cancelamento: acolhe, pergunta o motivo e tenta manter antes de cance
   assertStringIncludes(sp, "No máximo duas tentativas");
   assertStringIncludes(sp, "chame cancelar_agendamento");
 });
+
+Deno.test("ligacoes: acolhe quem quis ligar e segue por mensagem, sem prometer retorno", () => {
+  const sp = montarSystemPrompt({ primeiroNome: null, funil: null, etapa: null, exemplos: [], agoraLocal: "x" });
+  assertStringIncludes(sp, "# Ligações");
+  assertStringIncludes(sp, "por aqui eu não consigo atender ligação");
+  assertStringIncludes(sp, "Nunca prometa que alguém vai ligar para ela.");
+});
