@@ -102,6 +102,7 @@ import {
   TEXTOS_AGENDAMENTO_ANOTADO,
   TEXTOS_AGENDAMENTO_FALHOU,
   TEXTOS_CANCELAMENTO_FALHOU,
+  TEXTOS_CONFIRMACAO_ANOTADA,
   TEXTOS_CONSENTIMENTO_NEGADO,
   TEXTOS_ENCERRAMENTO,
   TEXTOS_ERRO_TEMPORARIO,
@@ -111,6 +112,7 @@ import {
   textoHorarioOcupado,
   textoPedidoConsentimento,
   TOOL_CANCELAR_AGENDAMENTO,
+  TOOL_CONFIRMAR_AGENDAMENTO,
   TOOL_PROPOR_AGENDAMENTO,
   type ExemploConversa,
 } from "../_shared/ia-prompt.ts";
@@ -926,6 +928,16 @@ async function rodarNaVez(
         // A IA ja tinha escrito "cancelei": nao afirma o que nao aconteceu.
         textoResposta = sortear(TEXTOS_CANCELAMENTO_FALHOU);
       }
+    } else if (t.name === TOOL_CONFIRMAR_AGENDAMENTO) {
+      // O lead confirmou a presenca (em geral respondendo ao lembrete de confirmacao).
+      const conf = await confirmarAgendamentoDoLead(body.cliente_crm_id);
+      await p.log("tools", conf.ok ? "confirmar_agendamento" : "confirmar_agendamento_falhou", {
+        motivo: conf.ok ? null : conf.erro, detalhe: { agendamento_id: conf.agendamento_id, inicio: conf.inicio, ja_confirmado: conf.ja_confirmado },
+      });
+      if (conf.ok) {
+        marcadores.confirmado_id = conf.agendamento_id;
+        if (!textoResposta) textoResposta = sortear(TEXTOS_CONFIRMACAO_ANOTADA);
+      }
     } else {
       await p.log("tools", "ferramenta_desconhecida", { motivo: t.name });
     }
@@ -1390,6 +1402,40 @@ async function cancelarAgendamentoDoLead(clienteId: string, motivo: string): Pro
     };
   } catch (e) {
     console.error(LOG, "ic-agendamento cancelar excecao:", e instanceof Error ? e.message : e);
+    return falha("excecao");
+  }
+}
+
+// Confirmacao de presenca pelo lead: ic-agendamento {acao:'confirmar'} (porta interna).
+// Falha aqui nao muda a resposta: o agradecimento continua valendo, so o status fica pendente.
+type ResultadoConfirmacao = { ok: boolean; agendamento_id: string | null; inicio: string | null; ja_confirmado: boolean; erro: string | null };
+async function confirmarAgendamentoDoLead(clienteId: string): Promise<ResultadoConfirmacao> {
+  const falha = (erro: string): ResultadoConfirmacao => ({ ok: false, agendamento_id: null, inicio: null, ja_confirmado: false, erro });
+  try {
+    const URL_SB = Deno.env.get("SUPABASE_URL") || "";
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 10000);
+    const resp = await fetch(`${URL_SB}/functions/v1/ic-agendamento`, {
+      method: "POST",
+      headers: headersInternos(),
+      body: JSON.stringify({ acao: "confirmar", cliente_crm_id: clienteId }),
+      signal: ctl.signal,
+    });
+    clearTimeout(t);
+    const data: any = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data || data.ok === false) {
+      if (data?.erro !== "sem_agendamento") console.error(LOG, "ic-agendamento confirmar falhou:", resp.status, JSON.stringify(data).slice(0, 200));
+      return falha(data && data.erro ? String(data.erro) : `http_${resp.status}`);
+    }
+    return {
+      ok: true,
+      agendamento_id: data.agendamento_id ? String(data.agendamento_id) : null,
+      inicio: data.inicio ? String(data.inicio) : null,
+      ja_confirmado: data.ja_confirmado === true,
+      erro: null,
+    };
+  } catch (e) {
+    console.error(LOG, "ic-agendamento confirmar excecao:", e instanceof Error ? e.message : e);
     return falha("excecao");
   }
 }

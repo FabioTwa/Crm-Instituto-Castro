@@ -177,6 +177,10 @@ lembrete `confirmacao_mesmo_dia_horas` antes (padrão '3' sem a chave; 3 a 12;
 e ainda faltem mais de 2 h para o horário.
 Desligar: `update crm_ia_config set valor = '' where chave = 'confirmacao_antes_horas';`
 (desliga os dois).
+Quando a pessoa confirma ("confirmo", "estarei aí"), a IA chama a ferramenta
+`confirmar_agendamento`: o `ic-agendamento` (`{acao:'confirmar'}`, porta interna)
+passa o próximo horário pendente do card para `confirmado` (o gatilho do SQL 18
+move o card e registra o handoff `agendamento_confirmado`, só histórico).
 
 ### Encerramento por inatividade
 

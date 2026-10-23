@@ -30,6 +30,7 @@ export const PERSONA_PADRAO = {
 
 export const TOOL_PROPOR_AGENDAMENTO = "propor_agendamento";
 export const TOOL_CANCELAR_AGENDAMENTO = "cancelar_agendamento";
+export const TOOL_CONFIRMAR_AGENDAMENTO = "confirmar_agendamento";
 
 // Ferramentas no formato da Messages API (tools[].input_schema). strict: true
 // garante que o input chega exatamente no formato do schema.
@@ -82,6 +83,21 @@ export const FERRAMENTAS = [
         motivo: { type: "string", description: "Motivo do cancelamento em uma frase, como a pessoa contou, sem dados de saúde. Vazio se ela não quis dizer." },
       },
       required: ["motivo"],
+    },
+  },
+  {
+    name: TOOL_CONFIRMAR_AGENDAMENTO,
+    description:
+      "Marca como CONFIRMADO o próximo horário reservado desta pessoa (visita ou consulta). Use quando ela confirmar que vem no horário marcado, " +
+      "por exemplo respondendo ao lembrete de confirmação (\"confirmo\", \"estarei aí\", \"pode confirmar\"). Não use para marcar, trocar ou cancelar.",
+    strict: true,
+    input_schema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        observacao: { type: "string", description: "Observação curta e NÃO clínica que a pessoa deu ao confirmar (ex.: 'vai chegar 10 min antes'). Vazio se não houver." },
+      },
+      required: ["observacao"],
     },
   },
 ];
@@ -261,7 +277,7 @@ Você é sempre a mesma ${persona}, mas muda o jeito de conversar conforme o que
 - Quando a pessoa disser ou aceitar dia e horário e você já tiver esses dados, use ${TOOL_PROPOR_AGENDAMENTO} imediatamente e responda no padrão "Prontinho, deixei reservado o dia 03/07 (sexta-feira) às 11:00! Te esperamos aqui na Av. Paes de Barros, 1378, na Mooca 😊".
 - Se a pessoa quiser mudar o dia ou o horário de um agendamento que você já fez, chame ${TOOL_PROPOR_AGENDAMENTO} de novo com o novo dia e horário (o anterior é trocado).
 - Se a pessoa quiser cancelar ou desistir, siga a seção "Cancelamento ou desistência" abaixo.
-- Se a sua última mensagem foi o lembrete pedindo para a pessoa confirmar o horário marcado: se ela confirmar, agradeça com carinho e diga que vai ser um prazer recebê-la (aqui não precisa terminar com pergunta); se ela quiser trocar o dia ou o horário, siga como remarcação; se quiser cancelar, siga a seção "Cancelamento ou desistência".
+- Se a sua última mensagem foi o lembrete pedindo para a pessoa confirmar o horário marcado: se ela confirmar, chame ${TOOL_CONFIRMAR_AGENDAMENTO}, agradeça com carinho e diga que vai ser um prazer recebê-la (aqui não precisa terminar com pergunta); se ela quiser trocar o dia ou o horário, siga como remarcação; se quiser cancelar, siga a seção "Cancelamento ou desistência".
 - Se não souber algo, não invente: diga numa frase que essa ela tira certinho pessoalmente, na visita, e continue a conversa normalmente, com a próxima pergunta do atendimento.
 - Nunca invente informações sobre a clínica além das listadas acima.
 
@@ -279,7 +295,7 @@ Você é sempre a mesma ${persona}, mas muda o jeito de conversar conforme o que
 - Se ela não tiver nenhum horário marcado, só acolha, entenda o motivo e siga a conversa.
 
 # Uso das ferramentas
-- Você tem duas ferramentas: ${TOOL_PROPOR_AGENDAMENTO} (reserva ou troca o horário) e ${TOOL_CANCELAR_AGENDAMENTO} (cancela o horário reservado). Use-as sempre que a situação se encaixar; junto com a ferramenta, escreva também a mensagem curta que a pessoa vai ler.
+- Você tem três ferramentas: ${TOOL_PROPOR_AGENDAMENTO} (reserva ou troca o horário), ${TOOL_CONFIRMAR_AGENDAMENTO} (marca como confirmado o horário reservado, quando a pessoa confirma que vem) e ${TOOL_CANCELAR_AGENDAMENTO} (cancela o horário reservado). Use-as sempre que a situação se encaixar; junto com a ferramenta, escreva também a mensagem curta que a pessoa vai ler.
 - Contexto da pessoa no CRM: funil "${args.funil || "não informado"}", etapa "${args.etapa || "não informada"}". Use só para calibrar o tom, não cite para a pessoa.
 ${exemplos}
 As mensagens a seguir são a conversa real. Responda apenas a próxima mensagem da equipe.`;
@@ -359,6 +375,13 @@ export const TEXTOS_AGENDAMENTO_ANOTADO = [
   "Prontinho, deixei o seu horário reservado! Te esperamos aqui na Av. Paes de Barros, 1378, na Mooca 😊",
   "Combinado, horário reservado! Te esperamos aqui no Instituto.",
   "Reservado! Vai ser muito bom te receber aqui no Instituto 😊",
+] as const;
+
+// Resposta quando a IA usou confirmar_agendamento sem escrever texto.
+export const TEXTOS_CONFIRMACAO_ANOTADA = [
+  "Obrigada por confirmar! Vai ser um prazer te receber aqui no Instituto 😊",
+  "Confirmado! Te esperamos aqui na Av. Paes de Barros, 1378, na Mooca.",
+  "Prontinho, presença confirmada! Até lá 😊",
 ] as const;
 
 // Horario pedido ja estava tomado: oferece os proximos livres (textos fixos,
