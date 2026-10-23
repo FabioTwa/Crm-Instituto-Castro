@@ -6,6 +6,10 @@
 //   crm_ia_config.confirmacao_antes_horas  "24" = liga, 24 h antes do horario.
 //                                          Vazio, "0" ou sem a chave = DESLIGADO.
 //
+//   crm_ia_config.confirmacao_mesmo_dia_horas  quem marcou tarde demais para o
+//                                          lembrete de 24 h recebe este, "3" h antes
+//                                          (padrao sem a chave). "0" desliga so este.
+//
 // Para desligar: update crm_ia_config set valor = '' where chave = 'confirmacao_antes_horas';
 // O varredor (1x por minuto) chama; a janela de envio e a mesma das retomadas
 // (followup_horario, nunca aos domingos). Logica pura (sem banco) para ser testavel.
@@ -26,6 +30,20 @@ export function horasConfirmacao(cfg: Record<string, string>): number {
   return Math.min(72, Math.max(3, n));
 }
 
+// Lembrete curto (marcou no dia ou na vespera, depois da janela de 24 h).
+export const HORAS_CURTA_PADRAO = 3;
+// Quem acabou de marcar nao recebe lembrete logo em seguida: precisa ter
+// marcado pelo menos 1 h antes da janela curta.
+export const FOLGA_CURTA_MS = 3600 * 1000;
+
+export function horasConfirmacaoCurta(cfg: Record<string, string>): number {
+  const bruto = String(cfg.confirmacao_mesmo_dia_horas ?? "").trim();
+  if (!bruto) return HORAS_CURTA_PADRAO;
+  const n = Math.floor(Number(bruto));
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(12, Math.max(3, n));
+}
+
 // Quando o lembrete pode sair: "horas" antes do horario; se isso cair num
 // domingo, adianta um dia (sabado), porque domingo nao se manda mensagem.
 export function inicioDaJanela(inicioMs: number, horas: number, tz: string = TZ_PADRAO): number {
@@ -34,15 +52,17 @@ export function inicioDaJanela(inicioMs: number, horas: number, tz: string = TZ_
   return ms;
 }
 
-// Decide se o agendamento recebe o lembrete agora. So recebe quem marcou com
-// antecedencia maior que a janela (quem marcou ontem para hoje acabou de falar
-// com a gente) e ainda nao recebeu este lembrete para este horario.
+// Decide se o agendamento recebe o lembrete agora. Quem marcou com antecedencia
+// maior que a janela recebe "horas" antes; quem marcou depois disso (no dia ou na
+// vespera) recebe "horasCurta" antes, se marcou pelo menos 1 h antes dessa janela
+// curta. Um lembrete so por agendamento e horario (controle no chamador).
 export function precisaLembrete(a: {
   inicio: string;
   criadoEm: string | null;
   status: string | null;
   agora: Date;
   horas: number;
+  horasCurta?: number;
   tentativas: number;
   tz?: string;
 }): boolean {
@@ -54,10 +74,13 @@ export function precisaLembrete(a: {
   const agoraMs = a.agora.getTime();
   if (inicioMs - agoraMs < MINIMO_ANTES_MS) return false;
   const janela = inicioDaJanela(inicioMs, a.horas, a.tz);
-  if (agoraMs < janela) return false;
   const criadoMs = Date.parse(String(a.criadoEm || ""));
-  if (Number.isFinite(criadoMs) && criadoMs > janela) return false;
-  return true;
+  if (!Number.isFinite(criadoMs) || criadoMs <= janela) return agoraMs >= janela;
+  const curta = Math.floor(a.horasCurta ?? 0);
+  if (curta <= 0) return false;
+  const janelaCurta = inicioMs - curta * 3600 * 1000;
+  if (criadoMs > janelaCurta - FOLGA_CURTA_MS) return false;
+  return agoraMs >= janelaCurta;
 }
 
 // "hoje", "amanhã" ou a data, pelo dia local.

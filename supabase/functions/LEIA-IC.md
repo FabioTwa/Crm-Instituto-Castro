@@ -165,13 +165,18 @@ e `ia_decisoes_log` `followup/followup_enviado`. Lead ou vendedor falou por
 Na mesma rodada do varredor, a função procura agendamentos `pendente` ou
 `confirmado` e manda um texto fixo (`_shared/confirmacao-agendamento.ts`) pedindo
 que a pessoa confirme a presença, 24 h antes do horário. Só para quem tem
-consentimento concedido, agendado com mais de 24 h de antecedência, dentro de
+consentimento concedido, dentro de
 `followup_horario` e nunca aos domingos (a segunda-feira é lembrada no sábado).
 Uma vez por agendamento e horário: `ia_decisoes_log`
 `confirmacao_agendamento/lembrete_enviado` com `detalhe.agendamento_id` e
 `detalhe.inicio`; no máximo 3 por rodada. A resposta da pessoa segue pelo
 atendimento normal (confirma, remarca ou cancela).
+Quem marcou depois da janela de 24 h (no dia ou na véspera) recebe o mesmo
+lembrete `confirmacao_mesmo_dia_horas` antes (padrão '3' sem a chave; 3 a 12;
+'0' desliga só este), desde que tenha marcado pelo menos 1 h antes dessa janela
+e ainda faltem mais de 2 h para o horário.
 Desligar: `update crm_ia_config set valor = '' where chave = 'confirmacao_antes_horas';`
+(desliga os dois).
 
 ### Encerramento por inatividade
 
