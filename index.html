@@ -6643,7 +6643,7 @@
         </div>
         <p id="confirm-message" style="font-size:14px;color:var(--texto-secundario);line-height:1.6;margin-bottom:20px"></p>
         <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="closeModal('modal-confirm')">Cancelar</button>
+            <button class="btn btn-secondary" onclick="closeModal('modal-confirm')">Voltar</button>
             <button class="btn btn-primary" id="confirm-btn" onclick="">Confirmar</button>
         </div>
     </div>
@@ -6981,6 +6981,7 @@ function confirmAction(mensagem, callback) {
         closeModal('modal-confirm');
         callback();
     };
+    if (typeof icTrazerParaFrente === 'function') icTrazerParaFrente('modal-confirm');
     openModal('modal-confirm');
 }
 
