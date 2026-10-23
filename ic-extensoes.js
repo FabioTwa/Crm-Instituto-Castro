@@ -154,7 +154,16 @@
         btn.textContent = rotuloConfirmar || 'Confirmar';
         btn.className = destrutivo ? 'btn ic-destrutivo' : 'btn btn-primary ic-folha';
         btn.onclick = function () { closeModal('modal-confirm'); try { onConfirmar(); } catch (e) { console.error(e); } };
+        icTrazerParaFrente('modal-confirm');
         openModal('modal-confirm');
+    };
+
+    // Modais com o mesmo z-index se empilham pela ordem no DOM. Os modais criados na hora
+    // (ex.: detalhe do agendamento no calendário) entram no fim do body e cobriam o
+    // #modal-confirm. Mover para o fim do body o coloca acima de qualquer modal já aberto.
+    window.icTrazerParaFrente = function (id) {
+        var el = document.getElementById(id);
+        if (el && el.parentNode === document.body && el !== document.body.lastElementChild) document.body.appendChild(el);
     };
 
     // Pergunta com campo de texto (substitui prompt() nativo). Modal próprio, filho direto do body.
@@ -693,13 +702,16 @@
 
     window.icAgendamentoStatus = function (id, status) {
         var textos = { confirmado: 'Confirmar este agendamento? O card avança para a etapa de agendamento e o atendimento passa para a equipe (handoff).', cancelado: 'Cancelar este agendamento?', realizado: 'Marcar como realizado?', faltou: 'Marcar que o lead faltou?' };
-        icConfirmar(textos[status] || 'Confirmar?', IC_STATUS_AG[status] || 'Confirmar', async function () {
+        var rotulos = { confirmado: 'Confirmar agendamento', cancelado: 'Cancelar agendamento', realizado: 'Marcar como realizado', faltou: 'Marcar falta' };
+        icConfirmar(textos[status] || 'Confirmar?', rotulos[status] || 'Confirmar', async function () {
             var r = await icChamarAgendamento({ acao: 'status', id: id, status: status });
             if (!r.ok) {
                 var rpc = await supabaseClient.rpc('ic_agendamento_status', { p_id: id, p_status: status });
                 if (rpc.error) { showToast('Não foi possível atualizar: ' + rpc.error.message, 'error'); return; }
             }
             showToast('Agendamento ' + (IC_STATUS_AG[status] || status).toLowerCase() + '.', 'success');
+            // O detalhe aberto pelo calendário mostraria o status antigo.
+            closeModal('modal-ic-ag-detalhe');
             icLoadAgendamentos();
         }, status === 'cancelado');
     };
