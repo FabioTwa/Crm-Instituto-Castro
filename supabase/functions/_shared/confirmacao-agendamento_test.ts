@@ -30,7 +30,7 @@ Deno.test("precisaLembrete: so dentro da janela, com antecedencia e sem repetir"
   assertEquals(precisaLembrete({ ...base, agora: new Date("2026-10-27T18:00:00Z") }), true);
   assertEquals(precisaLembrete({ ...base, agora: new Date("2026-10-28T10:00:00Z") }), true);
   // perto demais do horario
-  assertEquals(precisaLembrete({ ...base, agora: new Date("2026-10-28T16:30:00Z") }), false);
+  assertEquals(precisaLembrete({ ...base, agora: new Date("2026-10-28T17:50:00Z") }), false);
   // desligado, cancelado, ja tentou demais
   assertEquals(precisaLembrete({ ...base, horas: 0, agora: new Date("2026-10-27T18:00:00Z") }), false);
   assertEquals(precisaLembrete({ ...base, status: "cancelado", agora: new Date("2026-10-27T18:00:00Z") }), false);
@@ -54,14 +54,17 @@ Deno.test("precisaLembrete: marcou no dia recebe o lembrete curto", () => {
   const base = { inicio: QUA_15H, criadoEm: "2026-10-28T12:00:00Z", status: "pendente", horas: 24, horasCurta: 3, tentativas: 0 };
   // antes da janela curta (12:00 local)
   assertEquals(precisaLembrete({ ...base, agora: new Date("2026-10-28T14:30:00Z") }), false);
-  // na janela curta (3 h antes) e ate 2 h antes
+  // na janela curta (3 h antes) e ate 15 min antes
   assertEquals(precisaLembrete({ ...base, agora: new Date("2026-10-28T15:00:00Z") }), true);
-  assertEquals(precisaLembrete({ ...base, agora: new Date("2026-10-28T15:59:00Z") }), true);
-  assertEquals(precisaLembrete({ ...base, agora: new Date("2026-10-28T16:30:00Z") }), false);
+  assertEquals(precisaLembrete({ ...base, agora: new Date("2026-10-28T17:30:00Z") }), true);
+  assertEquals(precisaLembrete({ ...base, agora: new Date("2026-10-28T17:50:00Z") }), false);
   // marcou na vespera a noite (20:00 local) para o dia seguinte
   assertEquals(precisaLembrete({ ...base, criadoEm: "2026-10-27T23:00:00Z", agora: new Date("2026-10-28T15:00:00Z") }), true);
-  // acabou de marcar (menos de 1 h antes da janela curta): nao lembra
-  assertEquals(precisaLembrete({ ...base, criadoEm: "2026-10-28T14:30:00Z", agora: new Date("2026-10-28T15:00:00Z") }), false);
+  // marcou em cima da hora (14:00 local para as 15:00): lembra 30 min depois de marcar
+  assertEquals(precisaLembrete({ ...base, criadoEm: "2026-10-28T17:00:00Z", agora: new Date("2026-10-28T17:10:00Z") }), false);
+  assertEquals(precisaLembrete({ ...base, criadoEm: "2026-10-28T17:00:00Z", agora: new Date("2026-10-28T17:30:00Z") }), true);
+  // marcou a menos de 45 min: o lembrete cairia a menos de 15 min do horario
+  assertEquals(precisaLembrete({ ...base, criadoEm: "2026-10-28T17:20:00Z", agora: new Date("2026-10-28T17:50:00Z") }), false);
   // lembrete curto desligado
   assertEquals(precisaLembrete({ ...base, horasCurta: 0, agora: new Date("2026-10-28T15:00:00Z") }), false);
   // lembrete geral desligado desliga tambem o curto

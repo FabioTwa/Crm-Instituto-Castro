@@ -173,8 +173,8 @@ Uma vez por agendamento e horário: `ia_decisoes_log`
 atendimento normal (confirma, remarca ou cancela).
 Quem marcou depois da janela de 24 h (no dia ou na véspera) recebe o mesmo
 lembrete `confirmacao_mesmo_dia_horas` antes (padrão '3' sem a chave; 3 a 12;
-'0' desliga só este), desde que tenha marcado pelo menos 1 h antes dessa janela
-e ainda faltem mais de 2 h para o horário.
+'0' desliga só este); quem marcou mais em cima da hora recebe 30 min depois de
+marcar. Nunca a menos de 15 min do horário.
 Desligar: `update crm_ia_config set valor = '' where chave = 'confirmacao_antes_horas';`
 (desliga os dois).
 Quando a pessoa confirma ("confirmo", "estarei aí"), a IA chama a ferramenta
