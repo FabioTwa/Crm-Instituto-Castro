@@ -159,6 +159,20 @@ ferramentas, com pós-validação); se falhar, vai um texto fixo de
 e `ia_decisoes_log` `followup/followup_enviado`. Lead ou vendedor falou por
 último: nada. Depois da última retomada a IA espera o lead.
 
+### Lembrete de confirmação, SQL 39 — temporário
+
+`confirmacao_antes_horas` ('24' = ligado; vazio, '0' ou sem a chave = desligado).
+Na mesma rodada do varredor, a função procura agendamentos `pendente` ou
+`confirmado` e manda um texto fixo (`_shared/confirmacao-agendamento.ts`) pedindo
+que a pessoa confirme a presença, 24 h antes do horário. Só para quem tem
+consentimento concedido, agendado com mais de 24 h de antecedência, dentro de
+`followup_horario` e nunca aos domingos (a segunda-feira é lembrada no sábado).
+Uma vez por agendamento e horário: `ia_decisoes_log`
+`confirmacao_agendamento/lembrete_enviado` com `detalhe.agendamento_id` e
+`detalhe.inicio`; no máximo 3 por rodada. A resposta da pessoa segue pelo
+atendimento normal (confirma, remarca ou cancela).
+Desligar: `update crm_ia_config set valor = '' where chave = 'confirmacao_antes_horas';`
+
 ### Encerramento por inatividade
 
 Só vale com `followups_minutos` vazio (desde o SQL 37 fica em '0': nunca encerra). `encerrar_apos_minutos` (padrão '60' sem linha na tabela; '0' desliga; 5 a 1440).

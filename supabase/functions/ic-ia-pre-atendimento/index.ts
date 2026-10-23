@@ -89,6 +89,7 @@ import { faseTeste } from "../_shared/ia-teste.ts";
 import { decidirRajada, rajadaDoConfig } from "../_shared/rajada.ts";
 import { decidirFollowup, followupsDoConfig, instrucaoFollowup, podeMandarFollowup, textoFollowupFixo } from "../_shared/ia-followup.ts";
 import { dataHoraLocal, numerosAviso, textoAvisoAgendamento, textoAvisoCancelamento } from "../_shared/aviso-agendamento.ts";
+import { ETAPA_CONFIRMACAO, horasConfirmacao, MINIMO_ANTES_MS, precisaLembrete, STATUS_COM_LEMBRETE, textoConfirmacao } from "../_shared/confirmacao-agendamento.ts";
 import { decidirEncerramento, ETAPA_ENCERRAMENTO, mensagensDaConversaAtual, minutosEncerramento } from "../_shared/ia-encerramento.ts";
 import { detectarNegociacao, type EventoFunil } from "../_shared/funil-ia.ts";
 import {
@@ -1180,6 +1181,92 @@ async function retomarInativas(sb: SupabaseClient, cfg: Record<string, string>, 
   return { ok: true, decisao: "followup", enviadas };
 }
 
+// Lembrete de confirmacao do horario marcado (_shared/confirmacao-agendamento.ts).
+// TEMPORARIO: desliga com crm_ia_config.confirmacao_antes_horas vazio. Texto fixo
+// (sem chamar o modelo); a resposta da pessoa segue pelo atendimento normal.
+// So para quem autorizou o atendimento (LGPD), poucos por rodada.
+const CONFIRMACOES_POR_RODADA = 3;
+async function lembrarConfirmacoes(sb: SupabaseClient): Promise<Record<string, unknown>> {
+  const cfg = await iaConfig(sb);
+  const horas = horasConfirmacao(cfg);
+  if (!horas) return { ok: true, decisao: "confirmacao_desligada" };
+  if (!(await icFlag(sb, "ia_pre_atendimento")) || String(cfg.ligada).toLowerCase() !== "true") return { ok: true, decisao: "desligada" };
+  const agora = new Date();
+  if (!podeMandarFollowup(agora, cfg.followup_horario, TZ_PADRAO)) return { ok: true, decisao: "fora_da_janela" };
+
+  // +24 h no teto: a janela de segunda adianta para sabado.
+  const { data: ags, error } = await sb
+    .from("agendamentos")
+    .select("id, cliente_crm_id, inicio, status, criado_em, telefone_lead")
+    .in("status", STATUS_COM_LEMBRETE)
+    .not("cliente_crm_id", "is", null)
+    .gt("inicio", new Date(agora.getTime() + MINIMO_ANTES_MS).toISOString())
+    .lte("inicio", new Date(agora.getTime() + (horas + 24) * 3600 * 1000).toISOString())
+    .order("inicio", { ascending: true })
+    .limit(30);
+  if (error) {
+    console.error(LOG, "busca de agendamentos para confirmar falhou:", error.message);
+    return { ok: false, erro: "erro_banco" };
+  }
+  const envioFlag = await icFlag(sb, "envio_whatsapp_cloud_api");
+  let enviadas = 0;
+  for (const ag of (ags as any[]) || []) {
+    if (enviadas >= CONFIRMACOES_POR_RODADA) break;
+    const marca = { agendamento_id: String(ag.id), inicio: String(ag.inicio) };
+    const { data: logs } = await sb
+      .from("ia_decisoes_log")
+      .select("decisao, criado_em")
+      .eq("cliente_crm_id", ag.cliente_crm_id)
+      .eq("etapa_pipeline", ETAPA_CONFIRMACAO)
+      .contains("detalhe", marca)
+      .limit(20);
+    const lista = (logs as any[]) || [];
+    const jaFoi = lista.some((l) => l.decisao === "lembrete_enviado" || l.decisao === "simulada_envio_desligado");
+    // Rodada anterior ainda enviando (o envio leva o tempo do "digitando..."): nao duplica.
+    const emAndamento = lista.some((l) => l.decisao === "tentativa" && agora.getTime() - Date.parse(String(l.criado_em)) < 5 * 60000);
+    const tentativas = lista.filter((l) => l.decisao === "tentativa").length;
+    if (jaFoi || emAndamento) continue;
+    if (!precisaLembrete({ inicio: ag.inicio, criadoEm: ag.criado_em, status: ag.status, agora, horas, tentativas })) continue;
+
+    const { data: cards } = await sb
+      .from("clientes_crm")
+      .select("id, nome, numero_whatsapp, telefone, vendedor_id, funil_id")
+      .eq("id", ag.cliente_crm_id)
+      .is("deleted_at", null)
+      .limit(1);
+    const card = cards && cards.length ? (cards[0] as any) : null;
+    if (!card) continue;
+    const para = canonicoTelefone(String(card.numero_whatsapp || card.telefone || ag.telefone_lead || ""));
+    if (!telefoneBrPlausivel(para)) continue;
+    const fase = faseTeste(cfg, para);
+    if (!fase.atende) continue;
+    const { data: cons } = await sb
+      .from("ia_consentimentos")
+      .select("status")
+      .eq("cliente_crm_id", card.id)
+      .order("criado_em", { ascending: false })
+      .limit(1);
+    if (!cons || !cons.length || String((cons[0] as any).status) !== "concedido") continue;
+
+    const p = new Pipeline(sb, { cliente_crm_id: String(card.id), conversa_id: null, vendedor_id: card.vendedor_id, funil_id: card.funil_id });
+    p.modelo = cfg.modelo || "claude-sonnet-5-5";
+    p.cfg = cfg;
+    p.card = card;
+    p.para = para;
+    p.envioLigado = !fase.sombra && envioFlag;
+    if (card.vendedor_id) {
+      const res = await canalDoVendedor(sb, String(card.vendedor_id));
+      if (res.ok) p.canal = res.canal;
+    }
+    const texto = textoConfirmacao({ primeiroNome: card.nome, inicioIso: String(ag.inicio), agora, variante: Math.floor(Math.random() * 3) });
+    enviadas++;
+    await p.log(ETAPA_CONFIRMACAO, "tentativa", { detalhe: marca });
+    await p.enviar(texto, ETAPA_CONFIRMACAO, "lembrete_enviado", marca, { confirmacao_agendamento: true, agendamento_id: marca.agendamento_id });
+  }
+  if (enviadas) console.log(LOG, "lembretes de confirmacao enviados:", enviadas);
+  return { ok: true, decisao: "confirmacao", enviadas };
+}
+
 // A IA escreve a retomada a partir da conversa; texto fixo se nao der.
 async function textoDaRetomada(
   sb: SupabaseClient, p: Pipeline, cfg: Record<string, string>, apiKey: string, numero: number, total: number, paradoMin: number,
@@ -1425,7 +1512,15 @@ Deno.serve(async (req: Request) => {
     // Unica acao do FRONT (JWT do usuario); todo o resto exige x-ic-internal.
     if (body.acao === "encerrar_conversa_equipe") return await encerrarPelaEquipe(req, sb, body);
     if (!chamadaInternaValida(req)) return json({ ok: false, erro: "nao_autorizado" }, 401);
-    if (body.acao === "encerrar_inativas") return json(await encerrarInativas(sb));
+    if (body.acao === "encerrar_inativas") {
+      const r = await encerrarInativas(sb);
+      // Lembrete de confirmacao (temporario; desliga com confirmacao_antes_horas vazio).
+      const confirmacoes = await lembrarConfirmacoes(sb).catch((e) => {
+        console.error(LOG, "lembretes de confirmacao falharam:", e instanceof Error ? e.message : e);
+        return { ok: false, erro: "excecao" };
+      });
+      return json({ ...r, confirmacoes });
+    }
 
     const clienteId = String(body.cliente_crm_id || "").trim();
     if (!clienteId) return json({ ok: false, erro: "payload_invalido" }, 400);
