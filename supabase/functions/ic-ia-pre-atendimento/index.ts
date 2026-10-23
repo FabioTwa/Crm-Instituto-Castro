@@ -89,7 +89,7 @@ import { faseTeste } from "../_shared/ia-teste.ts";
 import { decidirRajada, rajadaDoConfig } from "../_shared/rajada.ts";
 import { decidirFollowup, followupsDoConfig, instrucaoFollowup, podeMandarFollowup, textoFollowupFixo } from "../_shared/ia-followup.ts";
 import { dataHoraLocal, numerosAviso, textoAvisoAgendamento, textoAvisoCancelamento } from "../_shared/aviso-agendamento.ts";
-import { ETAPA_CONFIRMACAO, horasConfirmacao, MINIMO_ANTES_MS, precisaLembrete, STATUS_COM_LEMBRETE, textoConfirmacao } from "../_shared/confirmacao-agendamento.ts";
+import { ETAPA_CONFIRMACAO, horasConfirmacao, horasConfirmacaoCurta, MINIMO_ANTES_MS, precisaLembrete, STATUS_COM_LEMBRETE, textoConfirmacao } from "../_shared/confirmacao-agendamento.ts";
 import { decidirEncerramento, ETAPA_ENCERRAMENTO, mensagensDaConversaAtual, minutosEncerramento } from "../_shared/ia-encerramento.ts";
 import { detectarNegociacao, type EventoFunil } from "../_shared/funil-ia.ts";
 import {
@@ -1190,6 +1190,7 @@ async function lembrarConfirmacoes(sb: SupabaseClient): Promise<Record<string, u
   const cfg = await iaConfig(sb);
   const horas = horasConfirmacao(cfg);
   if (!horas) return { ok: true, decisao: "confirmacao_desligada" };
+  const horasCurta = horasConfirmacaoCurta(cfg);
   if (!(await icFlag(sb, "ia_pre_atendimento")) || String(cfg.ligada).toLowerCase() !== "true") return { ok: true, decisao: "desligada" };
   const agora = new Date();
   if (!podeMandarFollowup(agora, cfg.followup_horario, TZ_PADRAO)) return { ok: true, decisao: "fora_da_janela" };
@@ -1226,7 +1227,7 @@ async function lembrarConfirmacoes(sb: SupabaseClient): Promise<Record<string, u
     const emAndamento = lista.some((l) => l.decisao === "tentativa" && agora.getTime() - Date.parse(String(l.criado_em)) < 5 * 60000);
     const tentativas = lista.filter((l) => l.decisao === "tentativa").length;
     if (jaFoi || emAndamento) continue;
-    if (!precisaLembrete({ inicio: ag.inicio, criadoEm: ag.criado_em, status: ag.status, agora, horas, tentativas })) continue;
+    if (!precisaLembrete({ inicio: ag.inicio, criadoEm: ag.criado_em, status: ag.status, agora, horas, horasCurta, tentativas })) continue;
 
     const { data: cards } = await sb
       .from("clientes_crm")
