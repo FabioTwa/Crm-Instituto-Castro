@@ -19,8 +19,8 @@ import { partesNoFuso, TZ_PADRAO } from "./horario.ts";
 
 export const ETAPA_CONFIRMACAO = "confirmacao_agendamento";
 export const STATUS_COM_LEMBRETE = ["pendente", "confirmado"];
-// Perto demais do horario o lembrete perde o sentido.
-export const MINIMO_ANTES_MS = 2 * 3600 * 1000;
+// Perto demais do horario o lembrete perde o sentido (a pessoa ja esta a caminho).
+export const MINIMO_ANTES_MS = 15 * 60 * 1000;
 // Tentativas de envio por agendamento (falha do provedor nao vira insistencia).
 export const MAX_TENTATIVAS = 3;
 
@@ -32,9 +32,10 @@ export function horasConfirmacao(cfg: Record<string, string>): number {
 
 // Lembrete curto (marcou no dia ou na vespera, depois da janela de 24 h).
 export const HORAS_CURTA_PADRAO = 3;
-// Quem acabou de marcar nao recebe lembrete logo em seguida: precisa ter
-// marcado pelo menos 1 h antes da janela curta.
-export const FOLGA_CURTA_MS = 3600 * 1000;
+// Quem acabou de marcar nao recebe o lembrete logo em seguida: espera pelo
+// menos 30 min depois de marcar (decisao do Fabio em 23/10: sem limite de
+// antecedencia, quem marca em cima da hora tambem recebe).
+export const FOLGA_CURTA_MS = 30 * 60 * 1000;
 
 export function horasConfirmacaoCurta(cfg: Record<string, string>): number {
   const bruto = String(cfg.confirmacao_mesmo_dia_horas ?? "").trim();
@@ -54,8 +55,9 @@ export function inicioDaJanela(inicioMs: number, horas: number, tz: string = TZ_
 
 // Decide se o agendamento recebe o lembrete agora. Quem marcou com antecedencia
 // maior que a janela recebe "horas" antes; quem marcou depois disso (no dia ou na
-// vespera) recebe "horasCurta" antes, se marcou pelo menos 1 h antes dessa janela
-// curta. Um lembrete so por agendamento e horario (controle no chamador).
+// vespera) recebe "horasCurta" antes ou, se marcou mais em cima da hora, 30 min
+// depois de marcar. Nunca a menos de 15 min do horario. Um lembrete so por
+// agendamento e horario (controle no chamador).
 export function precisaLembrete(a: {
   inicio: string;
   criadoEm: string | null;
@@ -78,8 +80,7 @@ export function precisaLembrete(a: {
   if (!Number.isFinite(criadoMs) || criadoMs <= janela) return agoraMs >= janela;
   const curta = Math.floor(a.horasCurta ?? 0);
   if (curta <= 0) return false;
-  const janelaCurta = inicioMs - curta * 3600 * 1000;
-  if (criadoMs > janelaCurta - FOLGA_CURTA_MS) return false;
+  const janelaCurta = Math.max(inicioMs - curta * 3600 * 1000, criadoMs + FOLGA_CURTA_MS);
   return agoraMs >= janelaCurta;
 }
 
