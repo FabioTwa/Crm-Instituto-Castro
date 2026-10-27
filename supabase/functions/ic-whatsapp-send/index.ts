@@ -1,8 +1,7 @@
 // ic-whatsapp-send: envio de mensagem do CRM para o lead pelo WhatsApp, atras
-// da feature flag envio_whatsapp_cloud_api (vale para os dois provedores).
+// da feature flag envio_whatsapp_cloud_api (vale para todos os provedores).
 // O provedor sai do numero do vendedor (vendedores_whatsapp.provedor):
-// 'meta' = Cloud API direta; 'gupshup' = Gupshup (coexistencia). Ver
-// _shared/whatsapp-envio.ts.
+// 'meta' = Cloud API direta; 'zapi' = Z-API. Ver _shared/whatsapp-envio.ts.
 //
 // Quem chama: o FRONT (usuario logado), via supabaseClient.functions.invoke.
 // Publicar: supabase functions deploy ic-whatsapp-send        (verify_jwt LIGADO)
@@ -10,20 +9,14 @@
 // CONTRATO
 //   POST { cliente_crm_id, texto }                             -> texto livre (janela 24 h)
 //   POST { cliente_crm_id, template: { name, language, components? } } -> modelo aprovado (Meta)
-//   POST { cliente_crm_id, template: { id, params? } }         -> modelo aprovado (Gupshup: ID do modelo no painel)
 //   200 { ok: true, conversa_id, criada_em, wamid, tipo: 'texto'|'template' }
 //   400 { ok: false, erro: 'payload_invalido' | 'texto_invalido' | 'card_sem_numero' | ... }
 //   401/403 { ok: false, erro: 'sem_token' | 'token_invalido' | 'usuario_inativo' | 'usuario_nao_cadastrado' }
 //   403 { ok: false, erro: 'envio_desligado' }                 -> flag desligada
 //   404 { ok: false, erro: 'card_nao_encontrado' | 'vendedor_sem_cloud_api' } -> numero sem provedor configurado
 //   409 { ok: false, erro: 'fora_da_janela_24h' }              -> Meta 131047; use template
-//   502 { ok: false, erro: 'meta_recusou' | 'gupshup_recusou' | 'zapi_recusou' } -> provedor recusou (detalhe so no log)
-//   503 { ok: false, erro: 'envio_nao_configurado' }           -> falta META_ACCESS_TOKEN / GUPSHUP_API_KEY
-//
-// GUPSHUP: o envio e assincrono. 200 aqui quer dizer que o Gupshup ACEITOU;
-// falha posterior (ex.: fora da janela de 24 h) chega no webhook como
-// message-event "failed" e fica no log. O id gravado em zapi_message_id e o
-// messageId do Gupshup.
+//   502 { ok: false, erro: 'meta_recusou' | 'zapi_recusou' } -> provedor recusou (detalhe so no log)
+//   503 { ok: false, erro: 'envio_nao_configurado' }           -> falta META_ACCESS_TOKEN / ZAPI_INSTANCE_TOKEN / ZAPI_CLIENT_TOKEN
 //   500 { ok: false, erro: 'erro_interno' }
 //
 // FLUXO (so grava DEPOIS da confirmacao do envio)
@@ -31,7 +24,7 @@
 //   2. ic_flag('envio_whatsapp_cloud_api') false -> 403 envio_desligado;
 //   3. carrega o card e o canal do vendedor_id do card (_shared/whatsapp-envio.ts);
 //   4. valida texto (1-4096 chars) ou template;
-//   5. envia pelo provedor do numero (Meta: Graph API; Gupshup: api.gupshup.io);
+//   5. envia pelo provedor do numero (Meta: Graph API; Z-API: api.z-api.io);
 //   6. SO com a confirmacao do provedor: grava crm_conversas {direcao 'enviada', autor 'vendedor',
 //      tipo 'texto', zapi_message_id = wamid, payload_raw = resposta da Meta} e
 //      atualiza clientes_crm.ultima_mensagem_em / ultima_mensagem_direcao /
@@ -46,7 +39,7 @@
 // VARIAVEIS DE AMBIENTE
 //   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY  (o Supabase injeta)
 //   META_ACCESS_TOKEN   token permanente do usuario do sistema (whatsapp_business_messaging), provedor 'meta'
-//   GUPSHUP_API_KEY     API key da conta do Gupshup, provedor 'gupshup'
+//   ZAPI_INSTANCE_TOKEN, ZAPI_CLIENT_TOKEN  provedor 'zapi'
 //   IC_INTERNAL_SECRET  (lido por _shared/auth.ts; aqui nao e usado para autorizar)
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -139,7 +132,7 @@ Deno.serve(async (req: Request) => {
     if (template) {
       tipoEnvio = "template";
       envio = await enviarModeloCanal(canal, para, template, LOG);
-      mensagemGravar = "[Modelo enviado] " + String(canal.provedor === "gupshup" ? template.id : template.name);
+      mensagemGravar = "[Modelo enviado] " + String(template.name);
     } else {
       tipoEnvio = "texto";
       // Quem responde assina: *Nome* na primeira linha. O CRM guarda so o texto.
@@ -174,9 +167,7 @@ Deno.serve(async (req: Request) => {
           meta: envio.resposta,
           ...(template
             ? {
-              template: canal.provedor === "gupshup"
-                ? { id: template.id }
-                : { name: template.name, language: template.language || "pt_BR" },
+              template: { name: template.name, language: template.language || "pt_BR" },
             }
             : {}),
         },

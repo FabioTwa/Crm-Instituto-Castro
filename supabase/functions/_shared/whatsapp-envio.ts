@@ -4,32 +4,29 @@
 //
 //   provedor 'meta'    -> Cloud API direta (_shared/whatsapp-cloud.ts),
 //                         precisa de meta_phone_id + META_ACCESS_TOKEN
-//   provedor 'gupshup' -> Gupshup (_shared/gupshup.ts),
-//                         precisa de gupshup_app + numero_whatsapp + GUPSHUP_API_KEY
 //   provedor 'zapi'    -> Z-API (_shared/zapi.ts), so para a fase de treino,
 //                         precisa de zapi_instancia + ZAPI_INSTANCE_TOKEN + ZAPI_CLIENT_TOKEN
 //
-// Linha sem a coluna provedor (SQL 28 ainda nao aplicado) vale como 'meta':
-// o comportamento antigo continua igual.
+// Linha sem provedor vale como 'meta'. Linha antiga com provedor 'gupshup'
+// (removido em 27/10/2026) nao tem canal: nada e enviado por ela.
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { enviarTemplate, enviarTexto, type ResultadoEnvio } from "./whatsapp-cloud.ts";
-import { enviarTemplateGupshup, enviarTextoGupshup } from "./gupshup.ts";
 import { enviarTextoZapi, segundosDigitando } from "./zapi.ts";
-import { canonicoTelefone } from "./telefone.ts";
 
-export type Provedor = "meta" | "gupshup" | "zapi";
+export type Provedor = "meta" | "zapi";
 
 export type CanalEnvio =
   | { provedor: "meta"; phoneId: string; token: string }
-  | { provedor: "gupshup"; app: string; origem: string; apiKey: string }
   | { provedor: "zapi"; instancia: string; token: string; clientToken: string };
 
 // Motivo de nao ter canal, para log e resposta ao front.
 export type SemCanal = { provedor: Provedor | null; motivo: "sem_numero" | "numero_incompleto" | "sem_credencial" };
 
-export function provedorDaLinha(linha: any): Provedor {
+// null = provedor que o CRM nao usa mais (ex.: 'gupshup').
+export function provedorDaLinha(linha: any): Provedor | null {
   const p = String((linha && linha.provedor) || "meta").toLowerCase();
-  return p === "gupshup" || p === "zapi" ? p : "meta";
+  if (p === "zapi" || p === "meta") return p;
+  return null;
 }
 
 // Monta o canal a partir da linha de vendedores_whatsapp e dos segredos.
@@ -40,14 +37,7 @@ export function canalDaLinha(
 ): { ok: true; canal: CanalEnvio } | ({ ok: false } & SemCanal) {
   if (!linha) return { ok: false, provedor: null, motivo: "sem_numero" };
   const provedor = provedorDaLinha(linha);
-  if (provedor === "gupshup") {
-    const app = String(linha.gupshup_app || "").trim();
-    const origem = canonicoTelefone(String(linha.numero_whatsapp || ""));
-    if (!app || !origem) return { ok: false, provedor, motivo: "numero_incompleto" };
-    const apiKey = env("GUPSHUP_API_KEY") || "";
-    if (!apiKey) return { ok: false, provedor, motivo: "sem_credencial" };
-    return { ok: true, canal: { provedor, app, origem, apiKey } };
-  }
+  if (!provedor) return { ok: false, provedor: null, motivo: "numero_incompleto" };
   if (provedor === "zapi") {
     const instancia = String(linha.zapi_instancia || "").trim();
     if (!instancia) return { ok: false, provedor, motivo: "numero_incompleto" };
@@ -65,8 +55,8 @@ export function canalDaLinha(
   return { ok: true, canal: { provedor, phoneId, token } };
 }
 
-// Le o numero ativo do vendedor. select("*") de proposito: funciona antes e
-// depois do SQL 28 (colunas provedor/gupshup_app).
+// Le o numero ativo do vendedor. select("*") de proposito: sao poucas colunas
+// e a coluna provedor decide o canal.
 export async function canalDoVendedor(
   sb: SupabaseClient,
   vendedorId: string,
@@ -82,9 +72,9 @@ export async function canalDoVendedor(
   // Prefere a linha que tem o identificador do proprio provedor preenchido.
   const linha = linhas.find((l) => {
     const p = provedorDaLinha(l);
-    if (p === "gupshup") return !!l.gupshup_app;
     if (p === "zapi") return !!l.zapi_instancia;
-    return !!l.meta_phone_id;
+    if (p === "meta") return !!l.meta_phone_id;
+    return false;
   }) || null;
   return canalDaLinha(linha, (n) => Deno.env.get(n));
 }
@@ -96,9 +86,6 @@ export async function enviarTextoCanal(
   prefixoLog: string,
   opcoes: { simularDigitacao?: boolean } = {},
 ): Promise<ResultadoEnvio> {
-  if (canal.provedor === "gupshup") {
-    return await enviarTextoGupshup({ canal, para, texto, prefixoLog });
-  }
   if (canal.provedor === "zapi") {
     // So a Z-API mostra "digitando..." antes de entregar (delayTyping).
     const delayTyping = opcoes.simularDigitacao ? segundosDigitando(texto) : undefined;
@@ -107,14 +94,12 @@ export async function enviarTextoCanal(
   return await enviarTexto({ phoneId: canal.phoneId, token: canal.token, para, texto, prefixoLog });
 }
 
-// Modelo aprovado. Meta: {name, language, components}. Gupshup: {id, params}
-// (o Gupshup identifica o modelo pelo ID dele, visto no painel).
-export type ModeloEnvio = { name?: string; language?: string; components?: unknown[]; id?: string; params?: unknown[] };
+// Modelo aprovado (so Meta): {name, language, components}.
+export type ModeloEnvio = { name?: string; language?: string; components?: unknown[] };
 
 // Z-API nao tem modelo aprovado: nunca e valido ali.
 export function modeloValido(canal: CanalEnvio, t: ModeloEnvio): boolean {
   if (canal.provedor === "zapi") return false;
-  if (canal.provedor === "gupshup") return typeof t.id === "string" && t.id.trim().length > 0;
   return typeof t.name === "string" && t.name.trim().length > 0;
 }
 
@@ -124,14 +109,6 @@ export async function enviarModeloCanal(
   t: ModeloEnvio,
   prefixoLog: string,
 ): Promise<ResultadoEnvio> {
-  if (canal.provedor === "gupshup") {
-    return await enviarTemplateGupshup({
-      canal,
-      para,
-      template: { id: String(t.id), params: Array.isArray(t.params) ? t.params : [] },
-      prefixoLog,
-    });
-  }
   if (canal.provedor === "zapi") {
     return { ok: false, status: 400, codigoMeta: null, mensagemMeta: "Z-API nao envia modelo", foraDaJanela24h: false, resposta: null };
   }
