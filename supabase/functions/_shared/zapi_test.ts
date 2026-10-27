@@ -79,6 +79,19 @@ Deno.test("grupo, canal, lista, status e outros callbacks sao ignorados", () => 
   assertEquals(motivoIgnorarZapi({ ...base, text: { message: "ok" } }), null);
 });
 
+Deno.test("modelo (template) de empresa e ignorado: nao vira card nem aciona a IA", () => {
+  const modelo = {
+    ...base,
+    hydratedTemplate: { header: {}, message: "Pode nos contar? E uma pesquisa de 3 minutos.", footer: "", title: "", templateId: "1", hydratedButtons: [] },
+  };
+  assertEquals(motivoIgnorarZapi(modelo), "modelo de empresa");
+  const { envelope } = envelopeZapi(modelo);
+  assertEquals(envelope.entry, []);
+  assertEquals(envelope._ic_ignorado, "modelo de empresa");
+  // Mensagem comum continua passando.
+  assertEquals(motivoIgnorarZapi({ ...base, text: { message: "Oi, quero agendar" } }), null);
+});
+
 Deno.test("audio leva o link e o tipo para a transcricao", () => {
   const m = mensagemZapiParaMeta({
     ...base,

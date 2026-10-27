@@ -1,9 +1,9 @@
-// Z-API como provedor de WhatsApp do IC CRM, para a FASE DE TREINO da IA
-// enquanto a conta do Gupshup aguarda a verificacao da Meta (15/10/2026).
+// Z-API como provedor de WhatsApp do IC CRM (desde 15/10/2026; unico provedor
+// em uso desde 21/10/2026, o Gupshup foi removido em 27/10/2026).
 //
 // ATENCAO: a Z-API NAO e API oficial da Meta. Ela conecta o numero como um
 // "aparelho conectado" (WhatsApp Web). Existe risco de banimento do numero.
-// Uso decidido pelo Fabio so para treinar a IA; producao continua no Gupshup.
+// Decisao do Fabio (21/10/2026), riscos aceitos.
 //
 // Usado por ic-meta-webhook (entrada, rota ?provedor=zapi) e por
 // _shared/whatsapp-envio.ts (saida: ic-whatsapp-send e ic-ia-pre-atendimento).
@@ -19,7 +19,7 @@
 //   objeto por tipo: text.message, audio.audioUrl, image.imageUrl/caption...
 // - A midia vem com link direto (sem chave).
 // - Assinatura de webhook: a documentacao nao descreve nenhuma. A autenticidade
-//   e um segredo nosso na URL (?token=ZAPI_WEBHOOK_TOKEN), como no Gupshup.
+//   e um segredo nosso na URL (?token=ZAPI_WEBHOOK_TOKEN).
 // - Nao existe mensagem-modelo (template): fora da janela, a Z-API manda texto
 //   livre mesmo. O CRM recusa modelo nesse provedor.
 //
@@ -134,6 +134,9 @@ export function motivoIgnorarZapi(e: any): string | null {
   if (String(e.phone || "").includes("@g.us") || String(e.phone || "").includes("@newsletter")) return "grupo";
   // Mensagem ainda nao decifrada pelo aparelho: vem sem conteudo.
   if (e.waitingMessage === true) return "aguardando mensagem";
+  // Modelo (template) recebido: so empresa envia (banco, loja, a propria
+  // Z-API). Nao e lead; virar card faria a IA responder um robo.
+  if (e.fromMe !== true && e.hydratedTemplate && typeof e.hydratedTemplate === "object") return "modelo de empresa";
   // Enviada pela API (CRM ou IA). Quem enviou ja gravou a conversa; tratar o
   // eco como "vendedor respondeu pelo celular" faria a IA achar que um humano
   // assumiu e parar de responder.

@@ -35,7 +35,7 @@
 //   9  pos_validacao    filtro regex CFM na resposta do modelo
 //      (antes das tools: mensagem nova do lead durante a IA -> desiste, a nova responde)
 //   10 tools            executa as ferramentas (ic-agendamento 'propor'/'cancelar' + aviso a equipe)
-//   11 envio            provedor do numero (_shared/whatsapp-envio.ts: Meta ou Gupshup) + crm_conversas autor 'ia'
+//   11 envio            provedor do numero (_shared/whatsapp-envio.ts: Meta ou Z-API) + crm_conversas autor 'ia'
 //   12 funil            RPC ic_avancar_etapa (SQL 33): card anda so para frente
 //                       (conversa -> em_conversa; lead pergunta valor/convenio/formato
 //                       -> negociacao; IA propoe horario -> agendamento_pendente)
@@ -60,7 +60,7 @@
 //   IC_INTERNAL_SECRET            autoriza a chamada do webhook e as chamadas a ic-agendamento
 //   ANTHROPIC_API_KEY             Messages API da Anthropic
 //   META_ACCESS_TOKEN             envio pela Cloud API, provedor 'meta' (ausente = modo sombra)
-//   GUPSHUP_API_KEY               envio pelo Gupshup, provedor 'gupshup' (ausente = modo sombra)
+//   ZAPI_INSTANCE_TOKEN, ZAPI_CLIENT_TOKEN  envio pela Z-API, provedor 'zapi' (ausente = modo sombra)
 //   IC_POLITICA_PRIVACIDADE_URL   link no pedido de consentimento (opcional)
 //
 // OBSERVACAO SOBRE A API DA ANTHROPIC (conferido na skill claude-api em 03/10/2026):

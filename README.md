@@ -1,7 +1,7 @@
 # IC CRM — Instituto Castro de Medicina
 
 CRM de atendimento e pipeline de vendas da clínica, com WhatsApp Business API
-(Coexistence, pela Cloud API da Meta ou pelo Gupshup) espelhado nos cards, assistente virtual de pré-atendimento
+(pela Z-API ou pela Cloud API da Meta) espelhado nos cards, assistente virtual de pré-atendimento
 (Claude) e agendamento integrado ao Google Agenda.
 
 O sistema é uma página única (HTML, CSS e JS vanilla, sem build) sobre Postgres no
@@ -26,7 +26,7 @@ encaixes-depois.js         rotas de telas que não existem -> Kanban
 assets/logo-instituto-castro.svg
 config.example.js          copiar para config.js (URL + chave anon). config.js NÃO vai para o git
 ferramentas/               aplicar-tema-ic.mjs + tema-ic.css: identidade visual (tokens e verificações); auditar-xss.mjs e auditar-textos.mjs
-supabase/sql/              00–12 esquema base · 13 perfis/funis/telas · 14 dinheiro+flags · 15 RLS · 16 jobs · 17 IA · 18 agendamentos · 19 reserva vendas · 20 apoio front · 21 funis · 22 realtime do histórico · 23 cadastro padronizado · 24 limites de texto · 25 usuários só no Auth · 26 funções fora do anon · 27 Admin protegido · 28 WhatsApp pelo Gupshup · LEIA-IC.md
+supabase/sql/              00–12 esquema base · 13 perfis/funis/telas · 14 dinheiro+flags · 15 RLS · 16 jobs · 17 IA · 18 agendamentos · 19 reserva vendas · 20 apoio front · 21 funis · 22 realtime do histórico · 23 cadastro padronizado · 24 limites de texto · 25 usuários só no Auth · 26 funções fora do anon · 27 Admin protegido · 28 colunas do antigo Gupshup (sem uso) · 31 WhatsApp pela Z-API · LEIA-IC.md
 supabase/functions/        ic-meta-webhook · ic-whatsapp-send · ic-ia-pre-atendimento · ic-agendamento · ic-usuarios · _shared/ · LEIA-IC.md
 teste/testar-na-base-vazia.mjs   sobe 00–28 num Postgres local (PGlite) e testa funções, RLS por papel e jobs
 docs/                      validações e documentos do projeto (prints e relatórios por correção)
@@ -45,8 +45,8 @@ docs/                      validações e documentos do projeto (prints e relat�
    O build aborta se faltar variável ou se a chave não for a anon.
    Para rodar local sem a Vercel: `cp config.example.js config.js` e preencha.
 5. WhatsApp: cada número em `vendedores_whatsapp` escolhe o provedor (`provedor`):
-   - `gupshup` (recomendado para coexistência): checklist do Gupshup em `supabase/functions/LEIA-IC.md`
-     (app conectado por QR code, webhook em `/functions/v1/ic-meta-webhook?provedor=gupshup&token=...`, `gupshup_app`);
+   - `zapi` (em uso): checklist da Z-API em `supabase/functions/LEIA-IC.md`
+     (instância conectada por QR code, webhook em `/functions/v1/ic-meta-webhook?provedor=zapi&token=...`, `zapi_instancia`);
    - `meta`: checklist da Meta no mesmo arquivo (webhook em `/functions/v1/ic-meta-webhook`, WABA inscrita no app,
      `meta_phone_id`).
 
@@ -55,7 +55,7 @@ docs/                      validações e documentos do projeto (prints e relat�
 Cadastradas nas Edge Functions com `supabase secrets set NOME=valor`. Nunca vão para o git nem para o front.
 
 `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (injetadas pelo Supabase) · `META_VERIFY_TOKEN`, `META_APP_SECRET`,
-`META_ACCESS_TOKEN` · `GUPSHUP_API_KEY`, `GUPSHUP_WEBHOOK_TOKEN` · `GROQ_API_KEY` · `ANTHROPIC_API_KEY`, `IC_POLITICA_PRIVACIDADE_URL` · `IC_INTERNAL_SECRET`,
+`META_ACCESS_TOKEN` · `ZAPI_INSTANCE_TOKEN`, `ZAPI_CLIENT_TOKEN`, `ZAPI_WEBHOOK_TOKEN` · `GROQ_API_KEY` · `ANTHROPIC_API_KEY`, `IC_POLITICA_PRIVACIDADE_URL` · `IC_INTERNAL_SECRET`,
 `IC_CRYPTO_KEY`, `IC_APP_URL` · `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`.
 
 O front lê só `config.js` (URL do projeto e chave **anon**, que é pública por desenho). A `service_role` nunca entra ali.
@@ -65,7 +65,7 @@ O front lê só `config.js` (URL do projeto e chave **anon**, que é pública po
 | chave | padrão | liga |
 |---|---|---|
 | `ia_transcricao_audio` | true | transcrição de áudio no webhook (Groq Whisper) |
-| `envio_whatsapp_cloud_api` | false | envio de mensagem pela tela do CRM e pela IA (Meta ou Gupshup, conforme o número) |
+| `envio_whatsapp_cloud_api` | false | envio de mensagem pela tela do CRM e pela IA (Z-API ou Meta, conforme o número) |
 | `ia_pre_atendimento` | false | assistente virtual (roda em modo sombra enquanto o envio estiver desligado) |
 | `agendamento_google` | false | sincronização com o Google Agenda |
 
