@@ -40,3 +40,10 @@ Deno.test("diagnostico e receita detectados", () => {
 Deno.test("'imagem' nao bate em mg (fronteira de palavra)", () => {
   assertEquals(respostaProibida("Recebi a imagem, obrigado!"), null);
 });
+
+Deno.test("valor em dinheiro e bloqueado (o Instituto nao informa valores pelo WhatsApp)", () => {
+  assertEquals(respostaProibida("A avaliação inicial é *R$ 150,00* e dá pra parcelar."), "valor:r$ 1");
+  assertEquals(respostaProibida("Fica 500 reais a consulta."), "valor:500 reais");
+  assertEquals(respostaProibida("Os valores a gente conversa pessoalmente."), null);
+  assertEquals(respostaProibida("A consulta tem retorno em até 30 dias."), null);
+});
