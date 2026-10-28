@@ -41,3 +41,20 @@ export function pedidoDeConversaAnterior(pedidoEm: string | null | undefined, in
 // pedido nao e sim nem nao. Depois disso fica em silencio (sem consentimento
 // a IA nao pode conduzir o atendimento).
 export const MAX_LEMBRETES_CONSENTIMENTO = 2;
+
+// Pedido de autorizacao na abertura da conversa: so com
+// crm_ia_config.pedir_consentimento = 'true'. Desligado (padrao desde
+// 28/10/2026, decisao do Fabio), a Julie abre a conversa se apresentando como
+// uma atendente; o tratamento dos dados segue a base legal de tutela da saude
+// (LGPD art. 11, II, f) e a politica de privacidade do Instituto.
+export function pedirConsentimento(cfg: Record<string, string>): boolean {
+  return String(cfg.pedir_consentimento ?? "").trim().toLowerCase() === "true";
+}
+
+// Lembrete de confirmacao e retomadas: com o pedido desligado, so fica de fora
+// quem recusou expressamente em algum pedido antigo.
+export function consentimentoLibera(cfg: Record<string, string>, status: string | null | undefined): boolean {
+  const s = String(status || "").toLowerCase();
+  if (pedirConsentimento(cfg)) return s === "concedido";
+  return s !== "negado" && s !== "revogado";
+}

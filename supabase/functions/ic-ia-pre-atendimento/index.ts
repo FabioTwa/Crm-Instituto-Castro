@@ -83,7 +83,13 @@ import { canalDoVendedor, type CanalEnvio, enviarTextoCanal } from "../_shared/w
 import { segundosDigitando } from "../_shared/zapi.ts";
 import { detectarHandoff, handoffCalaIA, RESPOSTA_URGENCIA } from "../_shared/handoff-regras.ts";
 import { respostaProibida } from "../_shared/pos-validacao.ts";
-import { interpretarConsentimento, MAX_LEMBRETES_CONSENTIMENTO, pedidoDeConversaAnterior } from "../_shared/consentimento.ts";
+import {
+  consentimentoLibera,
+  interpretarConsentimento,
+  MAX_LEMBRETES_CONSENTIMENTO,
+  pedidoDeConversaAnterior,
+  pedirConsentimento,
+} from "../_shared/consentimento.ts";
 import { dentroDoHorario, partesNoFuso, TZ_PADRAO } from "../_shared/horario.ts";
 import { faseTeste } from "../_shared/ia-teste.ts";
 import { decidirRajada, rajadaDoConfig } from "../_shared/rajada.ts";
@@ -683,117 +689,123 @@ async function rodarNaVez(
   }
 
   // 5) consentimento (LGPD)
-  // Vale o registro MAIS RECENTE (o historico de respostas fica guardado).
-  const { data: consRows } = await sb
-    .from("ia_consentimentos")
-    .select("id, status, texto_apresentado, respondido_em, criado_em")
-    .eq("cliente_crm_id", body.cliente_crm_id)
-    .order("criado_em", { ascending: false })
-    .limit(1);
-  let cons: any = consRows && consRows[0] ? consRows[0] : null;
-  let statusCons = String((cons && cons.status) || ctx.consentimento || "pendente").toLowerCase();
-
-  if (statusCons === "negado" || statusCons === "revogado") {
-    // Recusou, a conversa foi encerrada depois e o lead voltou a escrever:
-    // conversa nova, pede a autorizacao de novo (registro novo, a recusa fica).
-    const recusaMs = cons ? Date.parse(String(cons.respondido_em || cons.criado_em || "")) : NaN;
-    const encerrouDepois = Number.isFinite(inicioMs) && (!Number.isFinite(recusaMs) || inicioMs > recusaMs);
-    if (!encerrouDepois) {
-      await p.log("consentimento", "negado_anteriormente");
-      return { ok: true, decisao: "consentimento_negado" };
-    }
-    const { data: novo, error: errNovo } = await sb
-      .from("ia_consentimentos")
-      .insert({ cliente_crm_id: body.cliente_crm_id, telefone_norm: p.para, status: "pendente" })
-      .select("id, status, texto_apresentado")
-      .maybeSingle();
-    if (errNovo || !novo) {
-      console.error(LOG, "ia_consentimentos (novo pedido) falhou:", errNovo ? errNovo.message : "sem retorno");
-      await p.log("consentimento", "negado_anteriormente", { motivo: "novo pedido falhou" });
-      return { ok: true, decisao: "consentimento_negado" };
-    }
-    await p.log("consentimento", "pedido_de_novo_apos_encerramento");
-    cons = novo;
-    statusCons = "pendente";
-  }
-  if (statusCons === "pendente" && cons && cons.texto_apresentado && pedidoDeConversaAnterior(cons.criado_em, inicioMs)) {
-    // Pedido feito numa conversa ja encerrada: a pessoa voltou do zero. Pede
-    // de novo (registro novo, o antigo fica no historico).
-    const { data: novo, error: errNovo } = await sb
-      .from("ia_consentimentos")
-      .insert({ cliente_crm_id: body.cliente_crm_id, telefone_norm: p.para, status: "pendente" })
-      .select("id, status, texto_apresentado")
-      .maybeSingle();
-    if (errNovo || !novo) {
-      console.error(LOG, "ia_consentimentos (novo pedido) falhou:", errNovo ? errNovo.message : "sem retorno");
-    } else {
-      await p.log("consentimento", "pedido_de_novo_conversa_nova");
-      cons = novo;
-    }
-  }
-  if (statusCons === "pendente") {
-    const jaPediu = !!(cons && cons.texto_apresentado);
-    if (!jaPediu) {
-      const texto = textoPedidoConsentimento(Deno.env.get("IC_POLITICA_PRIVACIDADE_URL") || "");
-      const r = await p.enviar(texto, "consentimento", "pedido_enviado");
-      // Registra o texto apresentado mesmo em modo sombra (marca "simulado" no canal).
-      const canal = r.enviado ? "whatsapp" : "whatsapp_simulado";
-      if (cons) {
-        await sb.from("ia_consentimentos").update({ texto_apresentado: texto, canal }).eq("id", cons.id);
-      } else {
-        const { error } = await sb.from("ia_consentimentos").insert({
-          cliente_crm_id: body.cliente_crm_id,
-          telefone_norm: p.para,
-          status: "pendente",
-          texto_apresentado: texto,
-          canal,
-        });
-        if (error) console.error(LOG, "ia_consentimentos insert falhou:", error.message);
-      }
-      return { ok: true, decisao: "consentimento_pedido" };
-    }
-    const resp = interpretarConsentimento(textoLead);
-    if (resp === "nao") {
-      await sb.from("ia_consentimentos").update({ status: "negado", respondido_em: new Date().toISOString() }).eq("id", cons.id);
-      await p.handoff("consentimento_negado", "lead nao autorizou atendimento automatizado");
-      await p.enviar(sortear(TEXTOS_CONSENTIMENTO_NEGADO), "consentimento", "negado_despedida");
-      return { ok: true, decisao: "consentimento_negado" };
-    }
-    if (resp === "ambiguo") {
-      // Urgencia ou duvida clinica no lugar do sim/nao: texto fixo (CFM), sem
-      // registrar consentimento.
-      const hdCons = detectarHandoff(textoLead);
-      const fixoCons = hdCons ? textoFixoRegra(hdCons.motivo) : null;
-      if (hdCons && fixoCons) {
-        if (hdCons.motivo === "urgencia") await p.handoff("urgencia", `regra '${hdCons.termo}' na resposta ao consentimento`);
-        await p.log("consentimento", "ambiguo_com_regra", { motivo: hdCons.termo });
-        await p.enviar(fixoCons, "envio", "enviada_fixa", { origem: "consentimento", motivo: hdCons.motivo });
-        return { ok: true, decisao: "regra_" + hdCons.motivo };
-      }
-      // Nem sim nem nao (ex.: a pessoa ja conta o que precisa): nunca deixa sem
-      // resposta. Acolhe e pede o ok de novo, ate MAX_LEMBRETES_CONSENTIMENTO
-      // vezes nesta conversa.
-      let qLembretes = sb
-        .from("ia_decisoes_log")
-        .select("id", { count: "exact", head: true })
-        .eq("cliente_crm_id", body.cliente_crm_id)
-        .eq("etapa_pipeline", "consentimento")
-        .eq("decisao", "lembrete_enviado");
-      if (inicioConversa) qLembretes = qLembretes.gt("criado_em", inicioConversa);
-      const { count: lembretes } = await qLembretes;
-      if ((lembretes || 0) < MAX_LEMBRETES_CONSENTIMENTO) {
-        await p.enviar(sortear(TEXTOS_LEMBRETE_CONSENTIMENTO), "consentimento", "lembrete_enviado");
-        return { ok: true, decisao: "consentimento_lembrete" };
-      }
-      await p.log("consentimento", "ambiguo");
-      return { ok: true, decisao: "consentimento_ambiguo" };
-    }
-    await sb.from("ia_consentimentos").update({ status: "concedido", respondido_em: new Date().toISOString() }).eq("id", cons.id);
-    await p.log("consentimento", "concedido");
-    // A mensagem "sim" ja foi consumida como consentimento; se ela nao traz mais
-    // nada, segue para a IA responder acolhendo (o contexto inteiro vai junto).
+  // Desligado (crm_ia_config.pedir_consentimento diferente de 'true'), a
+  // Julie abre a conversa se apresentando, sem pedir autorizacao.
+  if (!pedirConsentimento(cfg)) {
+    await p.log("consentimento", "dispensado");
   } else {
-    await p.log("consentimento", "ja_concedido");
+    // Vale o registro MAIS RECENTE (o historico de respostas fica guardado).
+    const { data: consRows } = await sb
+      .from("ia_consentimentos")
+      .select("id, status, texto_apresentado, respondido_em, criado_em")
+      .eq("cliente_crm_id", body.cliente_crm_id)
+      .order("criado_em", { ascending: false })
+      .limit(1);
+    let cons: any = consRows && consRows[0] ? consRows[0] : null;
+    let statusCons = String((cons && cons.status) || ctx.consentimento || "pendente").toLowerCase();
+
+    if (statusCons === "negado" || statusCons === "revogado") {
+      // Recusou, a conversa foi encerrada depois e o lead voltou a escrever:
+      // conversa nova, pede a autorizacao de novo (registro novo, a recusa fica).
+      const recusaMs = cons ? Date.parse(String(cons.respondido_em || cons.criado_em || "")) : NaN;
+      const encerrouDepois = Number.isFinite(inicioMs) && (!Number.isFinite(recusaMs) || inicioMs > recusaMs);
+      if (!encerrouDepois) {
+        await p.log("consentimento", "negado_anteriormente");
+        return { ok: true, decisao: "consentimento_negado" };
+      }
+      const { data: novo, error: errNovo } = await sb
+        .from("ia_consentimentos")
+        .insert({ cliente_crm_id: body.cliente_crm_id, telefone_norm: p.para, status: "pendente" })
+        .select("id, status, texto_apresentado")
+        .maybeSingle();
+      if (errNovo || !novo) {
+        console.error(LOG, "ia_consentimentos (novo pedido) falhou:", errNovo ? errNovo.message : "sem retorno");
+        await p.log("consentimento", "negado_anteriormente", { motivo: "novo pedido falhou" });
+        return { ok: true, decisao: "consentimento_negado" };
+      }
+      await p.log("consentimento", "pedido_de_novo_apos_encerramento");
+      cons = novo;
+      statusCons = "pendente";
+    }
+    if (statusCons === "pendente" && cons && cons.texto_apresentado && pedidoDeConversaAnterior(cons.criado_em, inicioMs)) {
+      // Pedido feito numa conversa ja encerrada: a pessoa voltou do zero. Pede
+      // de novo (registro novo, o antigo fica no historico).
+      const { data: novo, error: errNovo } = await sb
+        .from("ia_consentimentos")
+        .insert({ cliente_crm_id: body.cliente_crm_id, telefone_norm: p.para, status: "pendente" })
+        .select("id, status, texto_apresentado")
+        .maybeSingle();
+      if (errNovo || !novo) {
+        console.error(LOG, "ia_consentimentos (novo pedido) falhou:", errNovo ? errNovo.message : "sem retorno");
+      } else {
+        await p.log("consentimento", "pedido_de_novo_conversa_nova");
+        cons = novo;
+      }
+    }
+    if (statusCons === "pendente") {
+      const jaPediu = !!(cons && cons.texto_apresentado);
+      if (!jaPediu) {
+        const texto = textoPedidoConsentimento(Deno.env.get("IC_POLITICA_PRIVACIDADE_URL") || "");
+        const r = await p.enviar(texto, "consentimento", "pedido_enviado");
+        // Registra o texto apresentado mesmo em modo sombra (marca "simulado" no canal).
+        const canal = r.enviado ? "whatsapp" : "whatsapp_simulado";
+        if (cons) {
+          await sb.from("ia_consentimentos").update({ texto_apresentado: texto, canal }).eq("id", cons.id);
+        } else {
+          const { error } = await sb.from("ia_consentimentos").insert({
+            cliente_crm_id: body.cliente_crm_id,
+            telefone_norm: p.para,
+            status: "pendente",
+            texto_apresentado: texto,
+            canal,
+          });
+          if (error) console.error(LOG, "ia_consentimentos insert falhou:", error.message);
+        }
+        return { ok: true, decisao: "consentimento_pedido" };
+      }
+      const resp = interpretarConsentimento(textoLead);
+      if (resp === "nao") {
+        await sb.from("ia_consentimentos").update({ status: "negado", respondido_em: new Date().toISOString() }).eq("id", cons.id);
+        await p.handoff("consentimento_negado", "lead nao autorizou atendimento automatizado");
+        await p.enviar(sortear(TEXTOS_CONSENTIMENTO_NEGADO), "consentimento", "negado_despedida");
+        return { ok: true, decisao: "consentimento_negado" };
+      }
+      if (resp === "ambiguo") {
+        // Urgencia ou duvida clinica no lugar do sim/nao: texto fixo (CFM), sem
+        // registrar consentimento.
+        const hdCons = detectarHandoff(textoLead);
+        const fixoCons = hdCons ? textoFixoRegra(hdCons.motivo) : null;
+        if (hdCons && fixoCons) {
+          if (hdCons.motivo === "urgencia") await p.handoff("urgencia", `regra '${hdCons.termo}' na resposta ao consentimento`);
+          await p.log("consentimento", "ambiguo_com_regra", { motivo: hdCons.termo });
+          await p.enviar(fixoCons, "envio", "enviada_fixa", { origem: "consentimento", motivo: hdCons.motivo });
+          return { ok: true, decisao: "regra_" + hdCons.motivo };
+        }
+        // Nem sim nem nao (ex.: a pessoa ja conta o que precisa): nunca deixa sem
+        // resposta. Acolhe e pede o ok de novo, ate MAX_LEMBRETES_CONSENTIMENTO
+        // vezes nesta conversa.
+        let qLembretes = sb
+          .from("ia_decisoes_log")
+          .select("id", { count: "exact", head: true })
+          .eq("cliente_crm_id", body.cliente_crm_id)
+          .eq("etapa_pipeline", "consentimento")
+          .eq("decisao", "lembrete_enviado");
+        if (inicioConversa) qLembretes = qLembretes.gt("criado_em", inicioConversa);
+        const { count: lembretes } = await qLembretes;
+        if ((lembretes || 0) < MAX_LEMBRETES_CONSENTIMENTO) {
+          await p.enviar(sortear(TEXTOS_LEMBRETE_CONSENTIMENTO), "consentimento", "lembrete_enviado");
+          return { ok: true, decisao: "consentimento_lembrete" };
+        }
+        await p.log("consentimento", "ambiguo");
+        return { ok: true, decisao: "consentimento_ambiguo" };
+      }
+      await sb.from("ia_consentimentos").update({ status: "concedido", respondido_em: new Date().toISOString() }).eq("id", cons.id);
+      await p.log("consentimento", "concedido");
+      // A mensagem "sim" ja foi consumida como consentimento; se ela nao traz mais
+      // nada, segue para a IA responder acolhendo (o contexto inteiro vai junto).
+    } else {
+      await p.log("consentimento", "ja_concedido");
+    }
   }
 
   // 6) handoff_regras (codigo, antes da IA)
@@ -1171,14 +1183,14 @@ async function retomarInativas(sb: SupabaseClient, cfg: Record<string, string>, 
     p.card = card;
     p.para = para;
     if (await p.temHandoffPendente()) continue;
-    // So quem autorizou o atendimento (LGPD) recebe retomada.
+    // Quem recusou o atendimento (LGPD) nao recebe retomada.
     const { data: cons } = await sb
       .from("ia_consentimentos")
       .select("status")
       .eq("cliente_crm_id", card.id)
       .order("criado_em", { ascending: false })
       .limit(1);
-    if (!cons || !cons.length || String((cons[0] as any).status) !== "concedido") continue;
+    if (!consentimentoLibera(cfg, cons && cons.length ? String((cons[0] as any).status) : null)) continue;
 
     p.envioLigado = !fase.sombra && envioFlag;
     if (card.vendedor_id) {
@@ -1259,7 +1271,7 @@ async function lembrarConfirmacoes(sb: SupabaseClient): Promise<Record<string, u
       .eq("cliente_crm_id", card.id)
       .order("criado_em", { ascending: false })
       .limit(1);
-    if (!cons || !cons.length || String((cons[0] as any).status) !== "concedido") continue;
+    if (!consentimentoLibera(cfg, cons && cons.length ? String((cons[0] as any).status) : null)) continue;
 
     const p = new Pipeline(sb, { cliente_crm_id: String(card.id), conversa_id: null, vendedor_id: card.vendedor_id, funil_id: card.funil_id });
     p.modelo = cfg.modelo || "claude-sonnet-5-5";
