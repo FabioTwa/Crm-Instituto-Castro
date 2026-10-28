@@ -20,10 +20,12 @@ export function detectarNegociacao(textoLead: string): string | null {
 }
 
 // detectarAgendamento: a conversa entrou em agendamento. O lead pediu para
-// marcar ou falou de dia/horario, ou a resposta da IA ofereceu data/horario.
+// marcar ou perguntou de horario/dia, ou a resposta da IA ofereceu data/horario.
+// So palavras claras de agendamento: dia da semana sozinho ("na segunda vez")
+// nao conta.
 // Move o card para "agendamento pendente" sem esperar a reserva do horario.
 const RE_AGENDAMENTO_LEAD =
-  /\b(agendar|agendamento|agenda|marcar|marcacao|remarcar|horario|horarios|disponibilidade|disponivel|vaga|vagas|que dia|qual dia|amanha|segunda|terca|quarta|quinta|sexta|sabado|semana que vem|proxima semana)\b/;
+  /\b(agendar|agendamento|marcar|marcacao|remarcar|horario|horarios|disponibilidade|vaga|vagas|que dia|qual dia)\b/;
 // Na resposta da IA: uma data (12/11) ou um horario ("as 15h", "as 15:30").
 const RE_AGENDAMENTO_IA = /\b\d{1,2}\/\d{1,2}\b|\bas \d{1,2}(:\d{2}|h)/;
 

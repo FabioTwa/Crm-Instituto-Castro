@@ -21,7 +21,7 @@ Deno.test("detectarNegociacao: conversa comum nao conta", () => {
 Deno.test("detectarAgendamento: lead pede para marcar ou fala de dia e horario", () => {
   assertEquals(detectarAgendamento("Quero marcar uma visita", ""), 'lead falou de agendamento ("marcar")');
   assertEquals(detectarAgendamento("Tem horário na quinta?", ""), 'lead falou de agendamento ("horario")');
-  assertEquals(detectarAgendamento("Pode ser amanhã?", ""), 'lead falou de agendamento ("amanha")');
+  assertEquals(detectarAgendamento("Qual dia vocês atendem?", ""), 'lead falou de agendamento ("qual dia")');
 });
 
 Deno.test("detectarAgendamento: IA ofereceu data ou horario", () => {
@@ -33,4 +33,6 @@ Deno.test("detectarAgendamento: conversa comum nao conta", () => {
   assertEquals(detectarAgendamento("Oi, bom dia", "Oi, tudo bem? Aqui é a Jully."), null);
   assertEquals(detectarAgendamento("Qual o valor?", "A avaliação inicial é R$ 150,00."), null);
   assertEquals(detectarAgendamento("quero emagrecer", "Entendi, há quanto tempo você pensa nisso?"), null);
+  assertEquals(detectarAgendamento("Na segunda vez que tentei dieta não deu certo", "Entendo."), null);
+  assertEquals(detectarAgendamento("Minha agenda anda corrida", "Imagino."), null);
 });
