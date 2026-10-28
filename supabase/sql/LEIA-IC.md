@@ -47,6 +47,7 @@ No Supabase, SQL Editor, um arquivo por vez:
 | `40_ic_ia_jully_sem_emoji.sql` | Nome da atendente passa a ser **Jully** (`persona_nome`) e os exemplos da IA deixam de usar emoji e de chamar a atendente de Julie. Seguro rodar de novo. |
 | `42_ic_ia_sem_valores.sql` | Desativa (sem apagar) os exemplos IC03, IC14 e IC18, que falavam de preço e parcelamento: a Jully não informa valores pelo WhatsApp, os valores são conversados pessoalmente; rollback no rodapé | 40 |
 | `43_ic_ia_assessoria_roteiro.sql` | Exemplo IC02 (Assessoria) no roteiro da equipe do Instituto: valoriza a decisão, explica a Assessoria e pergunta sobre tratamento anterior e nutricionista antes de convidar; rollback no rodapé | 40 |
+| `44_ic_ia_convite_consulta.sql` | A Jully convida para consulta com especialista (padrão do Instituto): desativa IC15 (forma de pagamento) e troca visita por consulta no IC24; rollback no rodapé | 42 |
 
 Depois do 13, inserir o primeiro usuario (criado antes no Supabase Auth, mesmo
 e-mail) e o numero de WhatsApp: o bloco comentado no fim do 13 mostra como.

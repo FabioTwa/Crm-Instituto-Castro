@@ -64,13 +64,16 @@ Deno.test("partesDaResposta: um paragrafo por mensagem, lista junto, no maximo 3
   assertEquals(partesDaResposta("  \n\n "), []);
 });
 
-Deno.test("objetivo: conduz para conhecer o Instituto e so marca consulta se a pessoa quiser", () => {
+Deno.test("objetivo: conduz para consulta com especialista; visita so se a pessoa pedir", () => {
   const sp = montarSystemPrompt({ primeiroNome: null, funil: null, etapa: null, exemplos: [], agoraLocal: "x" });
-  assertStringIncludes(sp, "VIR CONHECER O INSTITUTO");
+  assertStringIncludes(sp, "A condução leva a pessoa a uma CONSULTA");
+  assertStringIncludes(sp, "Podemos agendar um horário com um dos nossos especialistas?");
+  assertStringIncludes(sp, "Só se a pessoa pedir para apenas conhecer o Instituto");
   assertStringIncludes(sp, "Visita para conhecer o Instituto");
   assertStringIncludes(sp, "TODA resposta termina com uma pergunta");
   assertStringIncludes(sp, "Não diga que a visita é gratuita");
-  assertStringIncludes(sp, 'Nunca chame a visita de "sem compromisso"');
+  assertStringIncludes(sp, 'nunca a chame de "sem compromisso"');
+  assertEquals(sp.includes("VIR CONHECER O INSTITUTO"), false);
 });
 
 Deno.test("atendimento 100% autonomo: nenhum texto fixo nem o prompt promete equipe ou atendente", async () => {
