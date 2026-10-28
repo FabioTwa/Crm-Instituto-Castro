@@ -320,7 +320,7 @@ export async function enviarTextoZapi(args: {
 //   que exige chave de acesso, { challenge: {...} } (concluir pelo painel).
 // O WhatsApp troca o QR a cada ~20 s; o front pede um novo a cada 15 s.
 
-export function urlInstanciaZapi(canal: CanalZapi, recurso: "status" | "qr-code/image"): string {
+export function urlInstanciaZapi(canal: CanalZapi, recurso: "status" | "qr-code/image" | "chats"): string {
   return `${ZAPI_API}/instances/${encodeURIComponent(canal.instancia)}/token/${encodeURIComponent(canal.token)}/${recurso}`;
 }
 
@@ -384,4 +384,43 @@ export async function statusZapi(canal: CanalZapi, prefixoLog = "[zapi]"): Promi
 export async function qrCodeZapi(canal: CanalZapi, prefixoLog = "[zapi]"): Promise<QrZapi> {
   const r = await getZapi(urlInstanciaZapi(canal, "qr-code/image"), canal.clientToken, prefixoLog);
   return interpretarQrZapi(r.status, r.data);
+}
+
+// ---------------------------------------------------------------------------
+// CONVERSAS: lista de chats (retomada depois de uma queda)
+// ---------------------------------------------------------------------------
+// GET /chats?page=&pageSize= -> [{ phone, name, isGroup, unread, lastMessageTime }]
+// Documentado em developer.z-api.io (Chats > Get chats): campos e paginacao.
+// lastMessageTime vem como texto (ex.: "1622991687"); aceita segundos ou ms.
+// A Z-API NAO devolve o texto das mensagens aqui, so quem e quando.
+
+export type ChatZapi = { telefone: string; nome: string; grupo: boolean; naoLidas: number; ultimaEm: number | null };
+
+export function interpretarChatsZapi(status: number, data: any): { ok: true; chats: ChatZapi[] } | { ok: false; detalhe: string } {
+  if (status < 200 || status >= 300 || !Array.isArray(data)) {
+    return { ok: false, detalhe: String((data && (data.error || data.message)) || `Z-API devolveu ${status}`).slice(0, 200) };
+  }
+  const chats: ChatZapi[] = [];
+  for (const c of data) {
+    if (!c || typeof c !== "object") continue;
+    const fone = String(c.phone ?? "").trim();
+    const grupo = c.isGroup === true || String(c.isGroup) === "true" || fone.includes("-group") || fone.includes("@g.us") || fone.includes("@newsletter") || fone.includes("@broadcast");
+    const t = Number(c.lastMessageTime);
+    const ultimaEm = Number.isFinite(t) && t > 0 ? (t > 1e12 ? t : t * 1000) : null;
+    const n = Number(c.unread ?? c.messagesUnread);
+    chats.push({
+      telefone: fone.includes("@") ? fone : soDigitos(fone),
+      nome: String(c.name ?? "").trim().slice(0, 120),
+      grupo,
+      naoLidas: Number.isFinite(n) && n > 0 ? Math.floor(n) : 0,
+      ultimaEm,
+    });
+  }
+  return { ok: true, chats };
+}
+
+export async function chatsZapi(canal: CanalZapi, pagina: number, porPagina: number, prefixoLog = "[zapi]"): Promise<{ ok: true; chats: ChatZapi[] } | { ok: false; detalhe: string }> {
+  const url = `${urlInstanciaZapi(canal, "chats")}?page=${Math.max(1, Math.floor(pagina))}&pageSize=${Math.max(1, Math.floor(porPagina))}`;
+  const r = await getZapi(url, canal.clientToken, prefixoLog);
+  return interpretarChatsZapi(r.status, r.data);
 }

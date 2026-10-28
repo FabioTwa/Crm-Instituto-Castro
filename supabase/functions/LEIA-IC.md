@@ -181,6 +181,28 @@ Quando a pessoa confirma ("confirmo", "estarei aí"), a IA chama a ferramenta
 passa o próximo horário pendente do card para `confirmado` (o gatilho do SQL 18
 move o card e registra o handoff `agendamento_confirmado`, só histórico).
 
+### Retomada depois de queda do WhatsApp, SQL 41
+
+Com o número Z-API desconectado, as mensagens recebidas não chegam ao CRM e a
+Z-API não as reenvia ao reconectar (teste de 28/10/2026); também não há rota
+documentada para ler o texto delas. Na mesma rodada do varredor, a função
+consulta o status de cada número Z-API ativo: ao cair, abre uma linha em
+`ic_whatsapp_quedas`; ao voltar, fecha e lê a lista de conversas da Z-API
+(`GET /chats`, `_shared/zapi.ts chatsZapi`: só quem falou e quando). Entra na
+fila `ic_retomada_queda` quem teve mensagem durante a queda e ainda não está no
+CRM (fora grupos, os números do CRM, os do aviso à equipe e quem está fora de
+`numeros_teste`). A fila anda **uma pessoa por vez**, a cada
+`retomada_queda_intervalo_min` (padrão 3), dentro de `retomada_queda_horario`
+(padrão 08:00-20:00, nunca domingo): com card, a IA lê a conversa e escreve
+pedindo desculpas pela demora e para a pessoa mandar de novo
+(`_shared/retomada-queda.ts`, texto fixo se a IA falhar); sem card (se
+`retomada_queda_desconhecidos` = 'true'), vai um texto fixo. Pula quem já
+escreveu de novo, tem handoff pendente ou recusou o atendimento; desiste depois
+de 48 h. Log: `ia_decisoes_log` `retomada_queda/*`.
+Desligar: `update crm_ia_config set valor = 'false' where chave = 'retomada_queda_ligada';`
+Limites: queda de menos de ~1 min pode passar sem ser vista; mensagem que alguém
+mandou pelo celular durante a queda também conta como conversa da queda.
+
 ### Encerramento por inatividade
 
 Só vale com `followups_minutos` vazio (desde o SQL 37 fica em '0': nunca encerra). `encerrar_apos_minutos` (padrão '60' sem linha na tabela; '0' desliga; 5 a 1440).
