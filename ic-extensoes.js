@@ -1633,32 +1633,72 @@
     // 9. WHATSAPP DESCONECTADO: tela de reconexão com QR Code (Z-API)
     // =====================================================================
     // A cada minuto (aba visível e usuário logado) consulta ic-whatsapp-conexao.
-    // Se um número cair, abre na frente do CRM uma tela com o QR Code para
-    // reconectar. O WhatsApp troca o QR a cada ~20 s: pede um novo a cada 15 s;
-    // depois de 3 sem leitura, para e mostra "Gerar novo QR Code" (recomendação
-    // da Z-API). "Lembrar depois" esconde a tela por 5 minutos.
+    // Se um número cair, TODOS os usuários veem uma faixa de alerta no topo do
+    // CRM. Só o ADMIN vê, na frente do CRM, a tela com o QR Code para reconectar
+    // (quem lê o QR assume o número; a função também recusa o QR a não-admin).
+    // O WhatsApp troca o QR a cada ~20 s: pede um novo a cada 15 s; depois de 3
+    // sem leitura, para e mostra "Gerar novo QR Code" (recomendação da Z-API).
+    // "Lembrar depois" esconde a tela por 5 minutos; a faixa continua.
     var IC_CONEXAO = { timer: null, qrTimer: null, statusTimer: null, adiadaAte: 0, qrs: 0, linha: null, emCurso: false };
     var IC_CONEXAO_INTERVALO = 60000, IC_QR_INTERVALO = 15000, IC_QR_MAX = 3, IC_ADIAR_MS = 5 * 60000;
 
+    // Resposta fora de 2xx vem em error.context (Response): lê o corpo para
+    // ter o código de erro da função (chave_de_acesso, somente_admin...).
     async function icConexaoChamar(body) {
         var r;
         try { r = await supabaseClient.functions.invoke('ic-whatsapp-conexao', { body: body }); } catch (e) { r = { error: e }; }
-        return r || {};
+        r = r || {};
+        if (!r.data && r.error && r.error.context && typeof r.error.context.json === 'function') {
+            try { r.data = await r.error.context.json(); } catch (e) {}
+        }
+        return r;
+    }
+
+    function icConexaoEhAdmin() {
+        return (typeof crmUserPerfil !== 'undefined' && crmUserPerfil === 'Admin')
+            || !!(window._perfilAtualCache && window._perfilAtualCache.is_admin);
     }
 
     async function icConexaoVerificar() {
         if (IC_CONEXAO.emCurso || document.hidden) return;
-        if (typeof currentUser === 'undefined' || !currentUser || typeof supabaseClient === 'undefined') return;
+        if (typeof currentUser === 'undefined' || !currentUser || typeof supabaseClient === 'undefined') { icConexaoFaixa(null); return; }
         if (document.getElementById('modal-ic-whatsapp')) return;
-        if (Date.now() < IC_CONEXAO.adiadaAte) return;
         IC_CONEXAO.emCurso = true;
         try {
             var r = await icConexaoChamar({ acao: 'status' });
             var d = r.data;
-            if (r.error || !d || !d.ok || !d.desconectado) return;
-            var caida = (d.linhas || []).filter(function (l) { return l.conectado === false; })[0];
-            if (caida) icConexaoAbrir(caida);
+            if (!d || !d.ok) return;   // falha na consulta: mantém a faixa como estava
+            var caida = d.desconectado ? (d.linhas || []).filter(function (l) { return l.conectado === false; })[0] : null;
+            icConexaoFaixa(caida || null);
+            if (caida && icConexaoEhAdmin() && Date.now() >= IC_CONEXAO.adiadaAte) icConexaoAbrir(caida);
         } finally { IC_CONEXAO.emCurso = false; }
+    }
+
+    // Faixa de alerta no topo do conteúdo (todos os usuários). null = esconde.
+    function icConexaoFaixa(linha) {
+        var id = 'ic-faixa-whatsapp', f = document.getElementById(id);
+        if (!linha) { if (f) f.remove(); return; }
+        var main = document.querySelector('#app-authenticated .main-content');
+        if (!main) return;
+        if (!f) {
+            f = document.createElement('div'); f.id = id; f.setAttribute('role', 'alert');
+            f.style.cssText = 'position:sticky;top:0;z-index:calc(var(--z-sidebar) - 1);display:flex;align-items:center;gap:12px;flex-wrap:wrap;'
+                + 'margin:-8px 0 16px;padding:10px 14px;border-radius:8px;background:var(--ic-danger);color:#fff;font-size:14px;line-height:1.4;box-shadow:0 2px 8px rgba(0,0,0,.15)';
+            f.innerHTML = '<span data-ic="texto" style="flex:1;min-width:200px"></span>';
+            main.insertBefore(f, main.firstChild);
+        }
+        var num = linha.numero ? icFormatarTelefoneBR(linha.numero) : '';
+        var admin = icConexaoEhAdmin();
+        f.querySelector('[data-ic="texto"]').textContent = 'O WhatsApp' + (num ? ' ' + num : '') + ' do CRM está desconectado. As mensagens não chegam e não são respondidas'
+            + (admin ? '.' : ' até um administrador reconectar.');
+        var b = f.querySelector('[data-ic="reconectar"]');
+        if (admin && !b) {
+            b = document.createElement('button'); b.type = 'button'; b.setAttribute('data-ic', 'reconectar');
+            b.textContent = 'Reconectar';
+            b.style.cssText = 'background:#fff;color:var(--ic-danger);border:0;border-radius:6px;padding:6px 14px;font-weight:600;font-size:13px;cursor:pointer';
+            f.appendChild(b);
+        } else if (!admin && b) { b.remove(); b = null; }
+        if (b) b.onclick = function () { IC_CONEXAO.adiadaAte = 0; icConexaoAbrir(linha); };
     }
 
     function icConexaoPararTimers() {
@@ -1667,6 +1707,8 @@
     }
 
     function icConexaoAbrir(linha) {
+        if (!icConexaoEhAdmin()) return;
+        icConexaoPararTimers();
         IC_CONEXAO.linha = linha;
         var id = 'modal-ic-whatsapp';
         var m = document.getElementById(id); if (m) m.remove();
@@ -1738,6 +1780,7 @@
             return;
         }
         var erro = (d && d.erro) || '';
+        if (erro === 'somente_admin') { icConexaoFechar(); return; }
         aviso.textContent = erro === 'chave_de_acesso'
             ? 'Este aparelho pede uma chave de acesso. Faça a conexão pelo painel da Z-API.'
             : 'Não foi possível gerar o QR Code agora. Tentando de novo...';
@@ -1755,6 +1798,7 @@
 
     function icConexaoSucesso() {
         icConexaoFechar();
+        icConexaoFaixa(null);
         IC_CONEXAO.linha = null;
         if (typeof showToast === 'function') showToast('WhatsApp conectado de novo.', 'success');
     }
