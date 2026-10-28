@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { interpretarConsentimento, pedidoDeConversaAnterior } from "./consentimento.ts";
+import { consentimentoLibera, interpretarConsentimento, pedidoDeConversaAnterior, pedirConsentimento } from "./consentimento.ts";
 
 Deno.test("'sim, pode' -> sim", () => {
   assertEquals(interpretarConsentimento("sim, pode"), "sim");
@@ -54,4 +54,22 @@ Deno.test("pedido feito antes do encerramento da conversa vale como pedido antig
 
 Deno.test("pedido de consulta no lugar do sim/nao fica ambiguo (vira lembrete)", () => {
   assertEquals(interpretarConsentimento("Olá, boa tarde. Gostaria de marcar uma consulta!"), "ambiguo");
+});
+
+Deno.test("pedido de autorizacao so com pedir_consentimento = 'true'", () => {
+  assertEquals(pedirConsentimento({}), false);
+  assertEquals(pedirConsentimento({ pedir_consentimento: "" }), false);
+  assertEquals(pedirConsentimento({ pedir_consentimento: "false" }), false);
+  assertEquals(pedirConsentimento({ pedir_consentimento: " TRUE " }), true);
+});
+
+Deno.test("lembrete: com pedido ligado so concedido; desligado so barra recusa", () => {
+  const ligado = { pedir_consentimento: "true" };
+  assertEquals(consentimentoLibera(ligado, "concedido"), true);
+  assertEquals(consentimentoLibera(ligado, "pendente"), false);
+  assertEquals(consentimentoLibera(ligado, null), false);
+  assertEquals(consentimentoLibera({}, null), true);
+  assertEquals(consentimentoLibera({}, "pendente"), true);
+  assertEquals(consentimentoLibera({}, "negado"), false);
+  assertEquals(consentimentoLibera({}, "revogado"), false);
 });

@@ -94,7 +94,7 @@ própria (CFM 2.336/2023).
 2. **humano_assumiu** — há `crm_conversas` `direcao='enviada'`, `autor='vendedor'` nas últimas 24 h (equipe respondeu pelo celular: é a linha que o eco grava) → `humano_no_controle`. **Atendimento 100% autônomo (22/10/2026):** não existe atendente, então nenhum handoff cala a IA, exceto `consentimento_negado` pendente (a pessoa recusou o atendimento automatizado) → silêncio (`consentimento_negado_pendente`). Ver `handoffCalaIA`.
 3. **limites** — só com `atender_fora_do_horario='false'`: fora de `horario_inicio`/`horario_fim` (America/Sao_Paulo; sexta até 18h; fim de semana sempre fora): manda o aviso fixo no máximo 1 vez por dia por card (`payload_raw.fora_horario=true`) e encerra. `max_respostas_por_conversa` atingido (conta `ia_decisoes_log.resposta_enviada=true` do card desde o último encerramento por inatividade) → handoff `manual` "limite de respostas da IA".
 4. **contexto** — RPC `ic_ia_contexto(card, contexto_mensagens)` (padrão 30).
-5. **consentimento** — `ia_consentimentos`: pendente e nunca pedido → envia o texto de consentimento (constante em `_shared/ia-prompt.ts`, com `IC_POLITICA_PRIVACIDADE_URL`) e grava `texto_apresentado`; pendente e já pedido → `interpretarConsentimento` (SIM/NÃO/ambíguo): NÃO → `negado` + handoff `consentimento_negado` + despedida; SIM → `concedido`, segue; ambíguo → não responde.
+5. **consentimento** — **desligado por padrão desde 28/10/2026** (decisão do Fabio: a Julie abre a conversa se apresentando como consultora, sem pedido de autorização; base legal de tutela da saúde, LGPD art. 11, II, f). Só roda com `crm_ia_config.pedir_consentimento = 'true'`; desligado, registra `dispensado` e segue, e o lembrete de confirmação só pula quem recusou num pedido antigo (`consentimentoLibera`). Ligado: `ia_consentimentos`: pendente e nunca pedido → envia o texto de consentimento (constante em `_shared/ia-prompt.ts`, com `IC_POLITICA_PRIVACIDADE_URL`) e grava `texto_apresentado`; pendente e já pedido → `interpretarConsentimento` (SIM/NÃO/ambíguo): NÃO → `negado` + handoff `consentimento_negado` + despedida; SIM → `concedido`, segue; ambíguo → não responde.
 6. **handoff_regras** — `detectarHandoff` (código, antes da IA): urgência → texto fixo orientando PS/192 e registro em `ia_handoffs` (histórico); dúvida clínica → texto fixo "só o médico avalia, pessoalmente" com convite para a visita (CFM: não passa pela IA). Reclamação e pedido de humano só ficam no log (`<motivo>_ia_conduz`) e a IA conduz pelo prompt. Nenhum texto fala em equipe ou atendente.
 7. **exemplos** — até 12 `ia_exemplos_conversa` ativos, preferindo os cujas `tags` casam com o nome do funil.
 8. **claude** — `POST https://api.anthropic.com/v1/messages` (`anthropic-version: 2023-06-01`), modelo `crm_ia_config.modelo` (padrão `claude-sonnet-5-5`), `max_tokens` = `crm_ia_config.max_tokens` (padrão 1024), `output_config.effort='low'`, tools `propor_agendamento` e `cancelar_agendamento` (`strict:true`, `tool_choice auto`), `AbortController` 25 s. Mensagens do contexto mapeadas lead→user, vendedor/ia→assistant com mesclagem de consecutivas.
@@ -148,7 +148,7 @@ e as do SQL 37 (Julie): `persona_nome`, `persona_ficha`, `rajada_silencio_segund
 3 dias desde que a conversa parou) e `followup_horario`
 ('08:00-20:00', nunca domingo). O varredor chama `{acao:'encerrar_inativas'}`
 1x por minuto; com retomadas ligadas, a função procura cards em que a IA falou
-por último, sem handoff pendente e com consentimento concedido, e manda no
+por último, sem handoff pendente e com consentimento liberado (ver passo 5), e manda no
 máximo 3 por rodada. A própria IA escreve a retomada lendo a conversa (sem
 ferramentas, com pós-validação); se falhar, vai um texto fixo de
 `_shared/ia-followup.ts`. Cada retomada grava `crm_conversas.payload_raw.followup=true`
@@ -161,7 +161,7 @@ e `ia_decisoes_log` `followup/followup_enviado`. Lead ou vendedor falou por
 Na mesma rodada do varredor, a função procura agendamentos `pendente` ou
 `confirmado` e manda um texto fixo (`_shared/confirmacao-agendamento.ts`) pedindo
 que a pessoa confirme a presença, 24 h antes do horário. Só para quem tem
-consentimento concedido, dentro de
+consentimento liberado (ver passo 5), dentro de
 `followup_horario` e nunca aos domingos (a segunda-feira é lembrada no sábado).
 Uma vez por agendamento e horário: `ia_decisoes_log`
 `confirmacao_agendamento/lembrete_enviado` com `detalhe.agendamento_id` e
