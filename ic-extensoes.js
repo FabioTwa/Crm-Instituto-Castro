@@ -14,6 +14,7 @@
 //   6. Agendamentos (Parte 7): aba, modal, status, Google Agenda
 //   7. Ações do Dia: handoffs da IA (Parte 6)
 //   8. Roteamento: view-agendamentos e Meu Perfil (Google)
+//   9. WhatsApp desconectado: tela de reconexão com QR Code
 (function () {
     'use strict';
 
@@ -1627,6 +1628,141 @@
                 return Promise.resolve(r).finally(function () { emCurso = false; });
             };
         });
+
+    // =====================================================================
+    // 9. WHATSAPP DESCONECTADO: tela de reconexão com QR Code (Z-API)
+    // =====================================================================
+    // A cada minuto (aba visível e usuário logado) consulta ic-whatsapp-conexao.
+    // Se um número cair, abre na frente do CRM uma tela com o QR Code para
+    // reconectar. O WhatsApp troca o QR a cada ~20 s: pede um novo a cada 15 s;
+    // depois de 3 sem leitura, para e mostra "Gerar novo QR Code" (recomendação
+    // da Z-API). "Lembrar depois" esconde a tela por 5 minutos.
+    var IC_CONEXAO = { timer: null, qrTimer: null, statusTimer: null, adiadaAte: 0, qrs: 0, linha: null, emCurso: false };
+    var IC_CONEXAO_INTERVALO = 60000, IC_QR_INTERVALO = 15000, IC_QR_MAX = 3, IC_ADIAR_MS = 5 * 60000;
+
+    async function icConexaoChamar(body) {
+        var r;
+        try { r = await supabaseClient.functions.invoke('ic-whatsapp-conexao', { body: body }); } catch (e) { r = { error: e }; }
+        return r || {};
+    }
+
+    async function icConexaoVerificar() {
+        if (IC_CONEXAO.emCurso || document.hidden) return;
+        if (typeof currentUser === 'undefined' || !currentUser || typeof supabaseClient === 'undefined') return;
+        if (document.getElementById('modal-ic-whatsapp')) return;
+        if (Date.now() < IC_CONEXAO.adiadaAte) return;
+        IC_CONEXAO.emCurso = true;
+        try {
+            var r = await icConexaoChamar({ acao: 'status' });
+            var d = r.data;
+            if (r.error || !d || !d.ok || !d.desconectado) return;
+            var caida = (d.linhas || []).filter(function (l) { return l.conectado === false; })[0];
+            if (caida) icConexaoAbrir(caida);
+        } finally { IC_CONEXAO.emCurso = false; }
+    }
+
+    function icConexaoPararTimers() {
+        clearInterval(IC_CONEXAO.qrTimer); clearInterval(IC_CONEXAO.statusTimer);
+        IC_CONEXAO.qrTimer = null; IC_CONEXAO.statusTimer = null;
+    }
+
+    function icConexaoAbrir(linha) {
+        IC_CONEXAO.linha = linha;
+        var id = 'modal-ic-whatsapp';
+        var m = document.getElementById(id); if (m) m.remove();
+        m = document.createElement('div'); m.className = 'modal-overlay'; m.id = id;
+        m.innerHTML = '<div class="modal-card" style="max-width:440px;text-align:center">'
+            + '<div class="modal-header"><h2>WhatsApp desconectado</h2><button type="button" class="modal-close" aria-label="Lembrar depois">&times;</button></div>'
+            + '<p data-ic="texto" style="font-size:14px;line-height:1.6;color:var(--ic-text);margin-bottom:12px"></p>'
+            + '<div data-ic="qr" style="width:264px;height:264px;margin:0 auto 12px;border:2px solid var(--ic-border);border-radius:10px;display:flex;align-items:center;justify-content:center;background:#fff">'
+            + '<span style="font-size:13px;color:var(--ic-muted)">Carregando QR Code...</span></div>'
+            + '<ol style="text-align:left;font-size:13px;line-height:1.7;color:var(--ic-text);margin:0 0 12px 20px;padding:0">'
+            + '<li>No celular do número, abra o WhatsApp.</li>'
+            + '<li>Toque em <b>Mais opções</b> (ou <b>Configurações</b>) e depois em <b>Dispositivos conectados</b>.</li>'
+            + '<li>Toque em <b>Conectar um dispositivo</b> e aponte a câmera para o QR Code.</li></ol>'
+            + '<div data-ic="aviso" style="display:none;font-size:13px;color:var(--ic-danger);margin-bottom:8px"></div>'
+            + '<div class="modal-footer"><button type="button" class="btn btn-secondary" data-ic="depois">Lembrar depois</button>'
+            + '<button type="button" class="btn btn-primary" data-ic="novo" style="display:none">Gerar novo QR Code</button></div></div>';
+        document.body.appendChild(m);
+        var num = linha.numero ? icFormatarTelefoneBR(linha.numero) : '';
+        m.querySelector('[data-ic="texto"]').textContent = 'O WhatsApp' + (num ? ' ' + num : '')
+            + ' do CRM foi desconectado. Enquanto isso, as mensagens não chegam e não são respondidas. Leia o QR Code abaixo com o celular desse número para reconectar.';
+        var adiar = function () {
+            IC_CONEXAO.adiadaAte = Date.now() + IC_ADIAR_MS;
+            icConexaoFechar();
+        };
+        m.querySelector('.modal-close').onclick = adiar;
+        m.querySelector('[data-ic="depois"]').onclick = adiar;
+        m.querySelector('[data-ic="novo"]').onclick = function () { icConexaoIniciarQr(); };
+        requestAnimationFrame(function () { m.classList.add('active'); });
+        icConexaoIniciarQr();
+        IC_CONEXAO.statusTimer = setInterval(icConexaoConferir, 5000);
+    }
+
+    function icConexaoFechar() {
+        icConexaoPararTimers();
+        var m = document.getElementById('modal-ic-whatsapp');
+        if (m) { m.classList.remove('active'); setTimeout(function () { m.remove(); }, 200); }
+    }
+
+    function icConexaoIniciarQr() {
+        var m = document.getElementById('modal-ic-whatsapp'); if (!m) return;
+        IC_CONEXAO.qrs = 0;
+        m.querySelector('[data-ic="novo"]').style.display = 'none';
+        m.querySelector('[data-ic="aviso"]').style.display = 'none';
+        clearInterval(IC_CONEXAO.qrTimer);
+        icConexaoBuscarQr();
+        IC_CONEXAO.qrTimer = setInterval(icConexaoBuscarQr, IC_QR_INTERVALO);
+    }
+
+    async function icConexaoBuscarQr() {
+        var m = document.getElementById('modal-ic-whatsapp'); if (!m || !IC_CONEXAO.linha) return;
+        var caixa = m.querySelector('[data-ic="qr"]'), aviso = m.querySelector('[data-ic="aviso"]');
+        if (IC_CONEXAO.qrs >= IC_QR_MAX) {
+            clearInterval(IC_CONEXAO.qrTimer); IC_CONEXAO.qrTimer = null;
+            caixa.innerHTML = '<span style="font-size:13px;color:var(--ic-muted);padding:16px">O QR Code expirou. Clique em <b>Gerar novo QR Code</b> quando estiver com o celular em mãos.</span>';
+            m.querySelector('[data-ic="novo"]').style.display = '';
+            return;
+        }
+        IC_CONEXAO.qrs++;
+        var r = await icConexaoChamar({ acao: 'qrcode', linha_id: IC_CONEXAO.linha.id });
+        if (!document.getElementById('modal-ic-whatsapp')) return;
+        var d = r.data;
+        if (d && d.ok && d.ja_conectado) { icConexaoSucesso(); return; }
+        if (d && d.ok && /^data:image\/(png|jpeg);base64,/.test(d.imagem || '')) {
+            var img = document.createElement('img');
+            img.src = d.imagem; img.alt = 'QR Code para conectar o WhatsApp';
+            img.style.cssText = 'width:256px;height:256px;object-fit:contain;image-rendering:pixelated';
+            caixa.innerHTML = ''; caixa.appendChild(img);
+            aviso.style.display = 'none';
+            return;
+        }
+        var erro = (d && d.erro) || '';
+        aviso.textContent = erro === 'chave_de_acesso'
+            ? 'Este aparelho pede uma chave de acesso. Faça a conexão pelo painel da Z-API.'
+            : 'Não foi possível gerar o QR Code agora. Tentando de novo...';
+        aviso.style.display = 'block';
+    }
+
+    async function icConexaoConferir() {
+        if (!IC_CONEXAO.linha) return;
+        var r = await icConexaoChamar({ acao: 'status' });
+        var d = r.data;
+        if (!d || !d.ok) return;
+        var l = (d.linhas || []).filter(function (x) { return x.id === IC_CONEXAO.linha.id; })[0];
+        if (l && l.conectado === true) icConexaoSucesso();
+    }
+
+    function icConexaoSucesso() {
+        icConexaoFechar();
+        IC_CONEXAO.linha = null;
+        if (typeof showToast === 'function') showToast('WhatsApp conectado de novo.', 'success');
+    }
+
+    window.icConexaoVerificar = icConexaoVerificar;
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) icConexaoVerificar(); });
+    setTimeout(icConexaoVerificar, 5000);
+    IC_CONEXAO.timer = setInterval(icConexaoVerificar, IC_CONEXAO_INTERVALO);
 
     window.crmSalvarCampo = function (campo, valor) {   // compatibilidade: chamadas antigas pelo nome
         var el = document.getElementById('crm-edit-' + campo);

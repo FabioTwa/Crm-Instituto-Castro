@@ -3,11 +3,14 @@ import {
   corpoTextoZapi,
   segundosDigitando,
   envelopeZapi,
+  interpretarQrZapi,
   interpretarRespostaZapi,
+  interpretarStatusZapi,
   mensagemZapiParaMeta,
   motivoIgnorarZapi,
   tokenWebhookZapiValido,
   urlEnvioTextoZapi,
+  urlInstanciaZapi,
   urlMidiaZapiPermitida,
 } from "./zapi.ts";
 
@@ -154,4 +157,31 @@ Deno.test("delayTyping vai no corpo so quando pedido e cresce com o texto", () =
   assertEquals(segundosDigitando("Oi"), 2);
   assertEquals(segundosDigitando("x".repeat(140)), 7);
   assertEquals(segundosDigitando("x".repeat(2000)), 9);
+});
+
+Deno.test("conexao: URLs de status e QR com instancia e token", () => {
+  const canal = { instancia: "ABC", token: "t/1", clientToken: "c" };
+  assertEquals(urlInstanciaZapi(canal, "status"), "https://api.z-api.io/instances/ABC/token/t%2F1/status");
+  assertEquals(urlInstanciaZapi(canal, "qr-code/image"), "https://api.z-api.io/instances/ABC/token/t%2F1/qr-code/image");
+});
+
+Deno.test("conexao: status conectado, desconectado e erro", () => {
+  assertEquals(interpretarStatusZapi(200, { connected: true, smartphoneConnected: true, error: "" }), {
+    ok: true, conectado: true, celularOnline: true, detalhe: "",
+  });
+  const off = interpretarStatusZapi(200, { connected: false, smartphoneConnected: false, error: "You are not connected." });
+  assert(off.ok && off.conectado === false);
+  assertEquals(interpretarStatusZapi(401, { error: "Instance not found" }).ok, false);
+  assertEquals(interpretarStatusZapi(200, {}).ok, false);
+});
+
+Deno.test("conexao: QR com e sem prefixo, chave de acesso e vazio", () => {
+  assertEquals(interpretarQrZapi(200, { value: "data:image/png;base64,iVBOR=" }), { ok: true, imagem: "data:image/png;base64,iVBOR=" });
+  assertEquals(interpretarQrZapi(200, { value: "iVBOR=" }), { ok: true, imagem: "data:image/png;base64,iVBOR=" });
+  const ch = interpretarQrZapi(200, { challenge: { rpId: "whatsapp.com" } });
+  assert(!ch.ok && ch.motivo === "chave_de_acesso");
+  const vazio = interpretarQrZapi(200, { value: "" });
+  assert(!vazio.ok && vazio.motivo === "sem_qr");
+  const html = interpretarQrZapi(200, { value: "<script>" });
+  assert(!html.ok);
 });
