@@ -8,6 +8,8 @@
 // a IA RETOMA as conversas em que o lead parou de responder e nunca encerra
 // (_shared/ia-followup.ts); com followups_minutos vazio volta o encerramento
 // por inatividade (crm_ia_config.encerrar_apos_minutos; _shared/ia-encerramento.ts).
+// Na mesma rodada: lembrete de confirmacao (SQL 39) e retomada de quem escreveu
+// enquanto o WhatsApp estava desconectado (SQL 41, _shared/retomada-queda.ts).
 //
 // ATENDIMENTO ATE O AGENDAMENTO (SQL 37): a IA ("Julie", crm_ia_config.persona_*)
 // responde a qualquer hora, informa valores, reserva o horario (ic-agendamento
@@ -78,9 +80,9 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 import { corsHeaders, erroGenerico, json } from "../_shared/http.ts";
 import { chamadaInternaValida, headersInternos, tokenDoHeader, usuarioAtivo } from "../_shared/auth.ts";
 import { iaConfig, icFlag } from "../_shared/flags.ts";
-import { canonicoTelefone, telefoneBrPlausivel } from "../_shared/telefone.ts";
-import { canalDoVendedor, type CanalEnvio, enviarTextoCanal } from "../_shared/whatsapp-envio.ts";
-import { segundosDigitando } from "../_shared/zapi.ts";
+import { canonicoTelefone, soDigitos, telefoneBrPlausivel, variacoesTelefone } from "../_shared/telefone.ts";
+import { canalDaLinha, canalDoVendedor, type CanalEnvio, enviarTextoCanal, provedorDaLinha } from "../_shared/whatsapp-envio.ts";
+import { type CanalZapi, type ChatZapi, chatsZapi, lerMensagemZapi, mensagensChatZapi, msLeitura, segundosDigitando, statusZapi } from "../_shared/zapi.ts";
 import { detectarHandoff, handoffCalaIA, RESPOSTA_URGENCIA } from "../_shared/handoff-regras.ts";
 import { respostaProibida } from "../_shared/pos-validacao.ts";
 import {
@@ -97,7 +99,23 @@ import { decidirFollowup, followupsDoConfig, instrucaoFollowup, podeMandarFollow
 import { dataHoraLocal, numerosAviso, textoAvisoAgendamento, textoAvisoCancelamento } from "../_shared/aviso-agendamento.ts";
 import { ETAPA_CONFIRMACAO, horasConfirmacao, horasConfirmacaoCurta, MINIMO_ANTES_MS, precisaLembrete, STATUS_COM_LEMBRETE, textoConfirmacao } from "../_shared/confirmacao-agendamento.ts";
 import { decidirEncerramento, ETAPA_ENCERRAMENTO, mensagensDaConversaAtual, minutosEncerramento } from "../_shared/ia-encerramento.ts";
-import { detectarNegociacao, type EventoFunil } from "../_shared/funil-ia.ts";
+import { detectarAgendamento, detectarNegociacao, type EventoFunil } from "../_shared/funil-ia.ts";
+import {
+  configRetomadaQueda,
+  type ConfigRetomadaQueda,
+  ETAPA_RETOMADA_QUEDA,
+  eventoParaReprocessar,
+  FOLGA_DESCONEXAO_MS,
+  instrucaoRetomadaQueda,
+  jaNoCrm,
+  MARGEM_CASAMENTO_MS,
+  mensagensDaQueda,
+  podeRetomarAgora,
+  PRAZO_COLETA_MS,
+  retomadaVencida,
+  selecionarChatsDaQueda,
+  textoRetomadaQuedaFixo,
+} from "../_shared/retomada-queda.ts";
 import {
   calendarioDiasUteis,
   FERRAMENTAS,
@@ -142,11 +160,11 @@ type Body = { cliente_crm_id: string; conversa_id: string | null; vendedor_id: s
 // (cada uma esperando os 30 s da rajada e a IA pensar), mas so UMA resposta e
 // enviada de cada vez no numero. A trava ia_vez so e segurada durante o envio;
 // o prazo e a rede de seguranca se a funcao cair no meio (cobre 3 partes com
-// "digitando..." de ate 9 s cada, as pausas e o aviso a equipe).
+// "digitando..." de ate 10 s cada, as pausas e o aviso a equipe).
 const PRAZO_VEZ_S = 90;
 // Entre as mensagens de uma resposta em partes: garante a ordem na Z-API, que
 // mostra o "digitando..." de cada uma antes de entregar.
-const PAUSA_ENTRE_MENSAGENS_MS = 1500;
+const PAUSA_ENTRE_MENSAGENS_MS = 2500;
 
 type Contexto = {
   primeiro_nome: string | null;
@@ -172,6 +190,8 @@ class Pipeline {
   canal: CanalEnvio | null = null;
   para = "";
   cfg: Record<string, string> = {};
+  // Antes disso nao comeca a digitar: tempo de "leitura" da mensagem (marcarComoLidas).
+  digitarDepoisDe = 0;
   private vezDono: string | null = null;
   private vezProfundidade = 0;
   constructor(sb: SupabaseClient, body: Body) {
@@ -302,6 +322,13 @@ class Pipeline {
     return !!(await this.handoffPendenteDesde());
   }
 
+  // Termina a "leitura" antes de pegar a vez (o tempo da IA pensar ja conta).
+  async esperarLeitura(): Promise<void> {
+    const falta = this.digitarDepoisDe - Date.now();
+    this.digitarDepoisDe = 0;
+    if (falta > 0) await new Promise((r) => setTimeout(r, falta));
+  }
+
   // Resposta da IA em varias mensagens, como uma pessoa manda (partesDaResposta):
   // cada uma com "digitando..." do tamanho dela. Marcadores so na primeira.
   async enviarEmPartes(
@@ -314,6 +341,7 @@ class Pipeline {
     const partes = partesDaResposta(texto);
     if (partes.length <= 1) return await this.enviar(partes[0] || texto, etapa, decisaoOk, extra, marcadores);
     let primeiro: { enviado: boolean; log_id: string | null } | null = null;
+    await this.esperarLeitura();
     const teveVez = await this.comVez(async () => {
       for (let i = 0; i < partes.length; i++) {
         if (i > 0 && this.envioLigado && this.canal) await new Promise((r) => setTimeout(r, PAUSA_ENTRE_MENSAGENS_MS));
@@ -343,6 +371,7 @@ class Pipeline {
       console.log(LOG, "MODO SOMBRA (nao enviado):", texto.slice(0, 120));
       return { enviado: false, log_id };
     }
+    await this.esperarLeitura();
     // Sem assinatura: a IA fala em nome da equipe; o nome so aparece quando um
     // atendente assume (ic-whatsapp-send). "Digitando..." antes, onde o provedor tem.
     const canal = this.canal;
@@ -578,6 +607,31 @@ async function esperarVez(sb: SupabaseClient, dono: string, cfg: Record<string, 
   }
 }
 
+// Marca como lidas as mensagens do lead desde a ultima resposta e define o tempo
+// de leitura (msLeitura) antes do "digitando...". So na Z-API e com envio ligado.
+async function marcarComoLidas(sb: SupabaseClient, p: Pipeline): Promise<void> {
+  if (!p.envioLigado || !p.canal || p.canal.provedor !== "zapi") return;
+  const { data } = await sb
+    .from("crm_conversas")
+    .select("direcao, mensagem, zapi_message_id")
+    .eq("cliente_crm_id", p.body.cliente_crm_id)
+    .order("criada_em", { ascending: false })
+    .limit(10);
+  const novas: any[] = [];
+  for (const m of (data as any[]) || []) {
+    if (m.direcao !== "recebida") break;
+    novas.push(m);
+  }
+  if (!novas.length) return;
+  const canal = p.canal;
+  // Da mais antiga para a mais nova, no maximo 5 (a ultima marca o resto no aparelho).
+  for (const m of novas.slice(0, 5).reverse()) {
+    if (m.zapi_message_id) await lerMensagemZapi(canal, p.para, String(m.zapi_message_id), LOG);
+  }
+  const caracteres = novas.reduce((n, m) => n + String(m.mensagem || "").length, 0);
+  p.digitarDepoisDe = Date.now() + msLeitura(caracteres);
+}
+
 // Resto do pipeline (depois da rajada).
 async function rodarNaVez(
   sb: SupabaseClient, body: Body, p: Pipeline, cfg: Record<string, string>, card: any, fase: ReturnType<typeof faseTeste>,
@@ -664,6 +718,9 @@ async function rodarNaVez(
     return { ok: true, decisao: "limite_respostas" };
   }
   await p.log("limites", "ok", { detalhe: { respostas: respostasDadas || 0, max: maxRespostas } });
+
+  // Como uma pessoa: abre a conversa (tracinhos azuis) e le antes de digitar.
+  await marcarComoLidas(sb, p);
 
   // 4) contexto
   const { data: ctxRaw, error: errCtx } = await sb.rpc("ic_ia_contexto", {
@@ -969,6 +1026,12 @@ async function rodarNaVez(
   const termoNegociacao = funilAuto ? detectarNegociacao(textoLead) : null;
   if (termoNegociacao) await avancarEtapa(sb, p, body.cliente_crm_id, "negociacao", `lead perguntou sobre "${termoNegociacao}"`);
   if (funilAuto && marcadores.agendamento_id) await avancarEtapa(sb, p, body.cliente_crm_id, "proposta", "a IA propôs um horário");
+  else if (funilAuto && env.enviado) {
+    // A conversa entrou em agendamento (pedido de marcar, dia/horario): o card
+    // ja vai para agendamento pendente, sem esperar a reserva do horario.
+    const motivoAgenda = detectarAgendamento(textoLead, textoResposta);
+    if (motivoAgenda) await avancarEtapa(sb, p, body.cliente_crm_id, "proposta", motivoAgenda);
+  }
 
   return { ok: true, decisao: env.enviado ? "enviada" : "simulada_envio_desligado" };
 }
@@ -1296,13 +1359,22 @@ async function lembrarConfirmacoes(sb: SupabaseClient): Promise<Record<string, u
 async function textoDaRetomada(
   sb: SupabaseClient, p: Pipeline, cfg: Record<string, string>, apiKey: string, numero: number, total: number, paradoMin: number,
 ): Promise<{ texto: string; origem: string }> {
-  const fixo = { texto: textoFollowupFixo(numero), origem: "fixo" };
+  return await textoComInstrucao(sb, p, cfg, apiKey, instrucaoFollowup(numero, total, paradoMin), "followup", textoFollowupFixo(numero));
+}
+
+// A IA le a conversa atual e escreve UMA mensagem seguindo uma instrucao
+// interna (que vai como ultima fala, nao e da pessoa). Sem ferramentas; se a IA
+// falhar ou a pos-validacao barrar, vai o texto fixo.
+async function textoComInstrucao(
+  sb: SupabaseClient, p: Pipeline, cfg: Record<string, string>, apiKey: string, instrucao: string, etapaLog: string, textoFixo: string,
+): Promise<{ texto: string; origem: string }> {
+  const fixo = { texto: textoFixo, origem: "fixo" };
   if (!apiKey) return fixo;
   const { data: ctxRaw, error } = await sb.rpc("ic_ia_contexto", { p_cliente: p.body.cliente_crm_id, p_limite: limiteContexto(cfg) });
   if (error || !ctxRaw) return fixo;
   const ctx = ctxRaw as Contexto;
   ctx.mensagens = mensagensDaConversaAtual(Array.isArray(ctx.mensagens) ? ctx.mensagens : [], await ultimoEncerramento(sb, p.body.cliente_crm_id));
-  const historico = mensagensParaClaude({ ...ctx, mensagens: [...ctx.mensagens, { autor: "lead", exibicao: instrucaoFollowup(numero, total, paradoMin), criada_em: new Date().toISOString() }] });
+  const historico = mensagensParaClaude({ ...ctx, mensagens: [...ctx.mensagens, { autor: "lead", exibicao: instrucao, criada_em: new Date().toISOString() }] });
   if (!historico.length) return fixo;
   const agoraSp = partesNoFuso(new Date(), TZ_PADRAO);
   const nomesDia = ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"];
@@ -1316,17 +1388,383 @@ async function textoDaRetomada(
     persona: { nome: cfg.persona_nome, ficha: cfg.persona_ficha },
   });
   const r = await chamarClaude({ apiKey, modelo: p.modelo, maxTokens: Math.max(256, Number(cfg.max_tokens || "1024") || 1024), system, messages: historico });
-  await p.log("followup", r.erro ? "erro_ia" : "ia_escreveu", {
+  await p.log(etapaLog, r.erro ? "erro_ia" : "ia_escreveu", {
     modelo: p.modelo, tokens_entrada: r.tokens_entrada, tokens_saida: r.tokens_saida, latencia_ms: r.latencia_ms, motivo: r.erro,
   });
   const texto = paraWhatsApp(r.texto || "");
   if (r.erro || !texto || r.tools.length) return fixo;
   const proibido = respostaProibida(texto);
   if (proibido) {
-    await p.log("followup", "bloqueada_pos_validacao", { motivo: proibido, detalhe: { resposta: texto } });
+    await p.log(etapaLog, "bloqueada_pos_validacao", { motivo: proibido, detalhe: { resposta: texto } });
     return fixo;
   }
   return { texto, origem: "ia" };
+}
+
+// ---------------------------------------------------------------------------
+// Retomada depois de queda do WhatsApp (_shared/retomada-queda.ts, SQL 41).
+// O varredor (1x por minuto) olha a conexao de cada numero Z-API e marca a
+// queda em ic_whatsapp_quedas. Ao reconectar, le na Z-API quem mandou mensagem
+// durante a queda (o texto nao vem) e poe na fila ic_retomada_queda. A fila
+// anda UMA pessoa por vez, a cada retomada_queda_intervalo_min, dentro do
+// horario: a Jully pede desculpas pela demora e pede para mandar de novo.
+// ---------------------------------------------------------------------------
+const PAGINAS_CHATS = 4;
+const CHATS_POR_PAGINA = 50;
+// Retomada que ficou "processando" alem disso caiu no meio (a funcao parou).
+const PRAZO_PROCESSANDO_MS = 10 * 60_000;
+
+async function retomarAposQueda(sb: SupabaseClient): Promise<Record<string, unknown>> {
+  const cfg = await iaConfig(sb);
+  const rq = configRetomadaQueda(cfg);
+  if (!rq.ligada) return { ok: true, decisao: "retomada_queda_desligada" };
+  if (!(await icFlag(sb, "ia_pre_atendimento")) || String(cfg.ligada).toLowerCase() !== "true") return { ok: true, decisao: "desligada" };
+
+  const { data: linhas, error } = await sb.from("vendedores_whatsapp").select("*").eq("ativo", true);
+  if (error) {
+    console.error(LOG, "retomada pos-queda: vendedores_whatsapp falhou:", error.message);
+    return { ok: false, erro: "erro_banco" };
+  }
+  const todas = (linhas as any[]) || [];
+  // Os numeros do proprio CRM e os da equipe nunca entram na fila.
+  const ignorar = [...todas.map((l) => String(l.numero_whatsapp || "")), ...numerosAviso(cfg.aviso_agendamento_whatsapp)];
+  const agora = new Date();
+  const conexao: Record<string, unknown>[] = [];
+  for (const linha of todas) {
+    if (provedorDaLinha(linha) !== "zapi" || !linha.zapi_instancia) continue;
+    const c = canalDaLinha(linha, (n) => Deno.env.get(n));
+    if (!c.ok || c.canal.provedor !== "zapi") continue;
+    conexao.push(await vigiarConexao(sb, cfg, rq, linha, c.canal, ignorar, agora));
+  }
+  const fila = await processarFilaQueda(sb, cfg, rq, agora);
+  return { ok: true, conexao, fila };
+}
+
+// Abre a queda quando cai, fecha quando volta e, depois de fechar, coleta quem
+// escreveu nesse periodo (tenta de novo a cada minuto ate PRAZO_COLETA_MS).
+async function vigiarConexao(
+  sb: SupabaseClient, cfg: Record<string, string>, rq: ConfigRetomadaQueda, linha: any, canal: CanalZapi, ignorar: string[], agora: Date,
+): Promise<Record<string, unknown>> {
+  const linhaId = String(linha.id);
+  const s = await statusZapi(canal, LOG);
+  if (!s.ok) return { linha: linhaId, decisao: "status_indisponivel" };
+  const { data: abertas, error } = await sb
+    .from("ic_whatsapp_quedas")
+    .select("id")
+    .eq("linha_id", linhaId)
+    .is("reconectado_em", null)
+    .limit(1);
+  if (error) {
+    console.error(LOG, "ic_whatsapp_quedas falhou (SQL 41 aplicado?):", error.message);
+    return { linha: linhaId, decisao: "erro_banco" };
+  }
+  const aberta = abertas && abertas.length ? String((abertas[0] as any).id) : null;
+  if (!s.conectado) {
+    if (aberta) return { linha: linhaId, decisao: "desconectado" };
+    const { error: errIns } = await sb.from("ic_whatsapp_quedas").insert({
+      linha_id: linhaId,
+      desconectado_em: new Date(agora.getTime() - FOLGA_DESCONEXAO_MS).toISOString(),
+    });
+    // 23505: outra rodada abriu ao mesmo tempo (indice unico da queda aberta).
+    if (errIns && errIns.code !== "23505") console.error(LOG, "abrir queda falhou:", errIns.message);
+    else console.warn(LOG, "WhatsApp desconectado, queda registrada:", linhaId);
+    return { linha: linhaId, decisao: "queda_registrada" };
+  }
+  if (aberta) {
+    const { error: errUpd } = await sb
+      .from("ic_whatsapp_quedas")
+      .update({ reconectado_em: agora.toISOString() })
+      .eq("id", aberta)
+      .is("reconectado_em", null);
+    if (errUpd) console.error(LOG, "fechar queda falhou:", errUpd.message);
+    else console.log(LOG, "WhatsApp reconectado:", linhaId);
+  }
+  const { data: aColetar } = await sb
+    .from("ic_whatsapp_quedas")
+    .select("id, desconectado_em, reconectado_em")
+    .eq("linha_id", linhaId)
+    .not("reconectado_em", "is", null)
+    .is("conversas", null)
+    .gte("reconectado_em", new Date(agora.getTime() - PRAZO_COLETA_MS).toISOString())
+    .order("desconectado_em", { ascending: true })
+    .limit(3);
+  let enfileiradas = 0;
+  for (const q of (aColetar as any[]) || []) {
+    const n = await coletarConversasDaQueda(sb, cfg, rq, linha, canal, q, ignorar, agora);
+    if (n != null) enfileiradas += n;
+  }
+  return { linha: linhaId, decisao: "conectado", enfileiradas };
+}
+
+// null = a Z-API nao respondeu a lista (tenta na proxima rodada).
+async function coletarConversasDaQueda(
+  sb: SupabaseClient, cfg: Record<string, string>, rq: ConfigRetomadaQueda, linha: any, canal: CanalZapi, queda: any, ignorar: string[], agora: Date,
+): Promise<number | null> {
+  const chats: ChatZapi[] = [];
+  for (let pagina = 1; pagina <= PAGINAS_CHATS; pagina++) {
+    const r = await chatsZapi(canal, pagina, CHATS_POR_PAGINA, LOG);
+    if (!r.ok) {
+      if (pagina === 1) {
+        console.warn(LOG, "lista de conversas da Z-API indisponivel:", r.detalhe);
+        return null;
+      }
+      break;
+    }
+    chats.push(...r.chats);
+    if (r.chats.length < CHATS_POR_PAGINA) break;
+  }
+  const candidatos = selecionarChatsDaQueda(chats, {
+    desconectadoEm: Date.parse(String(queda.desconectado_em)),
+    ate: agora.getTime(),
+    ignorar,
+  });
+  const fila: Record<string, unknown>[] = [];
+  for (const c of candidatos) {
+    if (!faseTeste(cfg, c.telefone).atende) continue;
+    const card = await cardPorTelefone(sb, linha.vendedor_id ? String(linha.vendedor_id) : null, c.telefone);
+    if (card) {
+      if (jaNoCrm(await ultimaMensagemNoCrm(sb, String(card.id)), c.ultimaEm)) continue;
+    } else if (!rq.desconhecidos) continue;
+    fila.push({
+      queda_id: queda.id,
+      linha_id: linha.id,
+      telefone: c.telefone,
+      nome: c.nome || null,
+      ultima_msg_em: new Date(c.ultimaEm).toISOString(),
+      cliente_crm_id: card ? card.id : null,
+    });
+  }
+  if (fila.length) {
+    const { error } = await sb.from("ic_retomada_queda").upsert(fila, { onConflict: "queda_id,telefone", ignoreDuplicates: true });
+    if (error) {
+      console.error(LOG, "ic_retomada_queda recusou:", error.message);
+      return null;
+    }
+  }
+  const { error: errUpd } = await sb.from("ic_whatsapp_quedas").update({ conversas: fila.length }).eq("id", queda.id);
+  if (errUpd) console.error(LOG, "registrar conversas da queda falhou:", errUpd.message);
+  console.log(LOG, "queda", queda.id, "conversas na Z-API:", chats.length, "na fila:", fila.length);
+  return fila.length;
+}
+
+// Mesmo caminho do webhook: card do vendedor com o numero em qualquer variacao.
+async function cardPorTelefone(sb: SupabaseClient, vendedorId: string | null, telefone: string): Promise<any | null> {
+  if (!vendedorId) return null;
+  const { data } = await sb
+    .from("clientes_crm")
+    .select("id, nome, numero_whatsapp, telefone, vendedor_id, funil_id")
+    .eq("vendedor_id", vendedorId)
+    .in("numero_whatsapp", variacoesTelefone(telefone))
+    .is("deleted_at", null)
+    .is("mesclado_para", null)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  return data && data.length ? data[0] : null;
+}
+
+async function ultimaMensagemNoCrm(sb: SupabaseClient, clienteId: string): Promise<number | null> {
+  const { data } = await sb
+    .from("crm_conversas")
+    .select("criada_em")
+    .eq("cliente_crm_id", clienteId)
+    .order("criada_em", { ascending: false })
+    .limit(1);
+  const t = data && data.length ? Date.parse(String((data[0] as any).criada_em)) : NaN;
+  return Number.isFinite(t) ? t : null;
+}
+
+// Uma retomada por rodada, respeitando o intervalo e o horario.
+async function processarFilaQueda(sb: SupabaseClient, cfg: Record<string, string>, rq: ConfigRetomadaQueda, agora: Date): Promise<Record<string, unknown>> {
+  // Rede de seguranca: a que ficou presa em "processando" vira falha.
+  await sb
+    .from("ic_retomada_queda")
+    .update({ estado: "falhou", motivo: "interrompida" })
+    .eq("estado", "processando")
+    .lt("processada_em", new Date(agora.getTime() - PRAZO_PROCESSANDO_MS).toISOString());
+  if (!podeMandarFollowup(agora, rq.horario, TZ_PADRAO)) return { decisao: "fora_da_janela" };
+  const { data: ult, error } = await sb
+    .from("ic_retomada_queda")
+    .select("processada_em")
+    .in("estado", ["processando", "enviada", "falhou"])
+    .not("processada_em", "is", null)
+    .order("processada_em", { ascending: false })
+    .limit(1);
+  if (error) return { decisao: "erro_banco" };
+  const ultMs = ult && ult.length ? Date.parse(String((ult[0] as any).processada_em)) : null;
+  if (!podeRetomarAgora(Number.isFinite(ultMs) ? ultMs : null, agora.getTime(), rq.intervaloMin)) return { decisao: "aguardando_intervalo" };
+
+  const { data: pendentes } = await sb
+    .from("ic_retomada_queda")
+    .select("*")
+    .eq("estado", "pendente")
+    .order("ultima_msg_em", { ascending: true })
+    .limit(10);
+  for (const item of (pendentes as any[]) || []) {
+    const marcar = (estado: string, motivo: string | null) =>
+      sb.from("ic_retomada_queda").update({ estado, motivo, processada_em: new Date().toISOString() }).eq("id", item.id);
+    if (retomadaVencida(Date.parse(String(item.ultima_msg_em)), agora.getTime())) {
+      await marcar("ignorada", "vencida");
+      continue;
+    }
+    // Reserva o item: so uma rodada o processa.
+    const { data: reservado } = await sb
+      .from("ic_retomada_queda")
+      .update({ estado: "processando", processada_em: new Date().toISOString() })
+      .eq("id", item.id)
+      .eq("estado", "pendente")
+      .select("id");
+    if (!reservado || !reservado.length) continue;
+    const r = await retomarUma(sb, cfg, rq, item);
+    await marcar(r.estado, r.motivo);
+    // Ignorada nao gasta a vez: tenta a proxima da fila na mesma rodada.
+    if (r.estado !== "ignorada") return { decisao: r.estado, motivo: r.motivo };
+  }
+  return { decisao: "fila_vazia" };
+}
+
+// Le na Z-API as mensagens que a pessoa mandou durante a queda e entrega cada
+// uma ao ic-meta-webhook (porta da Z-API), como se tivessem chegado agora.
+// Devolve quantas o webhook aceitou (0 = nao deu para ler; segue o pedido de reenvio).
+async function reprocessarMensagensDaQueda(sb: SupabaseClient, linha: any, canal: CanalEnvio, tel: string, item: any): Promise<number> {
+  if (canal.provedor !== "zapi") return 0;
+  const URL_SB = Deno.env.get("SUPABASE_URL") || "";
+  const segredo = Deno.env.get("ZAPI_WEBHOOK_TOKEN") || "";
+  if (!URL_SB || !segredo) {
+    console.warn(LOG, "retomada pos-queda: ZAPI_WEBHOOK_TOKEN ausente, nao reprocessa");
+    return 0;
+  }
+  const { data: queda } = await sb.from("ic_whatsapp_quedas").select("desconectado_em").eq("id", item.queda_id).maybeSingle();
+  const desde = queda ? Date.parse(String((queda as any).desconectado_em)) : Date.parse(String(item.ultima_msg_em)) - 3600_000;
+  const r = await mensagensChatZapi(canal, tel, 20, LOG);
+  if (!r.ok) {
+    console.warn(LOG, "retomada pos-queda: mensagens da conversa indisponiveis na Z-API:", r.detalhe);
+    return 0;
+  }
+  let msgs = mensagensDaQueda(r.mensagens, { desdeMs: desde - MARGEM_CASAMENTO_MS, ateMs: Date.now() });
+  if (!msgs.length) return 0;
+  // As que ja estao no CRM (chegaram antes da queda ou depois de reconectar) ficam de fora.
+  const { data: jaTem } = await sb
+    .from("crm_conversas")
+    .select("zapi_message_id")
+    .in("zapi_message_id", msgs.map((m) => String(m.messageId)));
+  const ids = new Set(((jaTem as any[]) || []).map((x) => String(x.zapi_message_id)));
+  msgs = msgs.filter((m) => !ids.has(String(m.messageId)));
+  let aceitas = 0;
+  for (const m of msgs) {
+    const evento = eventoParaReprocessar(m, {
+      instancia: String(linha.zapi_instancia || ""),
+      numero: soDigitos(String(linha.numero_whatsapp || "")),
+      telefoneLead: tel,
+    });
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 10000);
+    try {
+      const resp = await fetch(`${URL_SB}/functions/v1/ic-meta-webhook?provedor=zapi&token=${encodeURIComponent(segredo)}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(evento),
+        signal: ctl.signal,
+      });
+      const d: any = await resp.json().catch(() => ({}));
+      if (resp.ok && d && d.ack === true) aceitas++;
+      else console.warn(LOG, "retomada pos-queda: webhook nao aceitou a mensagem:", resp.status, d && (d.ignored || d.error));
+    } catch (e) {
+      console.error(LOG, "retomada pos-queda: webhook sem resposta:", e instanceof Error ? e.message : e);
+    } finally {
+      clearTimeout(t);
+    }
+  }
+  return aceitas;
+}
+
+async function retomarUma(
+  sb: SupabaseClient, cfg: Record<string, string>, rq: ConfigRetomadaQueda, item: any,
+): Promise<{ estado: "enviada" | "ignorada" | "falhou"; motivo: string | null }> {
+  const tel = canonicoTelefone(String(item.telefone || ""));
+  if (!telefoneBrPlausivel(tel)) return { estado: "ignorada", motivo: "telefone_invalido" };
+  const fase = faseTeste(cfg, tel);
+  if (!fase.atende) return { estado: "ignorada", motivo: "fora_dos_numeros_teste" };
+  const { data: linha } = await sb.from("vendedores_whatsapp").select("*").eq("id", item.linha_id).maybeSingle();
+  const c = linha ? canalDaLinha(linha, (n) => Deno.env.get(n)) : null;
+  if (!c || !c.ok) return { estado: "falhou", motivo: "sem_canal" };
+  const envioLigado = !fase.sombra && (await icFlag(sb, "envio_whatsapp_cloud_api"));
+  const ultimaMsgMs = Date.parse(String(item.ultima_msg_em));
+
+  // A pessoa pode ter escrito de novo depois de reconectar (e ganhado card).
+  let card: any = null;
+  if (item.cliente_crm_id) {
+    const { data } = await sb
+      .from("clientes_crm")
+      .select("id, nome, numero_whatsapp, telefone, vendedor_id, funil_id, deleted_at")
+      .eq("id", item.cliente_crm_id)
+      .maybeSingle();
+    card = data && !(data as any).deleted_at ? data : null;
+  }
+  if (!card) card = await cardPorTelefone(sb, (linha as any).vendedor_id ? String((linha as any).vendedor_id) : null, tel);
+  if (card && jaNoCrm(await ultimaMensagemNoCrm(sb, String(card.id)), ultimaMsgMs)) return { estado: "ignorada", motivo: "ja_atendida" };
+
+  // Primeiro tenta ler o que a pessoa escreveu e reprocessar pelo webhook: a
+  // Jully responde no mesmo contexto, pelo caminho normal (rajada, regras, vez).
+  const recuperadas = await reprocessarMensagensDaQueda(sb, linha, c.canal, tel, item);
+  if (recuperadas > 0) {
+    console.log(LOG, "retomada pos-queda: mensagens recuperadas e reprocessadas:", recuperadas);
+    return { estado: "enviada", motivo: `mensagens_recuperadas:${recuperadas}` };
+  }
+
+  // Sem conseguir ler: pede com naturalidade que a pessoa mande de novo.
+  if (card) {
+    const p = new Pipeline(sb, { cliente_crm_id: String(card.id), conversa_id: null, vendedor_id: card.vendedor_id, funil_id: card.funil_id });
+    p.modelo = cfg.modelo || "claude-sonnet-5-5";
+    p.cfg = cfg;
+    p.card = card;
+    p.para = tel;
+    if (await p.temHandoffPendente()) return { estado: "ignorada", motivo: "handoff_pendente" };
+    const { data: cons } = await sb
+      .from("ia_consentimentos")
+      .select("status")
+      .eq("cliente_crm_id", card.id)
+      .order("criado_em", { ascending: false })
+      .limit(1);
+    if (!consentimentoLibera(cfg, cons && cons.length ? String((cons[0] as any).status) : null)) return { estado: "ignorada", motivo: "consentimento" };
+    p.envioLigado = envioLigado;
+    p.canal = c.canal;
+    const minutosDesde = Math.max(1, Math.round((Date.now() - ultimaMsgMs) / 60000));
+    const texto = await textoComInstrucao(
+      sb, p, cfg, Deno.env.get("ANTHROPIC_API_KEY") || "", instrucaoRetomadaQueda(minutosDesde), ETAPA_RETOMADA_QUEDA, textoRetomadaQuedaFixo(true),
+    );
+    const env = await p.enviarEmPartes(texto.texto, ETAPA_RETOMADA_QUEDA, "retomada_enviada", { origem: texto.origem, queda_id: item.queda_id }, { retomada_queda: true });
+    if (env.enviado) return { estado: "enviada", motivo: null };
+    return envioLigado ? { estado: "falhou", motivo: "envio_falhou" } : { estado: "enviada", motivo: "simulada" };
+  }
+
+  if (!rq.desconhecidos) return { estado: "ignorada", motivo: "sem_card" };
+  // Sem card: texto fixo (nao ha conversa para a IA ler). O card nasce quando a
+  // pessoa responder, pelo caminho normal do webhook.
+  const texto = textoRetomadaQuedaFixo(false);
+  // Sem card o log fica sem cliente_crm_id (coluna aceita nulo).
+  const p = new Pipeline(sb, { cliente_crm_id: null as unknown as string, conversa_id: null, vendedor_id: (linha as any).vendedor_id, funil_id: null });
+  p.cfg = cfg;
+  if (!envioLigado) {
+    await p.log(ETAPA_RETOMADA_QUEDA, "simulada_envio_desligado", { detalhe: { resposta: texto, sem_card: true, retomada_id: item.id } });
+    return { estado: "enviada", motivo: "simulada" };
+  }
+  const canal = c.canal;
+  const caixa: { ok: boolean } = { ok: false };
+  const teveVez = await p.comVez(async () => {
+    const t0 = Date.now();
+    const r = await enviarTextoCanal(canal, tel, texto, LOG, { simularDigitacao: true });
+    caixa.ok = r.ok;
+    if (r.ok && canal.provedor === "zapi") {
+      const falta = segundosDigitando(texto) * 1000 + 1000 - (Date.now() - t0);
+      if (falta > 0) await new Promise((res) => setTimeout(res, falta));
+    }
+  });
+  await p.log(ETAPA_RETOMADA_QUEDA, caixa.ok ? "retomada_enviada" : "erro_envio", {
+    resposta_enviada: caixa.ok,
+    detalhe: { sem_card: true, retomada_id: item.id, sem_vez: !teveVez },
+  });
+  if (!teveVez) return { estado: "falhou", motivo: "sem_vez" };
+  return caixa.ok ? { estado: "enviada", motivo: null } : { estado: "falhou", motivo: "envio_falhou" };
 }
 
 // Chama ic-agendamento internamente (acao 'propor'): reserva o horario (status
@@ -1578,7 +2016,12 @@ Deno.serve(async (req: Request) => {
         console.error(LOG, "lembretes de confirmacao falharam:", e instanceof Error ? e.message : e);
         return { ok: false, erro: "excecao" };
       });
-      return json({ ...r, confirmacoes });
+      // Retomada de quem escreveu enquanto o WhatsApp estava desconectado (SQL 41).
+      const retomada_queda = await retomarAposQueda(sb).catch((e) => {
+        console.error(LOG, "retomada pos-queda falhou:", e instanceof Error ? e.message : e);
+        return { ok: false, erro: "excecao" };
+      });
+      return json({ ...r, confirmacoes, retomada_queda });
     }
 
     const clienteId = String(body.cliente_crm_id || "").trim();

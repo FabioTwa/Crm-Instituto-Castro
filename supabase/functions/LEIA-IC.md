@@ -104,7 +104,7 @@ própria (CFM 2.336/2023).
 9. **pos_validacao** — `respostaProibida` (medicamentos, mg, dose, garantias, "você tem"/"você está com" afirmativos, diagnóstico, receita): bateu → `bloqueada_pos_validacao`, handoff `erro_ia` (histórico), resposta fixa convidando a conversar com o médico pessoalmente.
 10. **tools** — antes: se o lead mandou mensagem nova enquanto a IA pensava, esta invocação desiste (`rajada/absorvida_depois_da_ia`) e a da mensagem nova responde tudo junto. `propor_agendamento` (serviço, dia, horário, nome completo, formato, pagamento) → `ic-agendamento` `{acao:'propor'}` reserva o horário (status `pendente`; recusa horário com `agenda_vagas_por_horario` agendamentos e devolve 2 sugestões, que viram a resposta). Reservou: handoff `agendamento_confirmado` (histórico; a IA segue respondendo o lead) e aviso no WhatsApp de cada número de `aviso_agendamento_whatsapp` (`tools/aviso_equipe_enviado`; vazio = `aviso_equipe_sem_numero`). Falha de sistema ao reservar → pede outro horário (`TEXTOS_AGENDAMENTO_FALHOU`). `cancelar_agendamento` (só depois de acolher, perguntar o motivo e tentar manter ou remarcar, ver a seção "Cancelamento ou desistência" do prompt) → `ic-agendamento` `{acao:'cancelar'}` cancela o próximo horário pendente ou confirmado do card, anota o motivo e apaga o evento do Google; avisa os mesmos números (`aviso_cancelamento_enviado`).
 11. **envio** — `_shared/whatsapp-envio.ts → enviarTextoCanal` (Meta ou Z-API, pelo provedor do número); grava `crm_conversas` `autor='ia'`, `direcao='enviada'`, `zapi_message_id`=wamid, `payload_raw={ia:true, modelo, decisao_log_id}`.
-12. **funil** — RPC `ic_avancar_etapa` (SQL 33), só para frente e nunca em fechado/perdido/cliente antigo: IA respondeu de verdade → `em_conversa`; lead perguntou valor, preço, convênio, parcelamento, online/presencial (`_shared/funil-ia.ts → detectarNegociacao`) → `negociacao` / `negociacao_quente`; IA propôs horário → `agendamento_pendente` / `avaliacao_inicial`. Funil sem a etapa: nada muda. Cada movimento grava `crm_historico` tipo `automatico` (autor "Assistente virtual") e `ia_decisoes_log` `funil/etapa_avancada`. Desligar: `crm_ia_config.funil_automatico='false'`. A confirmação do agendamento pela equipe (gatilho do SQL 18, agora via a mesma RPC) leva a `visita_confirmada` / `consulta_agendada` / `avaliacao_inicial`.
+12. **funil** — RPC `ic_avancar_etapa` (SQL 33), só para frente e nunca em fechado/perdido/cliente antigo: IA respondeu de verdade → `em_conversa`; lead perguntou valor, preço, convênio, parcelamento, online/presencial (`_shared/funil-ia.ts → detectarNegociacao`) → `negociacao` / `negociacao_quente`; IA propôs horário, ou a conversa entrou em agendamento (lead pediu para marcar ou falou de dia/horário, ou a IA ofereceu data/horário: `detectarAgendamento`) → `agendamento_pendente` / `avaliacao_inicial`. Funil sem a etapa: nada muda. Cada movimento grava `crm_historico` tipo `automatico` (autor "Assistente virtual") e `ia_decisoes_log` `funil/etapa_avancada`. Desligar: `crm_ia_config.funil_automatico='false'`. A confirmação do agendamento pela equipe (gatilho do SQL 18, agora via a mesma RPC) leva a `visita_confirmada` / `consulta_agendada` / `avaliacao_inicial`.
 
 ### Modo sombra
 
@@ -180,6 +180,39 @@ Quando a pessoa confirma ("confirmo", "estarei aí"), a IA chama a ferramenta
 `confirmar_agendamento`: o `ic-agendamento` (`{acao:'confirmar'}`, porta interna)
 passa o próximo horário pendente do card para `confirmado` (o gatilho do SQL 18
 move o card e registra o handoff `agendamento_confirmado`, só histórico).
+
+### Leitura e "digitando..." (Z-API)
+
+Antes de responder, a IA marca como lidas as mensagens novas do lead
+(`POST /read-message`, tracinhos azuis) e espera um tempo de leitura (2 s + ~25
+caracteres por segundo, até 8 s; o tempo da IA pensar conta junto). Cada bloco da
+resposta mostra "digitando..." de 3 a 10 s, com 2,5 s entre blocos. Só com envio
+ligado; no modo sombra nada é marcado.
+
+### Retomada depois de queda do WhatsApp, SQL 41
+
+Com o número Z-API desconectado, as mensagens recebidas não chegam ao CRM e a
+Z-API não as reenvia ao reconectar (teste de 28/10/2026). Na mesma rodada do varredor, a função
+consulta o status de cada número Z-API ativo: ao cair, abre uma linha em
+`ic_whatsapp_quedas`; ao voltar, fecha e lê a lista de conversas da Z-API
+(`GET /chats`, `_shared/zapi.ts chatsZapi`: só quem falou e quando). Entra na
+fila `ic_retomada_queda` quem teve mensagem durante a queda e ainda não está no
+CRM (fora grupos, os números do CRM, os do aviso à equipe e quem está fora de
+`numeros_teste`). A fila anda **uma pessoa por vez**, a cada
+`retomada_queda_intervalo_min` (padrão 3), dentro de `retomada_queda_horario`
+(padrão 08:00-20:00, nunca domingo). Para cada pessoa, primeiro lê na Z-API as
+mensagens da queda (`GET /chat-messages/{phone}`, `mensagensChatZapi`) e entrega
+cada uma ao `ic-meta-webhook` (porta da Z-API, com `ZAPI_WEBHOOK_TOKEN`), como se
+tivessem chegado agora: o card nasce se precisar, áudio é transcrito e a IA
+responde o conteúdo pelo caminho normal. Se não conseguir ler: com card, a IA lê
+a conversa e escreve pedindo desculpas pela demora e para a pessoa mandar de
+novo (`_shared/retomada-queda.ts`, texto fixo se a IA falhar); sem card (se
+`retomada_queda_desconhecidos` = 'true'), vai um texto fixo. Pula quem já
+escreveu de novo, tem handoff pendente ou recusou o atendimento; desiste depois
+de 48 h. Log: `ia_decisoes_log` `retomada_queda/*`.
+Desligar: `update crm_ia_config set valor = 'false' where chave = 'retomada_queda_ligada';`
+Limites: queda de menos de ~1 min pode passar sem ser vista; mensagem que alguém
+mandou pelo celular durante a queda também conta como conversa da queda.
 
 ### Encerramento por inatividade
 

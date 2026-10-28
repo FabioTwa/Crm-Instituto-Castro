@@ -1,7 +1,9 @@
 import { assert, assertEquals } from "jsr:@std/assert";
 import {
   corpoTextoZapi,
+  msLeitura,
   segundosDigitando,
+  urlLerMensagemZapi,
   envelopeZapi,
   interpretarQrZapi,
   interpretarRespostaZapi,
@@ -154,9 +156,10 @@ Deno.test("midia: so https", () => {
 Deno.test("delayTyping vai no corpo so quando pedido e cresce com o texto", () => {
   assertEquals(corpoTextoZapi("5511999990000", "Oi", 3), { phone: "5511999990000", message: "Oi", delayTyping: 3 });
   assertEquals(corpoTextoZapi("5511999990000", "Oi", 0), { phone: "5511999990000", message: "Oi" });
-  assertEquals(segundosDigitando("Oi"), 2);
-  assertEquals(segundosDigitando("x".repeat(140)), 7);
-  assertEquals(segundosDigitando("x".repeat(2000)), 9);
+  assertEquals(segundosDigitando("Oi"), 3);
+  assertEquals(segundosDigitando("x".repeat(140)), 10);
+  assertEquals(segundosDigitando("x".repeat(80)), 7);
+  assertEquals(segundosDigitando("x".repeat(2000)), 10);
 });
 
 Deno.test("conexao: URLs de status e QR com instancia e token", () => {
@@ -184,4 +187,11 @@ Deno.test("conexao: QR com e sem prefixo, chave de acesso e vazio", () => {
   assert(!vazio.ok && vazio.motivo === "sem_qr");
   const html = interpretarQrZapi(200, { value: "<script>" });
   assert(!html.ok);
+});
+
+Deno.test("leitura: tempo cresce com o texto, de 2 a 8 s, e URL do read-message", () => {
+  assertEquals(msLeitura(0), 2000);
+  assertEquals(msLeitura(50), 4000);
+  assertEquals(msLeitura(5000), 8000);
+  assertEquals(urlLerMensagemZapi({ instancia: "INST", token: "TOK", clientToken: "CT" }), "https://api.z-api.io/instances/INST/token/TOK/read-message");
 });

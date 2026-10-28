@@ -255,8 +255,15 @@ export function corpoTextoZapi(
 // Segundos de "digitando..." antes de a Z-API entregar a mensagem: cresce com o
 // tamanho do texto, como alguem digitando de verdade, entre 2 e 9 segundos.
 export function segundosDigitando(texto: string): number {
-  const s = 1.5 + String(texto || "").length / 28;
-  return Math.min(9, Math.max(2, Math.round(s)));
+  const s = 2.5 + String(texto || "").length / 20;
+  return Math.min(10, Math.max(3, Math.round(s)));
+}
+
+// Tempo de "leitura" antes de comecar a digitar, como uma pessoa que abre a
+// conversa e le o que chegou: 2 s + ~25 caracteres por segundo, ate 8 s.
+export function msLeitura(caracteres: number): number {
+  const n = Math.max(0, Math.floor(Number(caracteres) || 0));
+  return Math.min(8000, 2000 + n * 40);
 }
 
 // Sucesso so com 2xx + messageId.
@@ -320,7 +327,7 @@ export async function enviarTextoZapi(args: {
 //   que exige chave de acesso, { challenge: {...} } (concluir pelo painel).
 // O WhatsApp troca o QR a cada ~20 s; o front pede um novo a cada 15 s.
 
-export function urlInstanciaZapi(canal: CanalZapi, recurso: "status" | "qr-code/image"): string {
+export function urlInstanciaZapi(canal: CanalZapi, recurso: "status" | "qr-code/image" | "chats"): string {
   return `${ZAPI_API}/instances/${encodeURIComponent(canal.instancia)}/token/${encodeURIComponent(canal.token)}/${recurso}`;
 }
 
@@ -384,4 +391,106 @@ export async function statusZapi(canal: CanalZapi, prefixoLog = "[zapi]"): Promi
 export async function qrCodeZapi(canal: CanalZapi, prefixoLog = "[zapi]"): Promise<QrZapi> {
   const r = await getZapi(urlInstanciaZapi(canal, "qr-code/image"), canal.clientToken, prefixoLog);
   return interpretarQrZapi(r.status, r.data);
+}
+
+// ---------------------------------------------------------------------------
+// CONVERSAS: lista de chats (retomada depois de uma queda)
+// ---------------------------------------------------------------------------
+// GET /chats?page=&pageSize= -> [{ phone, name, isGroup, unread, lastMessageTime }]
+// Documentado em developer.z-api.io (Chats > Get chats): campos e paginacao.
+// lastMessageTime vem como texto (ex.: "1622991687"); aceita segundos ou ms.
+// A Z-API NAO devolve o texto das mensagens aqui, so quem e quando.
+
+export type ChatZapi = { telefone: string; nome: string; grupo: boolean; naoLidas: number; ultimaEm: number | null };
+
+export function interpretarChatsZapi(status: number, data: any): { ok: true; chats: ChatZapi[] } | { ok: false; detalhe: string } {
+  if (status < 200 || status >= 300 || !Array.isArray(data)) {
+    return { ok: false, detalhe: String((data && (data.error || data.message)) || `Z-API devolveu ${status}`).slice(0, 200) };
+  }
+  const chats: ChatZapi[] = [];
+  for (const c of data) {
+    if (!c || typeof c !== "object") continue;
+    const fone = String(c.phone ?? "").trim();
+    const grupo = c.isGroup === true || String(c.isGroup) === "true" || fone.includes("-group") || fone.includes("@g.us") || fone.includes("@newsletter") || fone.includes("@broadcast");
+    const t = Number(c.lastMessageTime);
+    const ultimaEm = Number.isFinite(t) && t > 0 ? (t > 1e12 ? t : t * 1000) : null;
+    const n = Number(c.unread ?? c.messagesUnread);
+    chats.push({
+      telefone: fone.includes("@") ? fone : soDigitos(fone),
+      nome: String(c.name ?? "").trim().slice(0, 120),
+      grupo,
+      naoLidas: Number.isFinite(n) && n > 0 ? Math.floor(n) : 0,
+      ultimaEm,
+    });
+  }
+  return { ok: true, chats };
+}
+
+export async function chatsZapi(canal: CanalZapi, pagina: number, porPagina: number, prefixoLog = "[zapi]"): Promise<{ ok: true; chats: ChatZapi[] } | { ok: false; detalhe: string }> {
+  const url = `${urlInstanciaZapi(canal, "chats")}?page=${Math.max(1, Math.floor(pagina))}&pageSize=${Math.max(1, Math.floor(porPagina))}`;
+  const r = await getZapi(url, canal.clientToken, prefixoLog);
+  return interpretarChatsZapi(r.status, r.data);
+}
+
+// ---------------------------------------------------------------------------
+// MENSAGENS DE UMA CONVERSA (retomada depois de uma queda)
+// ---------------------------------------------------------------------------
+// GET /chat-messages/{phone}?amount=N -> [{ messageId, phone, fromMe, momment,
+// text | image | audio | ..., senderName, chatName }] (developer.z-api.io,
+// Chats > Get message chats). A pagina lista tambem lastMessageId como
+// obrigatorio sem dizer onde vai; sem ele, tenta de novo com o campo vazio.
+// Mesmo formato do ReceivedCallback: o webhook reprocessa cada mensagem.
+
+export function urlMensagensChatZapi(canal: CanalZapi, telefone: string, quantidade: number, comUltimaId: boolean): string {
+  const base = `${ZAPI_API}/instances/${encodeURIComponent(canal.instancia)}/token/${encodeURIComponent(canal.token)}/chat-messages/${soDigitos(telefone)}`;
+  return `${base}?amount=${Math.max(1, Math.floor(quantidade))}${comUltimaId ? "&lastMessageId=" : ""}`;
+}
+
+export function interpretarMensagensChatZapi(status: number, data: any): { ok: true; mensagens: any[] } | { ok: false; detalhe: string } {
+  if (status < 200 || status >= 300 || !Array.isArray(data)) {
+    return { ok: false, detalhe: String((data && (data.error || data.message)) || `Z-API devolveu ${status}`).slice(0, 200) };
+  }
+  return { ok: true, mensagens: data.filter((m) => m && typeof m === "object") };
+}
+
+export async function mensagensChatZapi(
+  canal: CanalZapi, telefone: string, quantidade: number, prefixoLog = "[zapi]",
+): Promise<{ ok: true; mensagens: any[] } | { ok: false; detalhe: string }> {
+  const r1 = await getZapi(urlMensagensChatZapi(canal, telefone, quantidade, false), canal.clientToken, prefixoLog);
+  const r = interpretarMensagensChatZapi(r1.status, r1.data);
+  if (r.ok) return r;
+  const r2 = await getZapi(urlMensagensChatZapi(canal, telefone, quantidade, true), canal.clientToken, prefixoLog);
+  return interpretarMensagensChatZapi(r2.status, r2.data);
+}
+
+// ---------------------------------------------------------------------------
+// LEITURA: marca a mensagem recebida como lida (tracinhos azuis)
+// ---------------------------------------------------------------------------
+// POST /read-message { phone, messageId } -> { value: true }
+// (developer.z-api.io, Message > Read message). Melhor esforco: falhar so
+// deixa a mensagem sem os tracinhos azuis.
+
+export function urlLerMensagemZapi(canal: CanalZapi): string {
+  return `${ZAPI_API}/instances/${encodeURIComponent(canal.instancia)}/token/${encodeURIComponent(canal.token)}/read-message`;
+}
+
+export async function lerMensagemZapi(canal: CanalZapi, telefone: string, messageId: string, prefixoLog = "[zapi]"): Promise<boolean> {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 8000);
+  try {
+    const r = await fetch(urlLerMensagemZapi(canal), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Client-Token": canal.clientToken },
+      body: JSON.stringify({ phone: soDigitos(telefone), messageId }),
+      signal: ctl.signal,
+    });
+    const data: any = await r.json().catch(() => ({}));
+    if (!r.ok) console.warn(prefixoLog, "marcar como lida falhou:", r.status, String((data && (data.error || data.message)) || "").slice(0, 120));
+    return r.ok;
+  } catch (e) {
+    console.warn(prefixoLog, "marcar como lida sem resposta:", e instanceof Error ? e.message : e);
+    return false;
+  } finally {
+    clearTimeout(t);
+  }
 }
