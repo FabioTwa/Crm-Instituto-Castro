@@ -184,8 +184,7 @@ move o card e registra o handoff `agendamento_confirmado`, só histórico).
 ### Retomada depois de queda do WhatsApp, SQL 41
 
 Com o número Z-API desconectado, as mensagens recebidas não chegam ao CRM e a
-Z-API não as reenvia ao reconectar (teste de 28/10/2026); também não há rota
-documentada para ler o texto delas. Na mesma rodada do varredor, a função
+Z-API não as reenvia ao reconectar (teste de 28/10/2026). Na mesma rodada do varredor, a função
 consulta o status de cada número Z-API ativo: ao cair, abre uma linha em
 `ic_whatsapp_quedas`; ao voltar, fecha e lê a lista de conversas da Z-API
 (`GET /chats`, `_shared/zapi.ts chatsZapi`: só quem falou e quando). Entra na
@@ -193,9 +192,13 @@ fila `ic_retomada_queda` quem teve mensagem durante a queda e ainda não está n
 CRM (fora grupos, os números do CRM, os do aviso à equipe e quem está fora de
 `numeros_teste`). A fila anda **uma pessoa por vez**, a cada
 `retomada_queda_intervalo_min` (padrão 3), dentro de `retomada_queda_horario`
-(padrão 08:00-20:00, nunca domingo): com card, a IA lê a conversa e escreve
-pedindo desculpas pela demora e para a pessoa mandar de novo
-(`_shared/retomada-queda.ts`, texto fixo se a IA falhar); sem card (se
+(padrão 08:00-20:00, nunca domingo). Para cada pessoa, primeiro lê na Z-API as
+mensagens da queda (`GET /chat-messages/{phone}`, `mensagensChatZapi`) e entrega
+cada uma ao `ic-meta-webhook` (porta da Z-API, com `ZAPI_WEBHOOK_TOKEN`), como se
+tivessem chegado agora: o card nasce se precisar, áudio é transcrito e a IA
+responde o conteúdo pelo caminho normal. Se não conseguir ler: com card, a IA lê
+a conversa e escreve pedindo desculpas pela demora e para a pessoa mandar de
+novo (`_shared/retomada-queda.ts`, texto fixo se a IA falhar); sem card (se
 `retomada_queda_desconhecidos` = 'true'), vai um texto fixo. Pula quem já
 escreveu de novo, tem handoff pendente ou recusou o atendimento; desiste depois
 de 48 h. Log: `ia_decisoes_log` `retomada_queda/*`.

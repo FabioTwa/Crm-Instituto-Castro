@@ -80,9 +80,9 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 import { corsHeaders, erroGenerico, json } from "../_shared/http.ts";
 import { chamadaInternaValida, headersInternos, tokenDoHeader, usuarioAtivo } from "../_shared/auth.ts";
 import { iaConfig, icFlag } from "../_shared/flags.ts";
-import { canonicoTelefone, telefoneBrPlausivel, variacoesTelefone } from "../_shared/telefone.ts";
+import { canonicoTelefone, soDigitos, telefoneBrPlausivel, variacoesTelefone } from "../_shared/telefone.ts";
 import { canalDaLinha, canalDoVendedor, type CanalEnvio, enviarTextoCanal, provedorDaLinha } from "../_shared/whatsapp-envio.ts";
-import { type CanalZapi, type ChatZapi, chatsZapi, segundosDigitando, statusZapi } from "../_shared/zapi.ts";
+import { type CanalZapi, type ChatZapi, chatsZapi, mensagensChatZapi, segundosDigitando, statusZapi } from "../_shared/zapi.ts";
 import { detectarHandoff, handoffCalaIA, RESPOSTA_URGENCIA } from "../_shared/handoff-regras.ts";
 import { respostaProibida } from "../_shared/pos-validacao.ts";
 import {
@@ -104,9 +104,12 @@ import {
   configRetomadaQueda,
   type ConfigRetomadaQueda,
   ETAPA_RETOMADA_QUEDA,
+  eventoParaReprocessar,
   FOLGA_DESCONEXAO_MS,
   instrucaoRetomadaQueda,
   jaNoCrm,
+  MARGEM_CASAMENTO_MS,
+  mensagensDaQueda,
   podeRetomarAgora,
   PRAZO_COLETA_MS,
   retomadaVencida,
@@ -157,11 +160,11 @@ type Body = { cliente_crm_id: string; conversa_id: string | null; vendedor_id: s
 // (cada uma esperando os 30 s da rajada e a IA pensar), mas so UMA resposta e
 // enviada de cada vez no numero. A trava ia_vez so e segurada durante o envio;
 // o prazo e a rede de seguranca se a funcao cair no meio (cobre 3 partes com
-// "digitando..." de ate 9 s cada, as pausas e o aviso a equipe).
+// "digitando..." de ate 10 s cada, as pausas e o aviso a equipe).
 const PRAZO_VEZ_S = 90;
 // Entre as mensagens de uma resposta em partes: garante a ordem na Z-API, que
 // mostra o "digitando..." de cada uma antes de entregar.
-const PAUSA_ENTRE_MENSAGENS_MS = 1500;
+const PAUSA_ENTRE_MENSAGENS_MS = 2500;
 
 type Contexto = {
   primeiro_nome: string | null;
@@ -1574,6 +1577,61 @@ async function processarFilaQueda(sb: SupabaseClient, cfg: Record<string, string
   return { decisao: "fila_vazia" };
 }
 
+// Le na Z-API as mensagens que a pessoa mandou durante a queda e entrega cada
+// uma ao ic-meta-webhook (porta da Z-API), como se tivessem chegado agora.
+// Devolve quantas o webhook aceitou (0 = nao deu para ler; segue o pedido de reenvio).
+async function reprocessarMensagensDaQueda(sb: SupabaseClient, linha: any, canal: CanalEnvio, tel: string, item: any): Promise<number> {
+  if (canal.provedor !== "zapi") return 0;
+  const URL_SB = Deno.env.get("SUPABASE_URL") || "";
+  const segredo = Deno.env.get("ZAPI_WEBHOOK_TOKEN") || "";
+  if (!URL_SB || !segredo) {
+    console.warn(LOG, "retomada pos-queda: ZAPI_WEBHOOK_TOKEN ausente, nao reprocessa");
+    return 0;
+  }
+  const { data: queda } = await sb.from("ic_whatsapp_quedas").select("desconectado_em").eq("id", item.queda_id).maybeSingle();
+  const desde = queda ? Date.parse(String((queda as any).desconectado_em)) : Date.parse(String(item.ultima_msg_em)) - 3600_000;
+  const r = await mensagensChatZapi(canal, tel, 20, LOG);
+  if (!r.ok) {
+    console.warn(LOG, "retomada pos-queda: mensagens da conversa indisponiveis na Z-API:", r.detalhe);
+    return 0;
+  }
+  let msgs = mensagensDaQueda(r.mensagens, { desdeMs: desde - MARGEM_CASAMENTO_MS, ateMs: Date.now() });
+  if (!msgs.length) return 0;
+  // As que ja estao no CRM (chegaram antes da queda ou depois de reconectar) ficam de fora.
+  const { data: jaTem } = await sb
+    .from("crm_conversas")
+    .select("zapi_message_id")
+    .in("zapi_message_id", msgs.map((m) => String(m.messageId)));
+  const ids = new Set(((jaTem as any[]) || []).map((x) => String(x.zapi_message_id)));
+  msgs = msgs.filter((m) => !ids.has(String(m.messageId)));
+  let aceitas = 0;
+  for (const m of msgs) {
+    const evento = eventoParaReprocessar(m, {
+      instancia: String(linha.zapi_instancia || ""),
+      numero: soDigitos(String(linha.numero_whatsapp || "")),
+      telefoneLead: tel,
+    });
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 10000);
+    try {
+      const resp = await fetch(`${URL_SB}/functions/v1/ic-meta-webhook?provedor=zapi&token=${encodeURIComponent(segredo)}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(evento),
+        signal: ctl.signal,
+      });
+      const d: any = await resp.json().catch(() => ({}));
+      if (resp.ok && d && d.ack === true) aceitas++;
+      else console.warn(LOG, "retomada pos-queda: webhook nao aceitou a mensagem:", resp.status, d && (d.ignored || d.error));
+    } catch (e) {
+      console.error(LOG, "retomada pos-queda: webhook sem resposta:", e instanceof Error ? e.message : e);
+    } finally {
+      clearTimeout(t);
+    }
+  }
+  return aceitas;
+}
+
 async function retomarUma(
   sb: SupabaseClient, cfg: Record<string, string>, rq: ConfigRetomadaQueda, item: any,
 ): Promise<{ estado: "enviada" | "ignorada" | "falhou"; motivo: string | null }> {
@@ -1598,9 +1656,18 @@ async function retomarUma(
     card = data && !(data as any).deleted_at ? data : null;
   }
   if (!card) card = await cardPorTelefone(sb, (linha as any).vendedor_id ? String((linha as any).vendedor_id) : null, tel);
+  if (card && jaNoCrm(await ultimaMensagemNoCrm(sb, String(card.id)), ultimaMsgMs)) return { estado: "ignorada", motivo: "ja_atendida" };
 
+  // Primeiro tenta ler o que a pessoa escreveu e reprocessar pelo webhook: a
+  // Jully responde no mesmo contexto, pelo caminho normal (rajada, regras, vez).
+  const recuperadas = await reprocessarMensagensDaQueda(sb, linha, c.canal, tel, item);
+  if (recuperadas > 0) {
+    console.log(LOG, "retomada pos-queda: mensagens recuperadas e reprocessadas:", recuperadas);
+    return { estado: "enviada", motivo: `mensagens_recuperadas:${recuperadas}` };
+  }
+
+  // Sem conseguir ler: pede com naturalidade que a pessoa mande de novo.
   if (card) {
-    if (jaNoCrm(await ultimaMensagemNoCrm(sb, String(card.id)), ultimaMsgMs)) return { estado: "ignorada", motivo: "ja_atendida" };
     const p = new Pipeline(sb, { cliente_crm_id: String(card.id), conversa_id: null, vendedor_id: card.vendedor_id, funil_id: card.funil_id });
     p.modelo = cfg.modelo || "claude-sonnet-5-5";
     p.cfg = cfg;

@@ -2,9 +2,11 @@
 //
 // Enquanto o numero esta desconectado, as mensagens recebidas NAO chegam ao
 // CRM e a Z-API nao as reenvia depois (teste de 28/10/2026). A lista de
-// conversas da Z-API (_shared/zapi.ts chatsZapi) mostra QUEM falou e QUANDO,
-// sem o texto. Com isso a Jully retoma essas pessoas uma por vez, com calma,
-// pedindo com naturalidade que mandem de novo.
+// conversas da Z-API (_shared/zapi.ts chatsZapi) mostra QUEM falou e QUANDO.
+// Para cada pessoa, uma por vez e com calma, o CRM le na Z-API as mensagens da
+// queda (mensagensChatZapi) e as reprocessa pelo webhook: a Jully responde o que
+// a pessoa disse, no mesmo contexto. Se a leitura nao der, a Jully pede com
+// naturalidade que a pessoa mande de novo.
 //
 //   crm_ia_config:
 //   retomada_queda_ligada         'false' desliga (padrao ligado)
@@ -87,6 +89,40 @@ export function instrucaoRetomadaQueda(minutosDesde: number): string {
     `Se a conversa acima tiver um assunto em aberto, pode citá-lo de leve, sem inventar nada do que ela possa ter escrito. ` +
     `Não se apresente de novo se já conversaram, não use emoji e não use ferramentas.]`
   );
+}
+
+// Mensagens que a pessoa mandou durante a queda, lidas na Z-API (chatMessages):
+// so as recebidas, dentro da janela, com id, sem repetir, da mais antiga para a
+// mais nova. No maximo `limite` (as mais recentes).
+export function mensagensDaQueda(mensagens: ReadonlyArray<any>, a: { desdeMs: number; ateMs: number; limite?: number }): any[] {
+  const vistas = new Set<string>();
+  const out: any[] = [];
+  for (const m of mensagens) {
+    const id = String(m?.messageId || "").trim();
+    const t = Number(m?.momment);
+    if (!id || vistas.has(id) || m.fromMe === true || m.isGroup === true || m.broadcast === true) continue;
+    if (!Number.isFinite(t) || t < a.desdeMs || t > a.ateMs) continue;
+    vistas.add(id);
+    out.push(m);
+  }
+  out.sort((x, y) => Number(x.momment) - Number(y.momment));
+  return out.slice(-(a.limite ?? 10));
+}
+
+// Evento no formato do webhook da Z-API (ReceivedCallback) para o
+// ic-meta-webhook gravar a mensagem como se tivesse chegado agora: cria o card
+// se precisar, transcreve audio e chama a IA pelo caminho normal.
+export function eventoParaReprocessar(m: any, linha: { instancia: string; numero: string; telefoneLead: string }): any {
+  return {
+    ...m,
+    type: "ReceivedCallback",
+    instanceId: linha.instancia,
+    connectedPhone: linha.numero,
+    phone: m.phone || linha.telefoneLead,
+    fromMe: false,
+    fromApi: false,
+    isGroup: false,
+  };
 }
 
 // Se a IA falhar ou a pos-validacao barrar, vai um destes (sem emoji).

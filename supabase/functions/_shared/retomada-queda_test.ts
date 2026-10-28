@@ -1,6 +1,8 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
   configRetomadaQueda,
+  eventoParaReprocessar,
+  mensagensDaQueda,
   instrucaoRetomadaQueda,
   jaNoCrm,
   podeRetomarAgora,
@@ -10,7 +12,7 @@ import {
   TEXTOS_RETOMADA_QUEDA_NOVO,
   textoRetomadaQuedaFixo,
 } from "./retomada-queda.ts";
-import { interpretarChatsZapi } from "./zapi.ts";
+import { envelopeZapi, interpretarChatsZapi, interpretarMensagensChatZapi, urlMensagensChatZapi } from "./zapi.ts";
 import { respostaProibida } from "./pos-validacao.ts";
 
 const T0 = Date.parse("2026-10-28T15:00:00.000Z");
@@ -89,4 +91,45 @@ Deno.test("interpretarChatsZapi: campos, grupos e erros", () => {
   assertEquals(r.chats[2].ultimaEm, null);
   assertEquals(interpretarChatsZapi(401, { error: "unauthorized" }), { ok: false, detalhe: "unauthorized" });
   assertEquals(interpretarChatsZapi(200, { value: [] }).ok, false);
+});
+
+Deno.test("mensagensDaQueda: so recebidas, na janela, sem repetir, em ordem", () => {
+  const m = (id: string, t: number, extra: Record<string, unknown> = {}) => ({ messageId: id, momment: t, phone: "5511988887777", text: { message: id }, ...extra });
+  const r = mensagensDaQueda([
+    m("C", min(6)),
+    m("A", min(2)),
+    m("B", min(4), { fromMe: true }), // a casa falou
+    m("A", min(2)), // repetida
+    m("D", min(-5)), // antes da queda
+    m("E", min(40)), // depois do fim
+    m("", min(3)), // sem id
+  ], { desdeMs: min(0), ateMs: min(30) });
+  assertEquals(r.map((x) => x.messageId), ["A", "C"]);
+  const muitas = Array.from({ length: 15 }, (_, i) => m(`M${i}`, min(i + 1)));
+  assertEquals(mensagensDaQueda(muitas, { desdeMs: min(0), ateMs: min(30), limite: 3 }).map((x) => x.messageId), ["M12", "M13", "M14"]);
+});
+
+Deno.test("eventoParaReprocessar: o webhook aceita como mensagem recebida", () => {
+  const ev = eventoParaReprocessar(
+    { messageId: "ABC", momment: min(2), phone: "5511988887777", fromMe: false, senderName: "Maria", text: { message: "quero marcar" } },
+    { instancia: "INST", numero: "5511920622607", telefoneLead: "5511988887777" },
+  );
+  const { envelope, tipo } = envelopeZapi(ev);
+  assertEquals(tipo, "mensagem");
+  const v = envelope.entry[0].changes[0].value;
+  assertEquals(v.messages[0].id, "ABC");
+  assertEquals(v.messages[0].from, "5511988887777");
+  assertEquals(v.messages[0].text.body, "quero marcar");
+  assertEquals(v.metadata.zapi_instance_id, "INST");
+  assertEquals(v.contacts[0].profile.name, "Maria");
+});
+
+Deno.test("mensagens da conversa na Z-API: URL e resposta", () => {
+  const canal = { instancia: "INST", token: "TOK", clientToken: "CT" };
+  assertEquals(urlMensagensChatZapi(canal, "+55 (11) 98888-7777", 20, false), "https://api.z-api.io/instances/INST/token/TOK/chat-messages/5511988887777?amount=20");
+  assertEquals(urlMensagensChatZapi(canal, "5511988887777", 20, true), "https://api.z-api.io/instances/INST/token/TOK/chat-messages/5511988887777?amount=20&lastMessageId=");
+  const r = interpretarMensagensChatZapi(200, [{ messageId: "A" }, null, "x"]);
+  assert(r.ok);
+  if (r.ok) assertEquals(r.mensagens.length, 1);
+  assertEquals(interpretarMensagensChatZapi(404, { error: "not found" }), { ok: false, detalhe: "not found" });
 });

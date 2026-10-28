@@ -255,8 +255,8 @@ export function corpoTextoZapi(
 // Segundos de "digitando..." antes de a Z-API entregar a mensagem: cresce com o
 // tamanho do texto, como alguem digitando de verdade, entre 2 e 9 segundos.
 export function segundosDigitando(texto: string): number {
-  const s = 1.5 + String(texto || "").length / 28;
-  return Math.min(9, Math.max(2, Math.round(s)));
+  const s = 2.5 + String(texto || "").length / 20;
+  return Math.min(10, Math.max(3, Math.round(s)));
 }
 
 // Sucesso so com 2xx + messageId.
@@ -423,4 +423,35 @@ export async function chatsZapi(canal: CanalZapi, pagina: number, porPagina: num
   const url = `${urlInstanciaZapi(canal, "chats")}?page=${Math.max(1, Math.floor(pagina))}&pageSize=${Math.max(1, Math.floor(porPagina))}`;
   const r = await getZapi(url, canal.clientToken, prefixoLog);
   return interpretarChatsZapi(r.status, r.data);
+}
+
+// ---------------------------------------------------------------------------
+// MENSAGENS DE UMA CONVERSA (retomada depois de uma queda)
+// ---------------------------------------------------------------------------
+// GET /chat-messages/{phone}?amount=N -> [{ messageId, phone, fromMe, momment,
+// text | image | audio | ..., senderName, chatName }] (developer.z-api.io,
+// Chats > Get message chats). A pagina lista tambem lastMessageId como
+// obrigatorio sem dizer onde vai; sem ele, tenta de novo com o campo vazio.
+// Mesmo formato do ReceivedCallback: o webhook reprocessa cada mensagem.
+
+export function urlMensagensChatZapi(canal: CanalZapi, telefone: string, quantidade: number, comUltimaId: boolean): string {
+  const base = `${ZAPI_API}/instances/${encodeURIComponent(canal.instancia)}/token/${encodeURIComponent(canal.token)}/chat-messages/${soDigitos(telefone)}`;
+  return `${base}?amount=${Math.max(1, Math.floor(quantidade))}${comUltimaId ? "&lastMessageId=" : ""}`;
+}
+
+export function interpretarMensagensChatZapi(status: number, data: any): { ok: true; mensagens: any[] } | { ok: false; detalhe: string } {
+  if (status < 200 || status >= 300 || !Array.isArray(data)) {
+    return { ok: false, detalhe: String((data && (data.error || data.message)) || `Z-API devolveu ${status}`).slice(0, 200) };
+  }
+  return { ok: true, mensagens: data.filter((m) => m && typeof m === "object") };
+}
+
+export async function mensagensChatZapi(
+  canal: CanalZapi, telefone: string, quantidade: number, prefixoLog = "[zapi]",
+): Promise<{ ok: true; mensagens: any[] } | { ok: false; detalhe: string }> {
+  const r1 = await getZapi(urlMensagensChatZapi(canal, telefone, quantidade, false), canal.clientToken, prefixoLog);
+  const r = interpretarMensagensChatZapi(r1.status, r1.data);
+  if (r.ok) return r;
+  const r2 = await getZapi(urlMensagensChatZapi(canal, telefone, quantidade, true), canal.clientToken, prefixoLog);
+  return interpretarMensagensChatZapi(r2.status, r2.data);
 }
