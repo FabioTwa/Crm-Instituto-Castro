@@ -132,6 +132,7 @@ import {
   TEXTOS_ERRO_TEMPORARIO,
   TEXTOS_LEMBRETE_CONSENTIMENTO,
   TEXTOS_RESPOSTA_BLOQUEADA,
+  TEXTOS_VALOR_PESSOALMENTE,
   textoForaDoHorario,
   textoHorarioOcupado,
   textoPedidoConsentimento,
@@ -949,7 +950,8 @@ async function rodarNaVez(
   if (proibido) {
     await p.log("pos_validacao", "bloqueada_pos_validacao", { modelo: p.modelo, motivo: proibido, detalhe: { resposta: textoResposta } });
     await p.handoff("erro_ia", "resposta bloqueada");
-    await p.enviar(sortear(TEXTOS_RESPOSTA_BLOQUEADA), "envio", "enviada_fixa", { origem: "pos_validacao", termo: proibido });
+    const fixo = proibido.startsWith("valor:") ? sortear(TEXTOS_VALOR_PESSOALMENTE) : sortear(TEXTOS_RESPOSTA_BLOQUEADA);
+    await p.enviar(fixo, "envio", "enviada_fixa", { origem: "pos_validacao", termo: proibido });
     return { ok: true, decisao: "bloqueada_pos_validacao" };
   }
   await p.log("pos_validacao", textoResposta ? "ok" : "sem_texto");

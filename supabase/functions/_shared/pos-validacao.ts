@@ -1,6 +1,7 @@
 // Pos-validacao por CODIGO da resposta gerada pela IA (Resolucao CFM
 // 2.336/2023): nada de medicamento, dose, diagnostico, promessa de resultado
-// ou receita sai para o lead, mesmo que o modelo escorregue.
+// ou receita sai para o lead, mesmo que o modelo escorregue. Valor em dinheiro
+// tambem nao (decisao do Instituto).
 // Devolve o termo que bateu (para o log) ou null quando a resposta esta limpa.
 import { normalizarTexto } from "./texto.ts";
 
@@ -18,6 +19,8 @@ const REGRAS: Array<{ nome: string; re: RegExp }> = [
   { nome: "diagnostico", re: /\bdiagnostic[oa]s?\b|\bdiagnosticad[oa]\b/ },
   { nome: "receita", re: /\breceitas?\b|\bprescri(?:cao|coes|ver|revemos)\b/ },
   { nome: "medicacao", re: /\bmedicamentos?\b|\bremedios?\b|\bmedicacao\b/ },
+  // O Instituto nao informa valores pelo WhatsApp (feedback de 28/10/2026).
+  { nome: "valor", re: /r\$\s*\d|\b\d+(?:[.,]\d+)*\s*reais\b/ },
 ];
 
 export function respostaProibida(texto: string): string | null {

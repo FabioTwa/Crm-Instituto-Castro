@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
-import { calendarioDiasUteis, montarSystemPrompt, paraWhatsApp, partesDaResposta, TEXTOS_LEMBRETE_CONSENTIMENTO } from "./ia-prompt.ts";
+import { calendarioDiasUteis, montarSystemPrompt, paraWhatsApp, partesDaResposta, TEXTOS_LEMBRETE_CONSENTIMENTO, TEXTOS_VALOR_PESSOALMENTE } from "./ia-prompt.ts";
 import { respostaProibida } from "./pos-validacao.ts";
 
 Deno.test("paraWhatsApp troca markdown pela formatacao do WhatsApp", () => {
@@ -122,4 +122,11 @@ Deno.test("paraWhatsApp tira emoji (so texto)", () => {
   assertEquals(paraWhatsApp("Até lá 😊"), "Até lá");
   assertEquals(paraWhatsApp("Poxa 😕, esse horário saiu 👍🏽"), "Poxa, esse horário saiu");
   assertEquals(paraWhatsApp("Combinado ❤️!"), "Combinado!");
+});
+
+Deno.test("textos de valor: sem numero, sem emoji e passam na pos-validacao", () => {
+  for (const t of TEXTOS_VALOR_PESSOALMENTE) {
+    assertEquals(respostaProibida(t), null, t);
+    assertEquals(/\d/.test(t), false, t);
+  }
 });
