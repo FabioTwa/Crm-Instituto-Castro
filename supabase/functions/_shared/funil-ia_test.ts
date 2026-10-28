@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { detectarNegociacao } from "./funil-ia.ts";
+import { detectarAgendamento, detectarNegociacao } from "./funil-ia.ts";
 
 Deno.test("detectarNegociacao: valor, preco, convenio, formato", () => {
   assertEquals(detectarNegociacao("Qual o valor da consulta?"), "valor");
@@ -16,4 +16,21 @@ Deno.test("detectarNegociacao: conversa comum nao conta", () => {
   assertEquals(detectarNegociacao("Pode ser às 15h"), null);
   assertEquals(detectarNegociacao(""), null);
   assertEquals(detectarNegociacao("valorizo muito o atendimento"), null);
+});
+
+Deno.test("detectarAgendamento: lead pede para marcar ou fala de dia e horario", () => {
+  assertEquals(detectarAgendamento("Quero marcar uma visita", ""), 'lead falou de agendamento ("marcar")');
+  assertEquals(detectarAgendamento("Tem horário na quinta?", ""), 'lead falou de agendamento ("horario")');
+  assertEquals(detectarAgendamento("Pode ser amanhã?", ""), 'lead falou de agendamento ("amanha")');
+});
+
+Deno.test("detectarAgendamento: IA ofereceu data ou horario", () => {
+  assertEquals(detectarAgendamento("sim", "Pode ser no dia 12/11 (quarta) às 15:00?"), "a IA ofereceu data ou horário");
+  assertEquals(detectarAgendamento("ok", "Tenho às 9h ou às 14h, qual prefere?"), "a IA ofereceu data ou horário");
+});
+
+Deno.test("detectarAgendamento: conversa comum nao conta", () => {
+  assertEquals(detectarAgendamento("Oi, bom dia", "Oi, tudo bem? Aqui é a Jully."), null);
+  assertEquals(detectarAgendamento("Qual o valor?", "A avaliação inicial é R$ 150,00."), null);
+  assertEquals(detectarAgendamento("quero emagrecer", "Entendi, há quanto tempo você pensa nisso?"), null);
 });

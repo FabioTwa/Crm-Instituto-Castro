@@ -99,7 +99,7 @@ import { decidirFollowup, followupsDoConfig, instrucaoFollowup, podeMandarFollow
 import { dataHoraLocal, numerosAviso, textoAvisoAgendamento, textoAvisoCancelamento } from "../_shared/aviso-agendamento.ts";
 import { ETAPA_CONFIRMACAO, horasConfirmacao, horasConfirmacaoCurta, MINIMO_ANTES_MS, precisaLembrete, STATUS_COM_LEMBRETE, textoConfirmacao } from "../_shared/confirmacao-agendamento.ts";
 import { decidirEncerramento, ETAPA_ENCERRAMENTO, mensagensDaConversaAtual, minutosEncerramento } from "../_shared/ia-encerramento.ts";
-import { detectarNegociacao, type EventoFunil } from "../_shared/funil-ia.ts";
+import { detectarAgendamento, detectarNegociacao, type EventoFunil } from "../_shared/funil-ia.ts";
 import {
   configRetomadaQueda,
   type ConfigRetomadaQueda,
@@ -1026,6 +1026,12 @@ async function rodarNaVez(
   const termoNegociacao = funilAuto ? detectarNegociacao(textoLead) : null;
   if (termoNegociacao) await avancarEtapa(sb, p, body.cliente_crm_id, "negociacao", `lead perguntou sobre "${termoNegociacao}"`);
   if (funilAuto && marcadores.agendamento_id) await avancarEtapa(sb, p, body.cliente_crm_id, "proposta", "a IA propôs um horário");
+  else if (funilAuto && env.enviado) {
+    // A conversa entrou em agendamento (pedido de marcar, dia/horario): o card
+    // ja vai para agendamento pendente, sem esperar a reserva do horario.
+    const motivoAgenda = detectarAgendamento(textoLead, textoResposta);
+    if (motivoAgenda) await avancarEtapa(sb, p, body.cliente_crm_id, "proposta", motivoAgenda);
+  }
 
   return { ok: true, decisao: env.enviado ? "enviada" : "simulada_envio_desligado" };
 }
