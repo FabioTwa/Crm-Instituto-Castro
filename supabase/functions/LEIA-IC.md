@@ -29,7 +29,7 @@ callback é protegido por um `state` assinado (HS256 com `IC_INTERNAL_SECRET`,
 
 ### Contratos para o front
 
-**`ic-whatsapp-conexao`** (POST, `Authorization: Bearer <jwt do usuário>`): `{acao:"status"}` devolve as linhas Z-API ativas com `conectado`; `{acao:"qrcode", linha_id}` (só Admin; senão 403 `somente_admin`) devolve `imagem` (data URL do QR) ou `ja_conectado`. O front consulta o status a cada minuto e, se um número cair, mostra a todos os usuários uma faixa de alerta no topo do CRM; só para Admin abre na frente do CRM a tela com o QR Code (a faixa do Admin tem o botão "Reconectar") (novo QR a cada 15 s, até 3; depois botão "Gerar novo QR Code"; "Lembrar depois" esconde por 5 min). Aparelho que pede chave de acesso: conectar pelo painel da Z-API.
+**`ic-whatsapp-conexao`** (POST, `Authorization: Bearer <jwt do usuário>`): `{acao:"status"}` devolve as linhas Z-API ativas com `conectado`; `{acao:"qrcode", linha_id}` (só Admin; senão 403 `somente_admin`) devolve `imagem` (data URL do QR) ou `ja_conectado`. O front consulta o status a cada minuto e, se um número cair, mostra a todos os usuários uma faixa de alerta no topo do CRM; só para Admin abre na frente do CRM a tela com o QR Code (a faixa do Admin tem o botão "Conectar WhatsApp") (novo QR a cada 15 s, até 3; depois botão "Gerar novo QR Code"; "Lembrar depois" esconde por 5 min). Aparelho que pede chave de acesso: conectar pelo painel da Z-API.
 
 **`ic-whatsapp-send`** (POST, `Authorization: Bearer <jwt do usuário>`)
 

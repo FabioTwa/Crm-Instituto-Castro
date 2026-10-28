@@ -1638,7 +1638,8 @@
     // (quem lê o QR assume o número; a função também recusa o QR a não-admin).
     // O WhatsApp troca o QR a cada ~20 s: pede um novo a cada 15 s; depois de 3
     // sem leitura, para e mostra "Gerar novo QR Code" (recomendação da Z-API).
-    // "Lembrar depois" esconde a tela por 5 minutos; a faixa continua.
+    // "Lembrar depois" esconde a tela por 5 minutos; a faixa continua, com o
+    // botão "Conectar WhatsApp" para o Admin voltar à tela do QR Code.
     var IC_CONEXAO = { timer: null, qrTimer: null, statusTimer: null, adiadaAte: 0, qrs: 0, linha: null, emCurso: false };
     var IC_CONEXAO_INTERVALO = 60000, IC_QR_INTERVALO = 15000, IC_QR_MAX = 3, IC_ADIAR_MS = 5 * 60000;
 
@@ -1690,12 +1691,12 @@
         var num = linha.numero ? icFormatarTelefoneBR(linha.numero) : '';
         var admin = icConexaoEhAdmin();
         f.querySelector('[data-ic="texto"]').textContent = 'O WhatsApp' + (num ? ' ' + num : '') + ' do CRM está desconectado. As mensagens não chegam e não são respondidas'
-            + (admin ? '.' : ' até um administrador reconectar.');
+            + (admin ? '. Clique em Conectar WhatsApp para ler o QR Code e reconectar.' : ' até um administrador reconectar.');
         var b = f.querySelector('[data-ic="reconectar"]');
         if (admin && !b) {
             b = document.createElement('button'); b.type = 'button'; b.setAttribute('data-ic', 'reconectar');
-            b.textContent = 'Reconectar';
-            b.style.cssText = 'background:#fff;color:var(--ic-danger);border:0;border-radius:6px;padding:6px 14px;font-weight:600;font-size:13px;cursor:pointer';
+            b.textContent = 'Conectar WhatsApp';
+            b.style.cssText = 'background:#fff;color:var(--ic-danger);border:0;border-radius:6px;padding:8px 16px;font-weight:700;font-size:14px;cursor:pointer;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.2)';
             f.appendChild(b);
         } else if (!admin && b) { b.remove(); b = null; }
         if (b) b.onclick = function () { IC_CONEXAO.adiadaAte = 0; icConexaoAbrir(linha); };
