@@ -100,7 +100,7 @@ function quando(inicioIso: string, agora: Date, tz: string): string {
 export function textoConfirmacao(a: { primeiroNome: string | null; inicioIso: string; agora: Date; variante: number; tz?: string }): string {
   const tz = a.tz || TZ_PADRAO;
   const nome = String(a.primeiroNome || "").trim().split(/\s+/)[0] || "";
-  const oi = nome ? `Oi, ${nome}! Tudo bem? 😊` : "Oi! Tudo bem? 😊";
+  const oi = nome ? `Oi, ${nome}! Tudo bem?` : "Oi! Tudo bem?";
   const q = quando(a.inicioIso, a.agora, tz);
   const textos = [
     `${oi}\n\nPassando para lembrar do seu horário aqui no Instituto Castro ${q}. Te esperamos na Av. Paes de Barros, 1378, na Mooca.\n\nPosso confirmar a sua presença?`,
