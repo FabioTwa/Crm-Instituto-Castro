@@ -2,6 +2,8 @@
 // reconectar, usados pela tela de reconexao do CRM (ic-extensoes.js, secao 9).
 //
 // Quem chama: o FRONT (usuario logado e ativo), via supabaseClient.functions.invoke.
+// 'status' vale para todos (faixa de alerta); 'qrcode' so para Admin (quem le o
+// QR assume o numero).
 // Publicar: supabase functions deploy ic-whatsapp-conexao        (verify_jwt LIGADO)
 //
 // CONTRATO
@@ -13,6 +15,7 @@
 //     200 { ok: true, ja_conectado: true }
 //     409 { ok: false, erro: 'chave_de_acesso' }   -> aparelho pede chave; conectar pelo painel da Z-API
 //     502 { ok: false, erro: 'sem_qr' }
+//     403 { ok: false, erro: 'somente_admin' }
 //   400 { ok: false, erro: 'acao_invalida' | 'linha_invalida' }
 //   401/403 { ok: false, erro: 'sem_token' | 'token_invalido' | 'usuario_inativo' | 'usuario_nao_cadastrado' }
 //   404 { ok: false, erro: 'linha_nao_encontrada' }
@@ -24,7 +27,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { corsHeaders, erroGenerico, json } from "../_shared/http.ts";
-import { usuarioAtivo } from "../_shared/auth.ts";
+import { ehAdmin, usuarioAtivo } from "../_shared/auth.ts";
 import { canalDaLinha, provedorDaLinha } from "../_shared/whatsapp-envio.ts";
 import { qrCodeZapi, statusZapi } from "../_shared/zapi.ts";
 import type { CanalZapi } from "../_shared/zapi.ts";
@@ -87,6 +90,7 @@ Deno.serve(async (req: Request) => {
     }
 
     if (acao === "qrcode") {
+      if (!ehAdmin(auth.usuario)) return json({ ok: false, erro: "somente_admin" }, 403);
       const linhaId = String((payload && payload.linha_id) || "");
       if (!RE_UUID.test(linhaId)) return json({ ok: false, erro: "linha_invalida" }, 400);
       const linha = zapi.find((l) => String(l.id) === linhaId);
