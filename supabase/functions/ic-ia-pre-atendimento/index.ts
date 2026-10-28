@@ -82,7 +82,7 @@ import { chamadaInternaValida, headersInternos, tokenDoHeader, usuarioAtivo } fr
 import { iaConfig, icFlag } from "../_shared/flags.ts";
 import { canonicoTelefone, soDigitos, telefoneBrPlausivel, variacoesTelefone } from "../_shared/telefone.ts";
 import { canalDaLinha, canalDoVendedor, type CanalEnvio, enviarTextoCanal, provedorDaLinha } from "../_shared/whatsapp-envio.ts";
-import { type CanalZapi, type ChatZapi, chatsZapi, mensagensChatZapi, segundosDigitando, statusZapi } from "../_shared/zapi.ts";
+import { type CanalZapi, type ChatZapi, chatsZapi, lerMensagemZapi, mensagensChatZapi, msLeitura, segundosDigitando, statusZapi } from "../_shared/zapi.ts";
 import { detectarHandoff, handoffCalaIA, RESPOSTA_URGENCIA } from "../_shared/handoff-regras.ts";
 import { respostaProibida } from "../_shared/pos-validacao.ts";
 import {
@@ -190,6 +190,8 @@ class Pipeline {
   canal: CanalEnvio | null = null;
   para = "";
   cfg: Record<string, string> = {};
+  // Antes disso nao comeca a digitar: tempo de "leitura" da mensagem (marcarComoLidas).
+  digitarDepoisDe = 0;
   private vezDono: string | null = null;
   private vezProfundidade = 0;
   constructor(sb: SupabaseClient, body: Body) {
@@ -320,6 +322,13 @@ class Pipeline {
     return !!(await this.handoffPendenteDesde());
   }
 
+  // Termina a "leitura" antes de pegar a vez (o tempo da IA pensar ja conta).
+  async esperarLeitura(): Promise<void> {
+    const falta = this.digitarDepoisDe - Date.now();
+    this.digitarDepoisDe = 0;
+    if (falta > 0) await new Promise((r) => setTimeout(r, falta));
+  }
+
   // Resposta da IA em varias mensagens, como uma pessoa manda (partesDaResposta):
   // cada uma com "digitando..." do tamanho dela. Marcadores so na primeira.
   async enviarEmPartes(
@@ -332,6 +341,7 @@ class Pipeline {
     const partes = partesDaResposta(texto);
     if (partes.length <= 1) return await this.enviar(partes[0] || texto, etapa, decisaoOk, extra, marcadores);
     let primeiro: { enviado: boolean; log_id: string | null } | null = null;
+    await this.esperarLeitura();
     const teveVez = await this.comVez(async () => {
       for (let i = 0; i < partes.length; i++) {
         if (i > 0 && this.envioLigado && this.canal) await new Promise((r) => setTimeout(r, PAUSA_ENTRE_MENSAGENS_MS));
@@ -361,6 +371,7 @@ class Pipeline {
       console.log(LOG, "MODO SOMBRA (nao enviado):", texto.slice(0, 120));
       return { enviado: false, log_id };
     }
+    await this.esperarLeitura();
     // Sem assinatura: a IA fala em nome da equipe; o nome so aparece quando um
     // atendente assume (ic-whatsapp-send). "Digitando..." antes, onde o provedor tem.
     const canal = this.canal;
@@ -596,6 +607,31 @@ async function esperarVez(sb: SupabaseClient, dono: string, cfg: Record<string, 
   }
 }
 
+// Marca como lidas as mensagens do lead desde a ultima resposta e define o tempo
+// de leitura (msLeitura) antes do "digitando...". So na Z-API e com envio ligado.
+async function marcarComoLidas(sb: SupabaseClient, p: Pipeline): Promise<void> {
+  if (!p.envioLigado || !p.canal || p.canal.provedor !== "zapi") return;
+  const { data } = await sb
+    .from("crm_conversas")
+    .select("direcao, mensagem, zapi_message_id")
+    .eq("cliente_crm_id", p.body.cliente_crm_id)
+    .order("criada_em", { ascending: false })
+    .limit(10);
+  const novas: any[] = [];
+  for (const m of (data as any[]) || []) {
+    if (m.direcao !== "recebida") break;
+    novas.push(m);
+  }
+  if (!novas.length) return;
+  const canal = p.canal;
+  // Da mais antiga para a mais nova, no maximo 5 (a ultima marca o resto no aparelho).
+  for (const m of novas.slice(0, 5).reverse()) {
+    if (m.zapi_message_id) await lerMensagemZapi(canal, p.para, String(m.zapi_message_id), LOG);
+  }
+  const caracteres = novas.reduce((n, m) => n + String(m.mensagem || "").length, 0);
+  p.digitarDepoisDe = Date.now() + msLeitura(caracteres);
+}
+
 // Resto do pipeline (depois da rajada).
 async function rodarNaVez(
   sb: SupabaseClient, body: Body, p: Pipeline, cfg: Record<string, string>, card: any, fase: ReturnType<typeof faseTeste>,
@@ -682,6 +718,9 @@ async function rodarNaVez(
     return { ok: true, decisao: "limite_respostas" };
   }
   await p.log("limites", "ok", { detalhe: { respostas: respostasDadas || 0, max: maxRespostas } });
+
+  // Como uma pessoa: abre a conversa (tracinhos azuis) e le antes de digitar.
+  await marcarComoLidas(sb, p);
 
   // 4) contexto
   const { data: ctxRaw, error: errCtx } = await sb.rpc("ic_ia_contexto", {

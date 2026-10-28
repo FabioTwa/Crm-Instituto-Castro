@@ -181,6 +181,14 @@ Quando a pessoa confirma ("confirmo", "estarei aí"), a IA chama a ferramenta
 passa o próximo horário pendente do card para `confirmado` (o gatilho do SQL 18
 move o card e registra o handoff `agendamento_confirmado`, só histórico).
 
+### Leitura e "digitando..." (Z-API)
+
+Antes de responder, a IA marca como lidas as mensagens novas do lead
+(`POST /read-message`, tracinhos azuis) e espera um tempo de leitura (2 s + ~25
+caracteres por segundo, até 8 s; o tempo da IA pensar conta junto). Cada bloco da
+resposta mostra "digitando..." de 3 a 10 s, com 2,5 s entre blocos. Só com envio
+ligado; no modo sombra nada é marcado.
+
 ### Retomada depois de queda do WhatsApp, SQL 41
 
 Com o número Z-API desconectado, as mensagens recebidas não chegam ao CRM e a

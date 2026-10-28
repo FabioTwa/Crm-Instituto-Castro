@@ -259,6 +259,13 @@ export function segundosDigitando(texto: string): number {
   return Math.min(10, Math.max(3, Math.round(s)));
 }
 
+// Tempo de "leitura" antes de comecar a digitar, como uma pessoa que abre a
+// conversa e le o que chegou: 2 s + ~25 caracteres por segundo, ate 8 s.
+export function msLeitura(caracteres: number): number {
+  const n = Math.max(0, Math.floor(Number(caracteres) || 0));
+  return Math.min(8000, 2000 + n * 40);
+}
+
 // Sucesso so com 2xx + messageId.
 export function interpretarRespostaZapi(status: number, data: any): ResultadoEnvio {
   const messageId = data && (data.messageId || data.id) ? String(data.messageId || data.id) : "";
@@ -454,4 +461,36 @@ export async function mensagensChatZapi(
   if (r.ok) return r;
   const r2 = await getZapi(urlMensagensChatZapi(canal, telefone, quantidade, true), canal.clientToken, prefixoLog);
   return interpretarMensagensChatZapi(r2.status, r2.data);
+}
+
+// ---------------------------------------------------------------------------
+// LEITURA: marca a mensagem recebida como lida (tracinhos azuis)
+// ---------------------------------------------------------------------------
+// POST /read-message { phone, messageId } -> { value: true }
+// (developer.z-api.io, Message > Read message). Melhor esforco: falhar so
+// deixa a mensagem sem os tracinhos azuis.
+
+export function urlLerMensagemZapi(canal: CanalZapi): string {
+  return `${ZAPI_API}/instances/${encodeURIComponent(canal.instancia)}/token/${encodeURIComponent(canal.token)}/read-message`;
+}
+
+export async function lerMensagemZapi(canal: CanalZapi, telefone: string, messageId: string, prefixoLog = "[zapi]"): Promise<boolean> {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 8000);
+  try {
+    const r = await fetch(urlLerMensagemZapi(canal), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Client-Token": canal.clientToken },
+      body: JSON.stringify({ phone: soDigitos(telefone), messageId }),
+      signal: ctl.signal,
+    });
+    const data: any = await r.json().catch(() => ({}));
+    if (!r.ok) console.warn(prefixoLog, "marcar como lida falhou:", r.status, String((data && (data.error || data.message)) || "").slice(0, 120));
+    return r.ok;
+  } catch (e) {
+    console.warn(prefixoLog, "marcar como lida sem resposta:", e instanceof Error ? e.message : e);
+    return false;
+  } finally {
+    clearTimeout(t);
+  }
 }
