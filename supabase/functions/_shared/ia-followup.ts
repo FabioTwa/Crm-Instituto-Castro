@@ -103,7 +103,7 @@ export function instrucaoFollowup(numero: number, total: number, paradoMin: numb
 // Se a IA falhar ou a pos-validacao barrar, vai um destes (revisados, sem termos bloqueados).
 export const TEXTOS_FOLLOWUP: readonly (readonly string[])[] = [
   [
-    "Oi! Conseguiu pensar no melhor dia pra sua consulta? Se quiser, já te passo os horários livres 😊",
+    "Oi! Conseguiu pensar no melhor dia pra sua consulta? Se quiser, já te passo os horários livres.",
     "Oi, tudo bem? Fiquei aqui com o seu atendimento em aberto. Quer que eu veja um horário pra você?",
   ],
   [
@@ -111,8 +111,8 @@ export const TEXTOS_FOLLOWUP: readonly (readonly string[])[] = [
     "Oi, tudo bem? Se ainda tiver alguma dúvida sobre a consulta, me chama que eu te ajudo por aqui.",
   ],
   [
-    "Oi! Vou deixar o seu atendimento por aqui, tá bom? Quando quiser marcar, é só me chamar 😊",
-    "Oi! Qualquer hora que quiser retomar, é só mandar uma mensagem por aqui que eu te ajudo 😊",
+    "Oi! Vou deixar o seu atendimento por aqui, tá bom? Quando quiser marcar, é só me chamar.",
+    "Oi! Qualquer hora que quiser retomar, é só mandar uma mensagem por aqui que eu te ajudo.",
   ],
 ];
 

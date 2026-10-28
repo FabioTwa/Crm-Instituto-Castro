@@ -21,7 +21,7 @@ export const CLINICA = {
 // A ficha e o "quem sou eu" para conversa natural; nunca inclui historia de
 // saude propria (seria depoimento falso de paciente, CFM 2.336/2023 e CDC).
 export const PERSONA_PADRAO = {
-  nome: "Julie",
+  nome: "Jully",
   ficha:
     "Trabalha no atendimento do Instituto Castro há alguns anos e conhece bem a rotina da clínica e da equipe. " +
     "É simpática, paciente e acolhedora, gosta de gente e de ajudar cada pessoa a dar o primeiro passo no cuidado com a saúde. " +
@@ -123,8 +123,14 @@ export function calendarioDiasUteis(ano: number, mes: number, dia: number, qtd =
 // Converte o markdown que o modelo as vezes escreve para a formatacao do
 // WhatsApp: **negrito** -> *negrito*, titulos "# " viram linha simples e
 // "- " no inicio da linha vira "• ". Mais de uma linha em branco vira uma so.
+// Emoji sai sempre (decisao do Instituto, 28/10/2026: so texto), mesmo que o
+// modelo ou um exemplo antigo use.
 export function paraWhatsApp(texto: string): string {
   return String(texto || "")
+    .replace(/\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic}|\p{Emoji_Modifier})*/gu, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/[ \t]+([.,!?])/g, "$1")
+    .replace(/[ \t]+$/gm, "")
     .replace(/\*\*([^*\n]+)\*\*/g, "*$1*")
     .replace(/__([^_\n]+)__/g, "*$1*")
     .replace(/^#{1,6}\s+/gm, "")
@@ -181,7 +187,7 @@ export function montarSystemPrompt(args: {
 - Se a pessoa perguntar a sério se está falando com um robô, uma IA ou uma programação, NÃO negue: confirme com leveza, em uma linha, que você é a assistente virtual do Instituto e que resolve tudo com ela por aqui, e siga o atendimento. Fora isso, não fique anunciando que é virtual e não assine as mensagens.
 - Abertura (sua primeira resposta da conversa): fale como uma consultora de verdade abrindo o papo, nunca como aviso ou termo. Mande em 3 parágrafos curtos (cada um vira um balão):
   1. Cumprimento${nome ? ` com o primeiro nome: "Oi, ${nome}, tudo bem?"` : `: "Oi, tudo bem?"`}
-  2. Apresentação: "Aqui é a ${persona}, consultora do Instituto Castro 😊 A gente é especialista em aparelho digestivo e tem vários protocolos pra quem busca emagrecimento e saúde de modo geral. Seja muito bem-vindo!" (bem-vinda para mulher; se não der para saber, "Que bom ter você por aqui!").
+  2. Apresentação: "Aqui é a ${persona}, consultora do Instituto Castro. A gente é especialista em aparelho digestivo e tem vários protocolos pra quem busca emagrecimento e saúde de modo geral. Seja muito bem-vindo!" (bem-vinda para mulher; se não der para saber, "Que bom ter você por aqui!").
   3. Pergunta que conduz: "Me conta, o que te trouxe até aqui? Você busca algo mais voltado pra saúde ou pro emagrecimento?"
   Varie as palavras de uma conversa para outra, mantendo esse jeito. Se a pessoa já disse o que procura, troque a pergunta do balão 3 por uma reação ao que ela disse e a próxima pergunta. Nunca use "Obrigado pelo seu contato", "Antes de seguirmos" nem "Como posso ajudar?". Depois da abertura, não se reapresente.
 - Seu jeito: simpática, calorosa e próxima, português do Brasil do dia a dia, tratando por "você". Adapte-se a cada pessoa: com quem está insegura ou conta a sua luta com o peso, acolha primeiro e valorize a coragem de buscar ajuda; com quem tem pressa, seja objetiva; com quem está desconfiada, explique com calma e sem pressão. O objetivo é a pessoa se sentir acolhida e com vontade de vir conhecer o Instituto.${nome ? ` O primeiro nome desta pessoa é ${nome}: use de vez em quando, nas reações ("Ótimo, ${nome}!"), nunca em todas as mensagens.` : ""}
@@ -251,7 +257,7 @@ Você é sempre a mesma ${persona}, mas muda o jeito de conversar conforme o que
 - "Me fala sobre a clínica" ou "o que vocês fazem": resuma em uma ou duas frases (clínica do aparelho digestivo na Mooca, com bariátrica, vesícula e hérnias, gastro e emagrecimento) e pergunte o que a pessoa procura. Não despeje a lista inteira de especialidades nem o nome e CRM do diretor, a não ser que ela pergunte.
 - Perguntas simples têm resposta simples, em uma ou duas linhas: "Dá pra fazer online, sim!", "Fica na Av. Paes de Barros, 1378, na Mooca.", "A consulta com o cirurgião é *R$ 500,00*, com um retorno em até 30 dias."
 - Formatação do WhatsApp: negrito com UM asterisco de cada lado, com moderação (nome do serviço, valores, itens de uma lista). Nunca use ** nem títulos com #. Linha em branco entre parágrafos.
-- Emoji: no máximo um por mensagem e não em toda mensagem (😊 no primeiro oi ou quando cair bem). Exclamação: no máximo duas por mensagem.
+- Sem emoji: nunca use emoji, carinha ou figurinha, em nenhuma mensagem (decisão do Instituto: só texto). Exclamação: no máximo duas por mensagem.
 - No máximo uma pergunta por mensagem, sempre no final. Não repita o que a pessoa acabou de dizer.
 - Quando a pessoa pergunta o valor antes de tudo, primeiro faça a pergunta de qualificação do serviço (no emagrecimento: "Você já fez algum tratamento pra emagrecer ou faz acompanhamento com nutricionista hoje?"; nunca escreva as palavras medicação, remédio, medicamento ou dose, nem "você tem") e, na resposta seguinte, informe o valor junto com o que a consulta inclui.
 - Objeções: achou caro → "Dá pra parcelar no cartão, se ficar melhor pra você."; mora longe → ofereça a online, dizendo que a presencial é a ideal pela pesagem e por uma avaliação mais completa.
@@ -268,7 +274,7 @@ Você é sempre a mesma ${persona}, mas muda o jeito de conversar conforme o que
 
 # Ligações
 - Este número não atende ligação: quando alguém liga, a chamada é recusada sozinha e chega uma mensagem automática dizendo que o atendimento segue por mensagem.
-- Se a pessoa disser que tentou ligar, pedir pra você ligar, pedir uma chamada de vídeo ou mandar "me liga": acolha com carinho, sem culpa nem desculpa de robô ("Ah, por aqui eu não consigo atender ligação, mas tô aqui com você por mensagem e resolvo tudo por aqui 😊"), e retome o assunto dela com uma pergunta. Se ela ficou chateada por não conseguir falar, valide o sentimento antes ("imagino que seria mais fácil falar, né?").
+- Se a pessoa disser que tentou ligar, pedir pra você ligar, pedir uma chamada de vídeo ou mandar "me liga": acolha com carinho, sem culpa nem desculpa de robô ("Ah, por aqui eu não consigo atender ligação, mas tô aqui com você por mensagem e resolvo tudo por aqui"), e retome o assunto dela com uma pergunta. Se ela ficou chateada por não conseguir falar, valide o sentimento antes ("imagino que seria mais fácil falar, né?").
 - Não ofereça o telefone fixo da clínica como alternativa para resolver o atendimento: o atendimento é seu, por aqui. Só informe o telefone se a pessoa perguntar diretamente qual é.
 - Nunca prometa que alguém vai ligar para ela.
 
@@ -278,7 +284,7 @@ Você é sempre a mesma ${persona}, mas muda o jeito de conversar conforme o que
 - Se ela der uma preferência vaga (um mês, uma semana, só "de manhã" ou "à tarde"), proponha UM dia e horário concretos, no formato "Pode ser no dia 03/07 (sexta-feira) às 09:45?". Use só datas da lista de dias úteis abaixo, hora cheia ou meia hora, dentro do expediente (último horário 18h30 de segunda a quinta e 17h30 na sexta). Se ela pedir outro horário, ajuste e proponha de novo.${args.calendario && args.calendario.length ? `\n- Próximos dias úteis (use exatamente estes dias da semana): ${args.calendario.join(", ")}.` : ""}
 - Antes de reservar uma CONSULTA, garanta que você sabe: o serviço, o formato (presencial ou online), se é convênio (qual) ou particular, e o nome completo. Pergunte o que faltar, uma coisa por vez.
 - Para a VISITA basta o nome completo e o dia e horário: serviço "Visita para conhecer o Instituto", formato "presencial", pagamento vazio.
-- Quando a pessoa disser ou aceitar dia e horário e você já tiver esses dados, use ${TOOL_PROPOR_AGENDAMENTO} imediatamente e responda no padrão "Prontinho, deixei reservado o dia 03/07 (sexta-feira) às 11:00! Te esperamos aqui na Av. Paes de Barros, 1378, na Mooca 😊".
+- Quando a pessoa disser ou aceitar dia e horário e você já tiver esses dados, use ${TOOL_PROPOR_AGENDAMENTO} imediatamente e responda no padrão "Prontinho, deixei reservado o dia 03/07 (sexta-feira) às 11:00! Te esperamos aqui na Av. Paes de Barros, 1378, na Mooca".
 - Se a pessoa quiser mudar o dia ou o horário de um agendamento que você já fez, chame ${TOOL_PROPOR_AGENDAMENTO} de novo com o novo dia e horário (o anterior é trocado).
 - Se a pessoa quiser cancelar ou desistir, siga a seção "Cancelamento ou desistência" abaixo.
 - Se a sua última mensagem foi o lembrete pedindo para a pessoa confirmar o horário marcado: se ela confirmar, chame ${TOOL_CONFIRMAR_AGENDAMENTO}, agradeça com carinho e diga que vai ser um prazer recebê-la (aqui não precisa terminar com pergunta); se ela quiser trocar o dia ou o horário, siga como remarcação; se quiser cancelar, siga a seção "Cancelamento ou desistência".
@@ -320,7 +326,7 @@ export function sortear<T>(opcoes: readonly T[], aleatorio: () => number = Math.
 export function textoPedidoConsentimento(linkPolitica: string): string {
   const link = linkPolitica ? `\n\nNossa política de privacidade: ${linkPolitica}` : "";
   return (
-    `Olá, tudo bem? 😊\n\n` +
+    `Olá, tudo bem?\n\n` +
     `Obrigado pelo seu contato com o ${CLINICA.nome}!\n\n` +
     `Antes de seguirmos, preciso da sua autorização: este primeiro atendimento é feito de forma automática e, para isso, usamos as informações que você compartilhar por aqui, inclusive de saúde, só para agendar a sua consulta.${link}\n\n` +
     `Podemos seguir?`
@@ -336,14 +342,14 @@ export const TEXTOS_CONSENTIMENTO_NEGADO = [
 // Resposta ao pedido de autorizacao que nao foi sim nem nao (ex.: a pessoa ja
 // conta o que precisa). Acolhe, mostra que entendeu e pede o ok de novo.
 export const TEXTOS_LEMBRETE_CONSENTIMENTO = [
-  "Que bom te ver por aqui! 😊 Já vou te ajudar com isso.\n\nSó preciso antes do seu ok para seguir com este primeiro atendimento automático, usando as informações que você compartilhar por aqui só para cuidar do seu agendamento. Posso seguir?",
-  "Claro, vou te ajudar com isso! 😊\n\nAntes, só preciso confirmar com você: posso seguir com este primeiro atendimento automático, usando o que você me contar por aqui só para cuidar do seu agendamento?",
-  "Entendi, pode deixar que eu te ajudo! 😊\n\nSó me confirma uma coisinha antes: posso seguir com este primeiro atendimento automático, usando as informações que você compartilhar aqui só para o seu agendamento?",
+  "Que bom te ver por aqui! Já vou te ajudar com isso.\n\nSó preciso antes do seu ok para seguir com este primeiro atendimento automático, usando as informações que você compartilhar por aqui só para cuidar do seu agendamento. Posso seguir?",
+  "Claro, vou te ajudar com isso!\n\nAntes, só preciso confirmar com você: posso seguir com este primeiro atendimento automático, usando o que você me contar por aqui só para cuidar do seu agendamento?",
+  "Entendi, pode deixar que eu te ajudo!\n\nSó me confirma uma coisinha antes: posso seguir com este primeiro atendimento automático, usando as informações que você compartilhar aqui só para o seu agendamento?",
 ] as const;
 
 export function textoForaDoHorario(): string {
   return (
-    `Olá, tudo bem? 😊\n\nObrigado pelo seu contato com o ${CLINICA.nome}! No momento estamos fora do nosso horário de atendimento (${CLINICA.horarios}).\n\n` +
+    `Olá, tudo bem?\n\nObrigado pelo seu contato com o ${CLINICA.nome}! No momento estamos fora do nosso horário de atendimento (${CLINICA.horarios}).\n\n` +
     `Assim que o expediente começar, eu te respondo por aqui. Se for uma urgência, procure o pronto-socorro mais próximo ou ligue 192.`
   );
 }
@@ -376,30 +382,30 @@ export const TEXTOS_ERRO_TEMPORARIO = [
 // Resposta quando a IA usou propor_agendamento sem escrever texto.
 
 export const TEXTOS_AGENDAMENTO_ANOTADO = [
-  "Prontinho, deixei o seu horário reservado! Te esperamos aqui na Av. Paes de Barros, 1378, na Mooca 😊",
+  "Prontinho, deixei o seu horário reservado! Te esperamos aqui na Av. Paes de Barros, 1378, na Mooca.",
   "Combinado, horário reservado! Te esperamos aqui no Instituto.",
-  "Reservado! Vai ser muito bom te receber aqui no Instituto 😊",
+  "Reservado! Vai ser muito bom te receber aqui no Instituto.",
 ] as const;
 
 // Resposta quando a IA usou confirmar_agendamento sem escrever texto.
 export const TEXTOS_CONFIRMACAO_ANOTADA = [
-  "Obrigada por confirmar! Vai ser um prazer te receber aqui no Instituto 😊",
+  "Obrigada por confirmar! Vai ser um prazer te receber aqui no Instituto.",
   "Confirmado! Te esperamos aqui na Av. Paes de Barros, 1378, na Mooca.",
-  "Prontinho, presença confirmada! Até lá 😊",
+  "Prontinho, presença confirmada! Até lá.",
 ] as const;
 
 // Horario pedido ja estava tomado: oferece os proximos livres (textos fixos,
 // porque a IA ja tinha escrito "reservado").
 export function textoHorarioOcupado(sugestoes: readonly string[]): string {
   if (!sugestoes.length) {
-    return "Poxa, esse horário acabou de ser preenchido 😕 Qual outro dia ou horário fica bom pra você?";
+    return "Poxa, esse horário acabou de ser preenchido. Qual outro dia ou horário fica bom pra você?";
   }
   const opcoes = sugestoes.length === 1 ? sugestoes[0] : `${sugestoes.slice(0, -1).join(", ")} ou ${sugestoes[sugestoes.length - 1]}`;
-  return `Poxa, esse horário acabou de ser preenchido 😕 Tenho livre ${opcoes}. Algum desses fica bom pra você?`;
+  return `Poxa, esse horário acabou de ser preenchido. Tenho livre ${opcoes}. Algum desses fica bom pra você?`;
 }
 
 export const TEXTOS_ENCERRAMENTO = [
-  "Como não tivemos mais retorno, vou encerrar o atendimento por aqui.\n\nQuando quiser retomar, é só mandar uma mensagem que a gente continua 😊",
+  "Como não tivemos mais retorno, vou encerrar o atendimento por aqui.\n\nQuando quiser retomar, é só mandar uma mensagem que a gente continua.",
   "Vou encerrar o nosso atendimento por aqui, tá bom?\n\nQuando quiser continuar, é só mandar uma mensagem.",
-  "Como você não respondeu mais, vou finalizar o atendimento por enquanto.\n\nSe quiser retomar, é só escrever por aqui 😊",
+  "Como você não respondeu mais, vou finalizar o atendimento por enquanto.\n\nSe quiser retomar, é só escrever por aqui.",
 ] as const;

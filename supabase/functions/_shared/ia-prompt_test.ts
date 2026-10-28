@@ -46,10 +46,10 @@ Deno.test("sortear escolhe dentro da lista", async () => {
   assertEquals(sortear(["a", "b", "c"], () => 1), "c");
 });
 
-Deno.test("persona: Julie por padrao, nome e ficha da config, sem negar ser IA", () => {
+Deno.test("persona: Jully por padrao, nome e ficha da config, sem negar ser IA", () => {
   const base = { primeiroNome: null, funil: null, etapa: null, exemplos: [], agoraLocal: "quarta-feira, 21/10/2026 15:00" };
   const padrao = montarSystemPrompt(base);
-  assert(padrao.includes("Você é a Julie"));
+  assert(padrao.includes("Você é a Jully"));
   assert(padrao.includes("NÃO negue"));
   assert(padrao.includes("não conta história de saúde sua"));
   const outra = montarSystemPrompt({ ...base, persona: { nome: "Ana", ficha: "Gosta de música." } });
@@ -115,4 +115,11 @@ Deno.test("lembrete de consentimento: acolhe, pede o ok e passa na pos-validacao
 Deno.test("confirmacao: quem confirma o lembrete tem o horario marcado como confirmado", () => {
   const sp = montarSystemPrompt({ primeiroNome: null, funil: null, etapa: null, exemplos: [], agoraLocal: "x" });
   assertStringIncludes(sp, "se ela confirmar, chame confirmar_agendamento");
+});
+
+Deno.test("paraWhatsApp tira emoji (so texto)", () => {
+  assertEquals(paraWhatsApp("Aqui é a Jully, do Instituto Castro 😊 Que bom ter você!"), "Aqui é a Jully, do Instituto Castro Que bom ter você!");
+  assertEquals(paraWhatsApp("Até lá 😊"), "Até lá");
+  assertEquals(paraWhatsApp("Poxa 😕, esse horário saiu 👍🏽"), "Poxa, esse horário saiu");
+  assertEquals(paraWhatsApp("Combinado ❤️!"), "Combinado!");
 });
