@@ -311,3 +311,77 @@ export async function enviarTextoZapi(args: {
   if (!r.ok) console.error(LOG, "Z-API nao aceitou o envio:", resp.status, r.mensagemMeta.slice(0, 300));
   return r;
 }
+
+// ---------------------------------------------------------------------------
+// CONEXAO: status e QR Code (tela de reconexao do CRM)
+// ---------------------------------------------------------------------------
+// GET /status       -> { connected, smartphoneConnected, error }
+// GET /qr-code/image -> { value: "data:image/png;base64,..." } ou, em aparelho
+//   que exige chave de acesso, { challenge: {...} } (concluir pelo painel).
+// O WhatsApp troca o QR a cada ~20 s; o front pede um novo a cada 15 s.
+
+export function urlInstanciaZapi(canal: CanalZapi, recurso: "status" | "qr-code/image"): string {
+  return `${ZAPI_API}/instances/${encodeURIComponent(canal.instancia)}/token/${encodeURIComponent(canal.token)}/${recurso}`;
+}
+
+export type StatusZapi =
+  | { ok: true; conectado: boolean; celularOnline: boolean; detalhe: string }
+  | { ok: false; status: number; detalhe: string };
+
+export function interpretarStatusZapi(status: number, data: any): StatusZapi {
+  if (status < 200 || status >= 300 || !data || typeof data.connected !== "boolean") {
+    return { ok: false, status, detalhe: String((data && (data.error || data.message)) || `Z-API devolveu ${status}`).slice(0, 200) };
+  }
+  return {
+    ok: true,
+    conectado: data.connected === true,
+    celularOnline: data.smartphoneConnected === true,
+    detalhe: String(data.error || "").slice(0, 200),
+  };
+}
+
+export type QrZapi =
+  | { ok: true; imagem: string }
+  | { ok: false; motivo: "chave_de_acesso" | "sem_qr"; detalhe: string };
+
+// Aceita o base64 com ou sem o prefixo data:image.
+export function interpretarQrZapi(status: number, data: any): QrZapi {
+  if (data && data.challenge) return { ok: false, motivo: "chave_de_acesso", detalhe: "aparelho pede chave de acesso" };
+  const v = data && typeof data.value === "string" ? data.value.trim() : "";
+  if (status >= 200 && status < 300 && v) {
+    if (/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(v)) return { ok: true, imagem: v };
+    if (/^[A-Za-z0-9+/=]+$/.test(v)) return { ok: true, imagem: "data:image/png;base64," + v };
+  }
+  return { ok: false, motivo: "sem_qr", detalhe: String((data && (data.error || data.message)) || `Z-API devolveu ${status}`).slice(0, 200) };
+}
+
+async function getZapi(url: string, clientToken: string, LOG: string): Promise<{ status: number; data: any }> {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 12000);
+  try {
+    const r = await fetch(url, { headers: { "Client-Token": clientToken }, signal: ctl.signal });
+    const txt = await r.text().catch(() => "");
+    let data: any = {};
+    try {
+      data = JSON.parse(txt);
+    } catch (_e) {
+      data = { message: txt.slice(0, 200) };
+    }
+    return { status: r.status, data };
+  } catch (e) {
+    console.error(LOG, "Z-API sem resposta:", e instanceof Error ? e.message : e);
+    return { status: 0, data: { message: "falha de conexao" } };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+export async function statusZapi(canal: CanalZapi, prefixoLog = "[zapi]"): Promise<StatusZapi> {
+  const r = await getZapi(urlInstanciaZapi(canal, "status"), canal.clientToken, prefixoLog);
+  return interpretarStatusZapi(r.status, r.data);
+}
+
+export async function qrCodeZapi(canal: CanalZapi, prefixoLog = "[zapi]"): Promise<QrZapi> {
+  const r = await getZapi(urlInstanciaZapi(canal, "qr-code/image"), canal.clientToken, prefixoLog);
+  return interpretarQrZapi(r.status, r.data);
+}

@@ -12,6 +12,7 @@ de infraestrutura (CORS/JSON, auth, flags, Cloud API, prompt da IA) moram em
 |---|---|---|---|---|
 | `ic-meta-webhook` | Meta (webhook `messages` + `smb_message_echoes`), Z-API (`?provedor=zapi&token=...`), pg_cron (varredor `{"varredor":true}`) | **não** (Meta: assinatura `X-Hub-Signature-256`; Z-API: token na URL) | `META_VERIFY_TOKEN` (GET de verificação), `META_APP_SECRET` (assinatura), `META_ACCESS_TOKEN` (baixar áudio da Meta), `ZAPI_WEBHOOK_TOKEN` (porta da Z-API), `GROQ_API_KEY` (transcrição), `IC_INTERNAL_SECRET` (chamar a IA) | `supabase functions deploy ic-meta-webhook --no-verify-jwt` |
 | `ic-whatsapp-send` | front (`supabaseClient.functions.invoke`) | **sim** + `public.users` ativo | `META_ACCESS_TOKEN` ou `ZAPI_INSTANCE_TOKEN` + `ZAPI_CLIENT_TOKEN` (conforme o provedor do número) | `supabase functions deploy ic-whatsapp-send` |
+| `ic-whatsapp-conexao` | front (tela "WhatsApp desconectado", `ic-extensoes.js` seção 9) | **sim** + `public.users` ativo | `ZAPI_INSTANCE_TOKEN` + `ZAPI_CLIENT_TOKEN` | `supabase functions deploy ic-whatsapp-conexao` |
 | `ic-usuarios` | front (tela Usuários → Novo Usuário) | **sim** + `public.users` ativo + Admin | nenhum além dos injetados (usa a service role para `auth.admin.createUser`) | `supabase functions deploy ic-usuarios` |
 | `ic-ia-pre-atendimento` | só `ic-meta-webhook` (segundo plano) | **não** (`x-ic-internal`) | `IC_INTERNAL_SECRET` (autoriza e chama `ic-agendamento`), `ANTHROPIC_API_KEY` (modelo), `META_ACCESS_TOKEN` ou `ZAPI_INSTANCE_TOKEN` + `ZAPI_CLIENT_TOKEN` (envio, conforme o provedor do número; ausente = modo sombra), `IC_POLITICA_PRIVACIDADE_URL` (link no consentimento) | `supabase functions deploy ic-ia-pre-atendimento --no-verify-jwt` |
 | `ic-agendamento` | front (JWT validado em código), `ic-ia-pre-atendimento` (`x-ic-internal`), Google (redirect OAuth, GET) | **não** no gateway, **sim em código** (`auth.getUser` + `public.users` ativo) — ver motivo abaixo | `IC_INTERNAL_SECRET` (interno + assinatura do `state`), `IC_CRYPTO_KEY` (AES-GCM do refresh token), `IC_APP_URL` (link do card, redirect pós-OAuth), `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` | `supabase functions deploy ic-agendamento --no-verify-jwt` |
@@ -27,6 +28,8 @@ callback é protegido por um `state` assinado (HS256 com `IC_INTERNAL_SECRET`,
 10 min). É a mesma garantia, feita em código.
 
 ### Contratos para o front
+
+**`ic-whatsapp-conexao`** (POST, `Authorization: Bearer <jwt do usuário>`): `{acao:"status"}` devolve as linhas Z-API ativas com `conectado`; `{acao:"qrcode", linha_id}` devolve `imagem` (data URL do QR) ou `ja_conectado`. O front consulta o status a cada minuto e, se um número cair, abre na frente do CRM a tela com o QR Code (novo QR a cada 15 s, até 3; depois botão "Gerar novo QR Code"; "Lembrar depois" esconde por 5 min). Aparelho que pede chave de acesso: conectar pelo painel da Z-API.
 
 **`ic-whatsapp-send`** (POST, `Authorization: Bearer <jwt do usuário>`)
 
