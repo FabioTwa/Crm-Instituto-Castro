@@ -532,22 +532,14 @@ check('auditoria (16) em users gravou em audit_log_critico (insert + update do v
 
 check('26: authenticated executa crm_cards_irmaos e crm_mescla_resumo', (await r(`select has_function_privilege('authenticated', 'public.crm_cards_irmaos(uuid)', 'execute') and has_function_privilege('authenticated', 'public.crm_mescla_resumo(uuid)', 'execute') v`))[0]?.v === true);
 
-// 28: WhatsApp pelo Gupshup. Numero existente continua 'meta'; gupshup exige app; app unico; entrada bruta aceita 'gupshup'.
-check('28: numero existente nasce com provedor meta', (await r(`select bool_and(provedor = 'meta') v from vendedores_whatsapp`))[0]?.v === true);
-x = await r(`update vendedores_whatsapp set provedor = 'gupshup' where gupshup_app is null`);
-check('28: provedor gupshup sem gupshup_app e recusado', typeof x === 'string' && x.includes('vendedores_whatsapp_gupshup_app_check'), x);
-x = await r(`update vendedores_whatsapp set provedor = 'zapi'`);
-check('28: provedor fora da lista e recusado', typeof x === 'string' && x.includes('vendedores_whatsapp_provedor_check'), x);
-x = await r(`update vendedores_whatsapp set provedor = 'gupshup', gupshup_app = 'IntegracaoCRM' returning provedor`);
-check('28: liga o numero no Gupshup', ok(x) && x[0]?.provedor === 'gupshup', x);
-x = await r(`insert into vendedores_whatsapp (vendedor_id, numero_whatsapp, ativo, provedor, gupshup_app) values ('outro', '5511911112222', true, 'gupshup', ' integracaocrm ')`);
-check('28: o mesmo app em dois numeros ativos e recusado', typeof x === 'string' && x.includes('vendedores_whatsapp_gupshup_app_unico'), x);
-x = await r(`insert into crm_entrada_bruta (origem, envelope) values ('gupshup', '{}'::jsonb) returning id`);
-check("28: crm_entrada_bruta aceita origem 'gupshup'", ok(x) && x.length === 1, x);
+// 31: provedor do WhatsApp por numero. Numero existente continua 'meta'; zapi exige instancia; provedor fora da lista e recusado.
+check('31: numero existente nasce com provedor meta', (await r(`select bool_and(provedor = 'meta') v from vendedores_whatsapp`))[0]?.v === true);
+x = await r(`update vendedores_whatsapp set provedor = 'zapi', zapi_instancia = null`);
+check('31: provedor zapi sem zapi_instancia e recusado', typeof x === 'string' && x.includes('vendedores_whatsapp_zapi_instancia_check'), x);
+x = await r(`update vendedores_whatsapp set provedor = 'outro'`);
+check('31: provedor fora da lista e recusado', typeof x === 'string' && x.includes('vendedores_whatsapp_provedor_check'), x);
 x = await r(`insert into crm_entrada_bruta (origem, envelope) values ('outro', '{}'::jsonb)`);
-check('28: crm_entrada_bruta continua recusando origem desconhecida', typeof x === 'string' && x.includes('crm_entrada_bruta_origem_check'), x);
-await r(`delete from crm_entrada_bruta where origem = 'gupshup'`);
-await r(`update vendedores_whatsapp set provedor = 'meta', gupshup_app = null`);
+check('crm_entrada_bruta recusa origem desconhecida', typeof x === 'string' && x.includes('crm_entrada_bruta_origem_check'), x);
 
 console.log('\n----- pg_policies: politicas abertas para public que sobraram -----');
 console.log(JSON.stringify(await r(`select tablename, policyname, cmd from pg_policies where schemaname='public' and roles='{public}' order by 1,2`)));

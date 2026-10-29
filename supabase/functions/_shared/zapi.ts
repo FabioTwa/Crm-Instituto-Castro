@@ -1,5 +1,5 @@
-// Z-API como provedor de WhatsApp do IC CRM (desde 15/10/2026; unico provedor
-// em uso desde 21/10/2026, o Gupshup foi removido em 27/10/2026).
+// Z-API como provedor de WhatsApp do IC CRM (desde 15/10/2026; provedor
+// principal desde 21/10/2026).
 //
 // ATENCAO: a Z-API NAO e API oficial da Meta. Ela conecta o numero como um
 // "aparelho conectado" (WhatsApp Web). Existe risco de banimento do numero.

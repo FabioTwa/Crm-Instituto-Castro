@@ -33,10 +33,9 @@ No Supabase, SQL Editor, um arquivo por vez:
 | `25_ic_usuarios_auth.sql` | `users.pw` so aceita `'supabase_auth'` (senha mora so no Supabase Auth, criada pela function `ic-usuarios`); trigger `ic_users_protege_campos`: quem nao e Admin so altera nome, foto e iniciais da propria linha; rollback no rodape | 14, 15 |
 | `26_ic_funcoes_sem_anon.sql` | `crm_cards_irmaos` e `crm_mescla_resumo` (SECURITY DEFINER) so para authenticated/service_role; `ic_agendamento_confirmado` (gatilho) fora da API; rollback no rodape | 06, 18 |
 | `27_ic_admin_protegido.sql` | gatilho `ic_users_protege_admin`: ninguem altera o proprio perfil/papel/status pelo app, e nenhuma alteracao ou exclusao deixa o sistema sem Admin ativo (sem JWT, SQL Editor, passa: caminho de recuperacao); rollback no rodape | 14, 25 |
-| `28_ic_whatsapp_gupshup.sql` | `vendedores_whatsapp.provedor` (`meta`/`gupshup`, padrao `meta`), `gupshup_app`, `gupshup_app_id` (app unico por numero ativo); `crm_entrada_bruta` aceita origem `gupshup`; aditivo, rollback no rodape | 02 |
 | `29_ic_ia_fase_teste.sql` | `crm_ia_config`: chaves `modo_sombra` (padrao `true`, a IA nao envia) e `numeros_teste` (preenchida = a IA so atende esses telefones); aditivo, rollback no rodape | 17 |
 | `30_ic_ia_exemplos_iniciais.sql` | 16 exemplos anonimizados de atendimentos reais em `ia_exemplos_conversa` (tags por funil); nao duplica pelo titulo; rollback no rodape | 17 |
-| `31_ic_whatsapp_zapi.sql` | `vendedores_whatsapp.provedor` aceita `zapi` (treino da IA, não oficial); `zapi_instancia` obrigatória e única por número ativo; tokens nos segredos, não no banco; aditivo, rollback no rodapé | 28 |
+| `31_ic_whatsapp_zapi.sql` | `vendedores_whatsapp.provedor` (`meta`/`zapi`, padrao `meta`; Z-API não oficial); `zapi_instancia` obrigatória e única por número ativo; tokens nos segredos, não no banco; aditivo, rollback no rodapé | 02 |
 | `32_ic_ia_encerrar_conversa.sql` | `ic_encerrar_conversa(card)`: botão "Encerrar conversa" do painel do lead; fecha handoffs pendentes e marca o encerramento para a IA voltar a atender na próxima mensagem; aditivo, rollback no rodapé | 17, 15 |
 | `33_ic_funil_automatico.sql` | `ic_avancar_etapa(card, evento)`: card anda sozinho no funil conforme a conversa com a IA (em conversa, negociação, agendamento pendente), só para frente; gatilho de agendamento confirmado passa a levar para Visita Confirmada; chave `funil_automatico` em `crm_ia_config` para desligar; aditivo, rollback no rodapé | 18, 17 |
 | `34_ic_atendente_ve_todos.sql` | `ic_card_no_escopo`: todo usuário logado vê todos os cards (Atendente deixa de ver só os próprios); o recorte fica no escopo do perfil (tela Permissões); rollback no rodapé | 15 |
@@ -75,7 +74,7 @@ e-mail) e o numero de WhatsApp: o bloco comentado no fim do 13 mostra como.
 ### Colunas novas em tabelas existentes
 `perfis_acesso.rotulo text`, `perfis_acesso.ve_dinheiro boolean` (13).
 `crm_funis.excluido_em timestamptz`, `crm_funis.excluido_por text` (21).
-`vendedores_whatsapp.provedor text` (`meta`/`gupshup`), `.gupshup_app text`, `.gupshup_app_id text` (28). Funil excluido tem `ativo = false` e `excluido_em` preenchido; as telas filtram por `excluido_em is null`.
+`vendedores_whatsapp.provedor text` (`meta`/`zapi`) (31). Funil excluido tem `ativo = false` e `excluido_em` preenchido; as telas filtram por `excluido_em is null`.
 
 ### Funcoes
 | funcao | retorno | quem chama | arquivo |

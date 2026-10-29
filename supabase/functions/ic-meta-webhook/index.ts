@@ -31,10 +31,6 @@
 //
 // Publicar: supabase functions deploy ic-meta-webhook --no-verify-jwt
 //
-// GUPSHUP: removido em 27/10/2026 (o IC usa so a Z-API). Chamada antiga em
-// ?provedor=gupshup cai na porta da Meta, falha na assinatura e responde 200
-// sem gravar nada.
-//
 // Z-API (fase de treino da IA, NAO oficial) - 15/10/2026:
 //   .../functions/v1/ic-meta-webhook?provedor=zapi&token=<ZAPI_WEBHOOK_TOKEN>
 // - Webhook "Ao receber" da Z-API, com "notificar as enviadas por mim" ligado.
@@ -774,8 +770,6 @@ async function carregarVendedores(supabase: Supa): Promise<string | null> {
       if (canon) porZapiNumero.set(canon, v);
       continue;
     }
-    // Linha antiga do Gupshup (provedor removido) nao recebe nada.
-    if (String(r.provedor || "") === "gupshup") continue;
     if (r.meta_phone_id) mapa.set(String(r.meta_phone_id), v);
   }
   vendedorCache = mapa;
@@ -1792,12 +1786,6 @@ async function entradaZapi(req: Request, url: URL): Promise<Response> {
 // O envelope e sempre o da Meta; quando veio da Z-API, traz _ic_provedor.
 async function processarPayload(URL_SB: string, SR: string, payload: any): Promise<void> {
   const resultados: unknown[] = [];
-  // Envelope antigo do Gupshup (provedor removido): o varredor so marca como
-  // processado, sem gravar conversa.
-  if (payload && payload._ic_provedor === "gupshup") {
-    console.log("[ic-meta-webhook] envelope do Gupshup ignorado (provedor removido)");
-    return;
-  }
   const provedor: Provedor = payload && payload._ic_provedor === "zapi" ? "zapi" : "meta";
   try {
     const supabase = createClient(URL_SB, SR, { auth: { persistSession: false } });

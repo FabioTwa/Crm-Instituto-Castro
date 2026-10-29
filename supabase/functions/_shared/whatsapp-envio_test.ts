@@ -5,7 +5,7 @@ const env = (vals: Record<string, string>) => (n: string) => vals[n];
 
 Deno.test("linha sem provedor vale como meta; provedor fora de uso nao tem canal", () => {
   assertEquals(provedorDaLinha({ meta_phone_id: "1" }), "meta");
-  assertEquals(provedorDaLinha({ provedor: "GUPSHUP" }), null);
+  assertEquals(provedorDaLinha({ provedor: "OUTRO" }), null);
   assertEquals(provedorDaLinha(null), "meta");
 });
 
@@ -19,9 +19,9 @@ Deno.test("canal meta: precisa de meta_phone_id e META_ACCESS_TOKEN", () => {
   assertEquals(semId, { ok: false, provedor: "meta", motivo: "numero_incompleto" });
 });
 
-Deno.test("linha antiga do Gupshup (removido) nunca envia, nem com credencial de outro provedor", () => {
-  const linha = { provedor: "gupshup", gupshup_app: "IntegracaoCRM", numero_whatsapp: "+55 (11) 99999-0000", meta_phone_id: "PN1" };
-  const todos = env({ GUPSHUP_API_KEY: "k", META_ACCESS_TOKEN: "t", ZAPI_INSTANCE_TOKEN: "tk", ZAPI_CLIENT_TOKEN: "ct" });
+Deno.test("provedor desconhecido nunca envia, nem com credencial de outro provedor", () => {
+  const linha = { provedor: "outro", numero_whatsapp: "+55 (11) 99999-0000", meta_phone_id: "PN1" };
+  const todos = env({ META_ACCESS_TOKEN: "t", ZAPI_INSTANCE_TOKEN: "tk", ZAPI_CLIENT_TOKEN: "ct" });
   assertEquals(canalDaLinha(linha, todos), { ok: false, provedor: null, motivo: "numero_incompleto" });
 });
 
