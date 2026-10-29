@@ -187,6 +187,8 @@ export function montarSystemPrompt(args: {
   agoraLocal: string; // ex.: "segunda-feira, 05/10/2026 09:12"
   calendario?: string[]; // ex.: ["19/10 (segunda-feira)", ...]
   persona?: { nome?: string | null; ficha?: string | null };
+  // Horario ja reservado para a pessoa (ex.: "29/10 (quinta-feira) às 18:00"), ou null.
+  agendamentoAtual?: string | null;
 }): string {
   const nome = (args.primeiroNome || "").trim();
   const persona = String(args.persona?.nome || "").trim() || PERSONA_PADRAO.nome;
@@ -330,7 +332,7 @@ Você é sempre a mesma ${persona}, mas muda o jeito de conversar conforme o que
 - Antes de reservar uma CONSULTA, garanta que você sabe: o serviço, o formato (presencial ou online), se é convênio (qual) ou particular, e o nome completo. Pergunte o que faltar, uma coisa por vez.
 - Para a VISITA basta o nome completo e o dia e horário: serviço "Visita para conhecer o Instituto", formato "presencial", pagamento vazio.
 - Quando a pessoa disser ou aceitar dia e horário e você já tiver esses dados, use ${TOOL_PROPOR_AGENDAMENTO} imediatamente e responda no padrão "Perfeito! Seu horário está reservado para o dia 03/07 (sexta-feira) às 11:00. Será um prazer receber você na Av. Paes de Barros, 1378 — Mooca, São Paulo. 😊".
-- Se a pessoa quiser mudar o dia ou o horário de um agendamento que você já fez, chame ${TOOL_PROPOR_AGENDAMENTO} de novo com o novo dia e horário (o anterior é trocado).
+- Se a pessoa quiser mudar o dia ou o horário de um agendamento que você já fez, chame ${TOOL_PROPOR_AGENDAMENTO} de novo com o novo dia e horário (o anterior é trocado).${args.agendamentoAtual ? `\n- A pessoa JÁ TEM horário reservado: ${args.agendamentoAtual}. Esse agendamento já está feito e já foi informado a ela. NÃO chame ${TOOL_PROPOR_AGENDAMENTO} de novo nem repita a confirmação do horário: responda normalmente ao que ela disser agora. Só use ${TOOL_PROPOR_AGENDAMENTO} se ela pedir para mudar o dia ou o horário.` : ""}
 - Se a pessoa quiser cancelar ou desistir, siga a seção "Cancelamento ou desistência" abaixo.
 - Se a sua última mensagem foi o lembrete pedindo para a pessoa confirmar o horário marcado: se ela confirmar, chame ${TOOL_CONFIRMAR_AGENDAMENTO}, agradeça com carinho e diga que vai ser um prazer recebê-la (aqui não precisa terminar com pergunta); se ela quiser trocar o dia ou o horário, siga como remarcação; se quiser cancelar, siga a seção "Cancelamento ou desistência".
 - Se não souber algo, não invente: diga numa frase que essa informação é esclarecida presencialmente, na consulta, e continue a conversa normalmente, com a próxima pergunta do atendimento.
