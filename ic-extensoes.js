@@ -789,16 +789,27 @@
     // manda a despedida ao lead (ic-ia-pre-atendimento, acao
     // encerrar_conversa_equipe; banco: SQL 32). A próxima mensagem do lead
     // volta para a assistente virtual como conversa nova.
+    // Um encerramento por vez por card: o segundo clique, enquanto o primeiro
+    // ainda roda, é ignorado (o servidor também não repete a despedida).
+    var icEncerrandoConversa = {};
     window.icEncerrarConversa = function (clienteId) {
         if (!clienteId) return;
+        if (icEncerrandoConversa[clienteId]) { showToast('O encerramento desta conversa já está em andamento.', 'info'); return; }
         icConfirmar('Encerrar a conversa deste lead?\n\nA assistente virtual manda a mensagem de despedida ao lead. Quando ele mandar uma nova mensagem, ela volta a atender desde o começo.', 'Encerrar conversa', async function () {
+            if (icEncerrandoConversa[clienteId]) return;
+            icEncerrandoConversa[clienteId] = true;
             var r;
             try {
                 r = await supabaseClient.functions.invoke('ic-ia-pre-atendimento', {
                     body: { acao: 'encerrar_conversa_equipe', cliente_crm_id: clienteId }
                 });
             } catch (e) { r = { error: e }; }
+            finally { delete icEncerrandoConversa[clienteId]; }
             var d = r && r.data;
+            if (d && d.ok && d.ja_encerrada) {
+                showToast('Esta conversa já está encerrada. Nenhuma mensagem foi enviada de novo.', 'info');
+                return;
+            }
             if (r.error || !d || !d.ok) {
                 var st = r.error && r.error.context && r.error.context.status;
                 showToast(st === 403 || (d && d.erro === 'sem_permissao')

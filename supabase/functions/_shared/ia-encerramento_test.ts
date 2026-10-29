@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { decidirEncerramento, mensagensDaConversaAtual, minutosEncerramento } from "./ia-encerramento.ts";
+import { decidirEncerramento, jaEncerrada, mensagensDaConversaAtual, minutosEncerramento } from "./ia-encerramento.ts";
 
 const agora = new Date("2026-10-15T17:00:00Z");
 const ha = (min: number) => new Date(agora.getTime() - min * 60000).toISOString();
@@ -51,4 +51,12 @@ Deno.test("mensagensDaConversaAtual: descarta o que veio antes do encerramento",
   assertEquals(mensagensDaConversaAtual(msgs, "2026-10-16T17:50:00Z").map((m) => m.criada_em), ["2026-10-16T18:15:00Z"]);
   assertEquals(mensagensDaConversaAtual(msgs, null).length, 3);
   assertEquals(mensagensDaConversaAtual(msgs, "lixo").length, 3);
+});
+
+Deno.test("jaEncerrada: clique duplo nao encerra de novo; mensagem nova do lead reabre", () => {
+  assertEquals(jaEncerrada(null, "2026-10-29T12:00:00Z"), false);
+  assertEquals(jaEncerrada(null, null), false);
+  assertEquals(jaEncerrada("2026-10-29T12:05:00Z", "2026-10-29T12:00:00Z"), true);
+  assertEquals(jaEncerrada("2026-10-29T12:05:00Z", null), true);
+  assertEquals(jaEncerrada("2026-10-29T12:05:00Z", "2026-10-29T12:06:00Z"), false);
 });

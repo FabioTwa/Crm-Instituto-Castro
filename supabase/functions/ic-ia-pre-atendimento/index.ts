@@ -98,7 +98,7 @@ import { decidirRajada, rajadaDoConfig } from "../_shared/rajada.ts";
 import { decidirFollowup, followupsDoConfig, instrucaoFollowup, podeMandarFollowup, textoFollowupFixo } from "../_shared/ia-followup.ts";
 import { dataHoraLocal, numerosAviso, textoAvisoAgendamento, textoAvisoCancelamento } from "../_shared/aviso-agendamento.ts";
 import { ETAPA_CONFIRMACAO, horasConfirmacao, horasConfirmacaoCurta, MINIMO_ANTES_MS, precisaLembrete, STATUS_COM_LEMBRETE, textoConfirmacao } from "../_shared/confirmacao-agendamento.ts";
-import { decidirEncerramento, ETAPA_ENCERRAMENTO, mensagensDaConversaAtual, minutosEncerramento } from "../_shared/ia-encerramento.ts";
+import { decidirEncerramento, ETAPA_ENCERRAMENTO, jaEncerrada, mensagensDaConversaAtual, minutosEncerramento } from "../_shared/ia-encerramento.ts";
 import { detectarAgendamento, detectarNegociacao, type EventoFunil } from "../_shared/funil-ia.ts";
 import {
   configRetomadaQueda,
@@ -1939,6 +1939,20 @@ async function encerrarPelaEquipe(req: Request, sb: SupabaseClient, body: any): 
     console.error(LOG, "SUPABASE_ANON_KEY ausente");
     return json({ ok: false, erro: "erro_interno" }, 500);
   }
+  // Ja encerrada e o lead nao escreveu depois: nao encerra de novo nem manda
+  // outra despedida (clique duplo no botao).
+  const { data: ultRecebida } = await sb
+    .from("crm_conversas")
+    .select("criada_em")
+    .eq("cliente_crm_id", clienteId)
+    .eq("direcao", "recebida")
+    .order("criada_em", { ascending: false })
+    .limit(1);
+  const ultimaDoLead = ultRecebida && ultRecebida.length ? String((ultRecebida[0] as any).criada_em) : null;
+  if (jaEncerrada(await ultimoEncerramento(sb, clienteId), ultimaDoLead)) {
+    return json({ ok: true, encerrada: true, ja_encerrada: true, mensagem_enviada: false, motivo: "ja_encerrada" });
+  }
+
   const sbUsuario = createClient(Deno.env.get("SUPABASE_URL") || "", ANON, {
     auth: { persistSession: false },
     global: { headers: { Authorization: `Bearer ${tokenDoHeader(req)}` } },
