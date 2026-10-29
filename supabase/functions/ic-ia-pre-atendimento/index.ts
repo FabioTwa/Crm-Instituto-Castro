@@ -464,6 +464,7 @@ async function chamarClaude(args: {
   maxTokens: number;
   system: string;
   messages: Array<{ role: "user" | "assistant"; content: string }>;
+  semFerramentas?: boolean;
 }): Promise<RespostaClaude> {
   const inicio = Date.now();
   const ctl = new AbortController();
@@ -484,8 +485,7 @@ async function chamarClaude(args: {
         max_tokens: args.maxTokens,
         system: args.system,
         messages: args.messages,
-        tools: FERRAMENTAS,
-        tool_choice: { type: "auto" },
+        ...(args.semFerramentas ? {} : { tools: FERRAMENTAS, tool_choice: { type: "auto" } }),
         output_config: { effort: "low" },
       }),
       signal: ctl.signal,
@@ -910,6 +910,7 @@ async function rodarNaVez(
     await p.log("claude", "sem_turno_do_lead");
     return { ok: true, decisao: "sem_turno_do_lead" };
   }
+  const agendado = await agendamentoAtivo(sb, body.cliente_crm_id);
   const agoraSp = partesNoFuso(agora, TZ_PADRAO);
   const nomesDia = ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"];
   const agoraLocal = `${nomesDia[agoraSp.diaSemana]}, ${String(agoraSp.dia).padStart(2, "0")}/${String(agoraSp.mes).padStart(2, "0")}/${agoraSp.ano} ${String(agoraSp.hora).padStart(2, "0")}:${String(agoraSp.minuto).padStart(2, "0")}`;
@@ -921,6 +922,7 @@ async function rodarNaVez(
     agoraLocal,
     calendario: calendarioDiasUteis(agoraSp.ano, agoraSp.mes, agoraSp.dia),
     persona: { nome: cfg.persona_nome, ficha: cfg.persona_ficha },
+    agendamentoAtual: agendado ? dataHoraLocal(agendado.inicio) : null,
   });
   const maxTokens = Math.max(256, Number(cfg.max_tokens || "1024") || 1024);
   const r = await chamarClaude({ apiKey, modelo: p.modelo, maxTokens, system, messages });
@@ -969,10 +971,16 @@ async function rodarNaVez(
   for (const t of r.tools) {
     if (t.name === TOOL_PROPOR_AGENDAMENTO) {
       const resultado = await proporAgendamento(body.cliente_crm_id, t.input || {});
-      await p.log("tools", resultado.ok ? "propor_agendamento" : "propor_agendamento_falhou", {
+      // Mesmo horario que a pessoa ja tinha: nada mudou. Nao repete a confirmacao,
+      // o handoff nem o aviso a equipe (a IA so responde ao que a pessoa disse).
+      const repetido = resultado.ok && !!agendado && resultado.agendamento_id === agendado.id &&
+        !!resultado.inicio && Date.parse(resultado.inicio) === Date.parse(agendado.inicio);
+      await p.log("tools", !resultado.ok ? "propor_agendamento_falhou" : repetido ? "propor_agendamento_repetido" : "propor_agendamento", {
         motivo: resultado.ok ? null : resultado.erro, detalhe: { agendamento_id: resultado.agendamento_id, inicio: resultado.inicio, atualizado: resultado.atualizado },
       });
-      if (resultado.ok) {
+      if (repetido) {
+        if (!textoResposta) textoResposta = await respostaSemFerramentas(p, apiKey, maxTokens, system, messages);
+      } else if (resultado.ok) {
         if (!textoResposta) textoResposta = sortear(TEXTOS_AGENDAMENTO_ANOTADO);
         marcadores.agendamento_id = resultado.agendamento_id;
         // Agendou: fica o handoff agendamento_confirmado (historico no CRM; a IA segue).
@@ -1815,6 +1823,43 @@ async function proporAgendamento(
     console.error(LOG, "ic-agendamento propor excecao:", e instanceof Error ? e.message : e);
     return { ...FALHA_AGENDAMENTO, erro: "excecao" };
   }
+}
+
+// Horario ainda por vir ja reservado para o card (pendente ou confirmado), ou null.
+async function agendamentoAtivo(sb: SupabaseClient, clienteId: string): Promise<{ id: string; inicio: string } | null> {
+  const { data, error } = await sb
+    .from("agendamentos")
+    .select("id, inicio")
+    .eq("cliente_crm_id", clienteId)
+    .in("status", ["pendente", "confirmado"])
+    .gte("inicio", new Date().toISOString())
+    .order("inicio", { ascending: true })
+    .limit(1);
+  if (error) {
+    console.error(LOG, "agendamentos (ativo) recusou:", error.message);
+    return null;
+  }
+  const a = data && data.length ? (data[0] as any) : null;
+  return a && a.id && a.inicio ? { id: String(a.id), inicio: String(a.inicio) } : null;
+}
+
+// A IA so chamou a ferramenta de novo, sem texto: pede a resposta a mesma
+// conversa, sem ferramentas. Vazio se falhar ou a pos-validacao barrar.
+async function respostaSemFerramentas(
+  p: Pipeline, apiKey: string, maxTokens: number, system: string, messages: Array<{ role: "user" | "assistant"; content: string }>,
+): Promise<string> {
+  const r = await chamarClaude({ apiKey, modelo: p.modelo, maxTokens, system, messages, semFerramentas: true });
+  await p.log("claude", r.erro ? "erro" : "respondeu_sem_ferramentas", {
+    modelo: p.modelo, motivo: r.erro, tokens_entrada: r.tokens_entrada, tokens_saida: r.tokens_saida, latencia_ms: r.latencia_ms,
+  });
+  const texto = paraWhatsApp(r.texto || "");
+  if (r.erro || !texto) return "";
+  const proibido = respostaProibida(texto);
+  if (proibido) {
+    await p.log("pos_validacao", "bloqueada_pos_validacao", { modelo: p.modelo, motivo: proibido, detalhe: { resposta: texto } });
+    return "";
+  }
+  return texto;
 }
 
 // Texto fixo das regras por codigo (CFM): urgencia e duvida clinica nao passam

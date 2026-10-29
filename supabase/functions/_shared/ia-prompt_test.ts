@@ -156,3 +156,12 @@ Deno.test("abertura: texto institucional do Instituto", () => {
   assertStringIncludes(sp, "Central Nacional Unimed (CNU)");
   assert(!sp.includes("Sem emoji"));
 });
+
+Deno.test("prompt: com horario ja reservado, manda nao reagendar o mesmo horario", () => {
+  const base = { primeiroNome: null, funil: null, etapa: null, exemplos: [], agoraLocal: "x" };
+  const sem = montarSystemPrompt(base);
+  assert(!sem.includes("JÁ TEM horário reservado"));
+  const com = montarSystemPrompt({ ...base, agendamentoAtual: "29/10 (quinta-feira) às 18:00" });
+  assertStringIncludes(com, "A pessoa JÁ TEM horário reservado: 29/10 (quinta-feira) às 18:00.");
+  assertStringIncludes(com, "NÃO chame propor_agendamento de novo");
+});
