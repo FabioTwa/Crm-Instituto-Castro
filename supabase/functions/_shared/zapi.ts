@@ -253,10 +253,12 @@ export function corpoTextoZapi(
 }
 
 // Segundos de "digitando..." antes de a Z-API entregar a mensagem: cresce com o
-// tamanho do texto, como alguem digitando de verdade, entre 2 e 9 segundos.
+// tamanho do texto, como alguem digitando de verdade, entre 4 e 8 segundos.
+// Somado a pausa entre blocos da IA, da 5 a 10 s entre uma mensagem e outra
+// (padrao do Instituto, 29/10/2026).
 export function segundosDigitando(texto: string): number {
   const s = 2.5 + String(texto || "").length / 20;
-  return Math.min(10, Math.max(3, Math.round(s)));
+  return Math.min(8, Math.max(4, Math.round(s)));
 }
 
 // Tempo de "leitura" antes de comecar a digitar, como uma pessoa que abre a

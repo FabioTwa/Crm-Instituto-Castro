@@ -87,7 +87,7 @@ export function instrucaoRetomadaQueda(minutosDesde: number): string {
     `Escreva UMA mensagem curta (1 ou 2 frases), natural, como uma pessoa escreveria: peça desculpas pela demora, ` +
     `diga que teve uma instabilidade no WhatsApp e que a última mensagem dela não chegou, e peça com gentileza para ela mandar de novo. ` +
     `Se a conversa acima tiver um assunto em aberto, pode citá-lo de leve, sem inventar nada do que ela possa ter escrito. ` +
-    `Não se apresente de novo se já conversaram, não use emoji e não use ferramentas.]`
+    `Não se apresente de novo se já conversaram e não use ferramentas.]`
   );
 }
 

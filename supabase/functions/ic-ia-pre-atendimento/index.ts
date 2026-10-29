@@ -160,12 +160,12 @@ type Body = { cliente_crm_id: string; conversa_id: string | null; vendedor_id: s
 // Um envio por vez (SQL 37, atender_um_por_vez): as conversas andam em paralelo
 // (cada uma esperando os 30 s da rajada e a IA pensar), mas so UMA resposta e
 // enviada de cada vez no numero. A trava ia_vez so e segurada durante o envio;
-// o prazo e a rede de seguranca se a funcao cair no meio (cobre 3 partes com
-// "digitando..." de ate 10 s cada, as pausas e o aviso a equipe).
+// o prazo e a rede de seguranca se a funcao cair no meio (cobre 4 partes com
+// "digitando..." de ate 8 s cada, as pausas e o aviso a equipe).
 const PRAZO_VEZ_S = 90;
 // Entre as mensagens de uma resposta em partes: garante a ordem na Z-API, que
 // mostra o "digitando..." de cada uma antes de entregar.
-const PAUSA_ENTRE_MENSAGENS_MS = 2500;
+const PAUSA_ENTRE_MENSAGENS_MS = 1000;
 
 type Contexto = {
   primeiro_nome: string | null;
