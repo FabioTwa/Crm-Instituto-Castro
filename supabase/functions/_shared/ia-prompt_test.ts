@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
-import { calendarioDiasUteis, montarSystemPrompt, paraWhatsApp, partesDaResposta, TEXTOS_LEMBRETE_CONSENTIMENTO, TEXTOS_VALOR_PESSOALMENTE } from "./ia-prompt.ts";
+import { calendarioDiasUteis, MAX_CARACTERES_BLOCO, montarSystemPrompt, paraWhatsApp, partesDaResposta, TEXTOS_LEMBRETE_CONSENTIMENTO, TEXTOS_VALOR_PESSOALMENTE } from "./ia-prompt.ts";
 import { respostaProibida } from "./pos-validacao.ts";
 
 Deno.test("paraWhatsApp troca markdown pela formatacao do WhatsApp", () => {
@@ -56,11 +56,12 @@ Deno.test("persona: Jully por padrao, nome e ficha da config, sem negar ser IA",
   assert(outra.includes("Você é a Ana. Gosta de música."));
 });
 
-Deno.test("partesDaResposta: um paragrafo por mensagem, lista junto, no maximo 3", () => {
+Deno.test("partesDaResposta: um paragrafo por mensagem, lista junto, no maximo 4", () => {
   assertEquals(partesDaResposta("Oi!"), ["Oi!"]);
   assertEquals(partesDaResposta("Que bom!\n\nQual dia fica melhor?"), ["Que bom!", "Qual dia fica melhor?"]);
   assertEquals(partesDaResposta("Funciona assim:\n\n• A\n• B\n\nQuer agendar?"), ["Funciona assim:\n\n• A\n• B", "Quer agendar?"]);
-  assertEquals(partesDaResposta("a\n\nb\n\nc\n\nd"), ["a", "b", "c\n\nd"]);
+  assertEquals(partesDaResposta("a\n\nb\n\nc\n\nd"), ["a", "b", "c", "d"]);
+  assertEquals(partesDaResposta("a\n\nb\n\nc\n\nd\n\ne"), ["a", "b", "c", "d\n\ne"]);
   assertEquals(partesDaResposta("  \n\n "), []);
 });
 
@@ -103,7 +104,7 @@ Deno.test("cancelamento: acolhe, pergunta o motivo e tenta manter antes de cance
 Deno.test("ligacoes: acolhe quem quis ligar e segue por mensagem, sem prometer retorno", () => {
   const sp = montarSystemPrompt({ primeiroNome: null, funil: null, etapa: null, exemplos: [], agoraLocal: "x" });
   assertStringIncludes(sp, "# Ligações");
-  assertStringIncludes(sp, "por aqui eu não consigo atender ligação");
+  assertStringIncludes(sp, "Por aqui eu não consigo atender ligações");
   assertStringIncludes(sp, "Nunca prometa que alguém vai ligar para ela.");
 });
 
@@ -120,16 +121,38 @@ Deno.test("confirmacao: quem confirma o lembrete tem o horario marcado como conf
   assertStringIncludes(sp, "se ela confirmar, chame confirmar_agendamento");
 });
 
-Deno.test("paraWhatsApp tira emoji (so texto)", () => {
-  assertEquals(paraWhatsApp("Aqui é a Jully, do Instituto Castro 😊 Que bom ter você!"), "Aqui é a Jully, do Instituto Castro Que bom ter você!");
-  assertEquals(paraWhatsApp("Até lá 😊"), "Até lá");
-  assertEquals(paraWhatsApp("Poxa 😕, esse horário saiu 👍🏽"), "Poxa, esse horário saiu");
-  assertEquals(paraWhatsApp("Combinado ❤️!"), "Combinado!");
+Deno.test("paraWhatsApp mantem emoji (padrao do Instituto)", () => {
+  assertEquals(paraWhatsApp("Será um prazer receber você! 😊"), "Será um prazer receber você! 😊");
+  assertEquals(paraWhatsApp("📍 Estamos na Av. Paes de Barros, 1378"), "📍 Estamos na Av. Paes de Barros, 1378");
 });
 
-Deno.test("textos de valor: sem numero, sem emoji e passam na pos-validacao", () => {
+Deno.test("textos de valor: sem numero e passam na pos-validacao", () => {
   for (const t of TEXTOS_VALOR_PESSOALMENTE) {
     assertEquals(respostaProibida(t), null, t);
     assertEquals(/\d/.test(t), false, t);
   }
+});
+
+Deno.test("partesDaResposta: paragrafo longo vira blocos curtos, quebrando entre frases", () => {
+  const longo =
+    "As vitaminas são importantes para o bom funcionamento do organismo, e a necessidade de reposição deve ser avaliada de forma individualizada. " +
+    "No Instituto Castro, nossos especialistas avaliam suas necessidades. Estamos na Av. Paes de Barros, 1378. Gostaria de agendar?";
+  const partes = partesDaResposta(longo);
+  assertEquals(partes, [
+    "As vitaminas são importantes para o bom funcionamento do organismo, e a necessidade de reposição deve ser avaliada de forma individualizada.",
+    "No Instituto Castro, nossos especialistas avaliam suas necessidades. Estamos na Av. Paes de Barros, 1378. Gostaria de agendar?",
+  ]);
+  for (const p of partes) assert(p.length <= MAX_CARACTERES_BLOCO, p);
+  // Curto ou com quebra de linha (lista, endereco com link) fica como esta.
+  assertEquals(partesDaResposta("Que bom!"), ["Que bom!"]);
+  const comLinhas = "📍 Estamos na Av. Paes de Barros, 1378 — Mooca, São Paulo.\nPara facilitar sua chegada, acesse nossa localização:\nhttps://maps.app.goo.gl/wWJYrgfSpF1gA6Tq6 e venha nos visitar quando puder, será um prazer.";
+  assertEquals(partesDaResposta(comLinhas), [comLinhas]);
+});
+
+Deno.test("abertura: texto institucional do Instituto", () => {
+  const sp = montarSystemPrompt({ primeiroNome: "Ana", funil: null, etapa: null, exemplos: [], agoraLocal: "x" });
+  assertStringIncludes(sp, "Olá, Ana! Sou a Jully, consultora do Instituto Castro. Seja bem-vindo(a)!");
+  assertStringIncludes(sp, "O que motivou seu contato: cuidar da saúde, buscar o emagrecimento ou ambos?");
+  assertStringIncludes(sp, "Central Nacional Unimed (CNU)");
+  assert(!sp.includes("Sem emoji"));
 });

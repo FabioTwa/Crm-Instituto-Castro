@@ -156,10 +156,10 @@ Deno.test("midia: so https", () => {
 Deno.test("delayTyping vai no corpo so quando pedido e cresce com o texto", () => {
   assertEquals(corpoTextoZapi("5511999990000", "Oi", 3), { phone: "5511999990000", message: "Oi", delayTyping: 3 });
   assertEquals(corpoTextoZapi("5511999990000", "Oi", 0), { phone: "5511999990000", message: "Oi" });
-  assertEquals(segundosDigitando("Oi"), 3);
-  assertEquals(segundosDigitando("x".repeat(140)), 10);
-  assertEquals(segundosDigitando("x".repeat(80)), 7);
-  assertEquals(segundosDigitando("x".repeat(2000)), 10);
+  assertEquals(segundosDigitando("Oi"), 4);
+  assertEquals(segundosDigitando("x".repeat(140)), 8);
+  assertEquals(segundosDigitando("x".repeat(60)), 6);
+  assertEquals(segundosDigitando("x".repeat(2000)), 8);
 });
 
 Deno.test("conexao: URLs de status e QR com instancia e token", () => {
