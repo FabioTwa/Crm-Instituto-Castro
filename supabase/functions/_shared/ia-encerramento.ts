@@ -64,3 +64,13 @@ export function mensagensDaConversaAtual<T extends { criada_em: string }>(
     return Number.isFinite(t) && t > inicio;
   });
 }
+
+// A conversa ja esta encerrada: houve um encerramento e o lead nao escreveu
+// depois dele. Encerrar de novo (ex.: clique duplo no botao "Encerrar
+// conversa") nao manda outra despedida.
+export function jaEncerrada(ultimoEncerramentoEm: string | null, ultimaDoLeadEm: string | null): boolean {
+  const enc = ultimoEncerramentoEm ? Date.parse(ultimoEncerramentoEm) : NaN;
+  if (!Number.isFinite(enc)) return false;
+  const lead = ultimaDoLeadEm ? Date.parse(ultimaDoLeadEm) : NaN;
+  return !Number.isFinite(lead) || enc >= lead;
+}
