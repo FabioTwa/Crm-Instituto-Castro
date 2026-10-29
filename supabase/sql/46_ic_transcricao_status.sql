@@ -10,12 +10,13 @@
 --   transcricao_tentativas  quantas vezes a Groq foi chamada para este audio
 --   transcrita_em           hora em que a transcricao deu certo
 --
+-- ic_alertas_estado: memoria da rotina de alerta (o que ja foi avisado).
 -- ic_saude_transcricao(): leitura so, para o servidor (service_role). O
 -- navegador (anon/authenticated) NAO executa. Devolve numeros e codigos, nunca
 -- texto de mensagem, telefone ou nome.
 --
 -- SO ADITIVA: colunas novas (nulas ou com default constante, sem reescrever a
--- tabela), um indice parcial e uma funcao. Nao altera nem apaga dado.
+-- tabela), um indice parcial, uma funcao e uma tabela nova. Nao altera nem apaga dado.
 -- Antes: guarda copia de crm_conversas em crm_conversas_bkp_46 (RLS ligado,
 -- sem acesso pela API). Idempotente. ROLLBACK no fim.
 --
@@ -101,8 +102,24 @@ comment on function public.ic_saude_transcricao() is 'IC: saude da transcricao d
 revoke all on function public.ic_saude_transcricao() from public, anon, authenticated;
 grant execute on function public.ic_saude_transcricao() to service_role;
 
+-- 5) Estado dos alertas (usado pela rotina horaria que confere a saude):
+-- um registro por problema aberto, para avisar 1 vez, repetir a cada 6 h e
+-- avisar de novo quando voltar ao normal. So service_role. Sem dado pessoal.
+create table if not exists public.ic_alertas_estado (
+  chave            text primary key,          -- ex.: 'transcricao:falhas'
+  aberto_em        timestamptz not null default now(),
+  ultimo_aviso_em  timestamptz not null default now(),
+  avisos           integer not null default 1,
+  detalhe          jsonb
+);
+comment on table public.ic_alertas_estado is 'IC: problemas abertos dos alertas operacionais (rotina horaria). So service_role.';
+alter table public.ic_alertas_estado enable row level security;
+revoke all on public.ic_alertas_estado from public, anon, authenticated;
+grant select, insert, update, delete on public.ic_alertas_estado to service_role;
+
 -- ---------------------------------------------------------------------------
 -- ROLLBACK:
+-- drop table if exists public.ic_alertas_estado;
 -- drop function if exists public.ic_saude_transcricao();
 -- drop index if exists public.crm_conversas_audio_criada_em;
 -- alter table public.crm_conversas
