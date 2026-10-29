@@ -41,8 +41,8 @@ callback é protegido por um `state` assinado (HS256 com `IC_INTERNAL_SECRET`,
 ```
 
 O provedor sai de `vendedores_whatsapp.provedor` do número do vendedor do card
-(`_shared/whatsapp-envio.ts`): `meta` ou `zapi`. Linha antiga com provedor
-`gupshup` (removido em 27/10/2026) não envia nada (`vendedor_sem_cloud_api`).
+(`_shared/whatsapp-envio.ts`): `meta` ou `zapi`. Linha sem canal configurado não envia nada
+(`vendedor_sem_cloud_api`).
 
 | HTTP | corpo | quando |
 |---|---|---|
@@ -290,15 +290,6 @@ Confira com `GET https://graph.facebook.com/v23.0/<WABA_ID>/subscribed_apps`. O 
 f) para **enviar** (equipe e IA): o token do usuário do sistema precisa de `whatsapp_business_messaging` e `whatsapp_business_management`; para falar com quem não escreveu nas últimas 24 h, **modelos de mensagem aprovados** (use `template` em `ic-whatsapp-send`).
 
 Se pular (a): o webhook ignora tudo. Se pular (e): nada chega nem em `crm_entrada_bruta`. Se pular `smb_message_echoes`: só o lado do lead entra, e a IA nunca percebe que um humano assumiu.
-
-## 4b. Gupshup (removido em 27/10/2026)
-
-O IC usa só a Z-API. O código do Gupshup saiu do sistema: chamada antiga em
-`?provedor=gupshup` cai na porta da Meta, falha na assinatura e responde 200
-sem gravar nada; linha de `vendedores_whatsapp` com `provedor = 'gupshup'` não
-recebe nem envia. As colunas do SQL 28 (`gupshup_app`, `gupshup_app_id`)
-continuam no banco, sem uso. Para desligar de vez: apagar a URL de webhook no
-painel do Gupshup e os segredos `GUPSHUP_API_KEY` e `GUPSHUP_WEBHOOK_TOKEN`.
 
 ## 4c. Checklist Z-API (provedor em uso)
 

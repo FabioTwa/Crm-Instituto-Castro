@@ -26,7 +26,7 @@ encaixes-depois.js         rotas de telas que não existem -> Kanban
 assets/logo-instituto-castro.svg
 config.example.js          copiar para config.js (URL + chave anon). config.js NÃO vai para o git
 ferramentas/               aplicar-tema-ic.mjs + tema-ic.css: identidade visual (tokens e verificações); auditar-xss.mjs e auditar-textos.mjs
-supabase/sql/              00–12 esquema base · 13 perfis/funis/telas · 14 dinheiro+flags · 15 RLS · 16 jobs · 17 IA · 18 agendamentos · 19 reserva vendas · 20 apoio front · 21 funis · 22 realtime do histórico · 23 cadastro padronizado · 24 limites de texto · 25 usuários só no Auth · 26 funções fora do anon · 27 Admin protegido · 28 colunas do antigo Gupshup (sem uso) · 31 WhatsApp pela Z-API · LEIA-IC.md
+supabase/sql/              00–12 esquema base · 13 perfis/funis/telas · 14 dinheiro+flags · 15 RLS · 16 jobs · 17 IA · 18 agendamentos · 19 reserva vendas · 20 apoio front · 21 funis · 22 realtime do histórico · 23 cadastro padronizado · 24 limites de texto · 25 usuários só no Auth · 26 funções fora do anon · 27 Admin protegido · 31 WhatsApp pela Z-API · LEIA-IC.md
 supabase/functions/        ic-meta-webhook · ic-whatsapp-send · ic-ia-pre-atendimento · ic-agendamento · ic-usuarios · _shared/ · LEIA-IC.md
 teste/testar-na-base-vazia.mjs   sobe 00–28 num Postgres local (PGlite) e testa funções, RLS por papel e jobs
 docs/                      validações e documentos do projeto (prints e relatórios por correção)

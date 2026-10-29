@@ -7,8 +7,8 @@
 //   provedor 'zapi'    -> Z-API (_shared/zapi.ts), so para a fase de treino,
 //                         precisa de zapi_instancia + ZAPI_INSTANCE_TOKEN + ZAPI_CLIENT_TOKEN
 //
-// Linha sem provedor vale como 'meta'. Linha antiga com provedor 'gupshup'
-// (removido em 27/10/2026) nao tem canal: nada e enviado por ela.
+// Linha sem provedor vale como 'meta'. Provedor desconhecido nao tem canal:
+// nada e enviado por ela.
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { enviarTemplate, enviarTexto, type ResultadoEnvio } from "./whatsapp-cloud.ts";
 import { enviarTextoZapi, segundosDigitando } from "./zapi.ts";
@@ -22,7 +22,7 @@ export type CanalEnvio =
 // Motivo de nao ter canal, para log e resposta ao front.
 export type SemCanal = { provedor: Provedor | null; motivo: "sem_numero" | "numero_incompleto" | "sem_credencial" };
 
-// null = provedor que o CRM nao usa mais (ex.: 'gupshup').
+// null = provedor que o CRM nao conhece.
 export function provedorDaLinha(linha: any): Provedor | null {
   const p = String((linha && linha.provedor) || "meta").toLowerCase();
   if (p === "zapi" || p === "meta") return p;
