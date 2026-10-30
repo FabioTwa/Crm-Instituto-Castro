@@ -1,4 +1,4 @@
--- 46 Status da transcricao de audio + funcao de saude (alerta de transcricao).
+-- 47 Status da transcricao de audio + funcao de saude (alerta de transcricao).
 --
 -- Cada audio em crm_conversas passa a guardar (gravado pelo ic-meta-webhook,
 -- _shared/transcricao.ts):
@@ -17,18 +17,18 @@
 --
 -- SO ADITIVA: colunas novas (nulas ou com default constante, sem reescrever a
 -- tabela), um indice parcial, uma funcao e uma tabela nova. Nao altera nem apaga dado.
--- Antes: guarda copia de crm_conversas em crm_conversas_bkp_46 (RLS ligado,
+-- Antes: guarda copia de crm_conversas em crm_conversas_bkp_47 (RLS ligado,
 -- sem acesso pela API). Idempotente. ROLLBACK no fim.
 --
 -- Ordem de publicacao: rodar ESTE SQL antes de publicar o ic-meta-webhook
 -- novo (se a funcao subir antes, ela grava o audio sem status, sem perder nada).
 
 -- 1) Backup
-create table if not exists public.crm_conversas_bkp_46 as
+create table if not exists public.crm_conversas_bkp_47 as
   select * from public.crm_conversas;
-alter table public.crm_conversas_bkp_46 enable row level security;
-revoke all on public.crm_conversas_bkp_46 from public, anon, authenticated;
-comment on table public.crm_conversas_bkp_46 is 'IC: copia de crm_conversas antes do SQL 46 (29/10/2026). Pode apagar depois de validado.';
+alter table public.crm_conversas_bkp_47 enable row level security;
+revoke all on public.crm_conversas_bkp_47 from public, anon, authenticated;
+comment on table public.crm_conversas_bkp_47 is 'IC: copia de crm_conversas antes do SQL 47 (29/10/2026). Pode apagar depois de validado.';
 
 -- 2) Colunas novas
 alter table public.crm_conversas
@@ -130,4 +130,4 @@ grant select, insert, update, delete on public.ic_alertas_estado to service_role
 --   drop column if exists transcricao_erro,
 --   drop column if exists transcricao_tentativas,
 --   drop column if exists transcrita_em;
--- (depois de validado) drop table if exists public.crm_conversas_bkp_46;
+-- (depois de validado) drop table if exists public.crm_conversas_bkp_47;

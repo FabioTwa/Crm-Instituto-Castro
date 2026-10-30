@@ -138,7 +138,7 @@ Ordem recomendada: `ia_transcricao_audio` → `ia_pre_atendimento` + `ligada`
 (modo sombra; ler `ia_decisoes_log` por alguns dias) → `envio_whatsapp_cloud_api`
 → `agendamento_google`. As flags têm cache de 60 s nas funções.
 
-### Saúde da transcrição de áudio (SQL 46)
+### Saúde da transcrição de áudio (SQL 47)
 
 Cada áudio em `crm_conversas` guarda `transcricao_status` (`pendente`, `ok`,
 `falhou`, `ignorado`), `transcricao_erro` (código curto, sem dado pessoal),

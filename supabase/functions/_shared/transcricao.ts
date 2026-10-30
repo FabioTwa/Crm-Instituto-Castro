@@ -1,6 +1,6 @@
 // Transcricao de audio (Groq Whisper) com status por audio.
 //
-// Cada audio em crm_conversas guarda (SQL 46):
+// Cada audio em crm_conversas guarda (SQL 47):
 //   transcricao_status      pendente | ok | falhou | ignorado
 //   transcricao_erro        motivo CURTO, um codigo fixo daqui (nunca texto do
 //                           audio, telefone, nome ou resposta crua da Groq)

@@ -9,7 +9,7 @@
 //   compartilhado com ic-whatsapp-send para os dois lados gerarem o mesmo canonico).
 // - Transcricao de audio atras da feature flag ic_flag('ia_transcricao_audio')
 //   (cache 60 s). Flag desligada: audio entra com o placeholder, sem chamar o Groq.
-//   Cada audio guarda status/motivo/tentativas/hora (SQL 46, _shared/transcricao.ts).
+//   Cada audio guarda status/motivo/tentativas/hora (SQL 47, _shared/transcricao.ts).
 //   429 da Groq fica 'pendente' e o varredor tenta de novo (1x por minuto).
 // - Placeholders de midia legiveis: [Imagem recebida], [Vídeo recebido],
 //   [Documento recebido] nome.pdf, [Sticker recebido], [Localização recebida],
@@ -992,7 +992,7 @@ async function processarMensagem(
   // AUDIO: transcricao via Groq nos DOIS lados (lead e vendedor), como hoje.
   // Falha suave em qualquer etapa: grava o placeholder e o webhook segue.
   let mensagemFinal: string = conteudo.mensagem;
-  // Status da transcricao deste audio (SQL 46). Fica null para os outros tipos.
+  // Status da transcricao deste audio (SQL 47). Fica null para os outros tipos.
   let resTranscricao: ResultadoTranscricao | null = null;
   if (tipo === "audio") {
     // IC CRM: a transcricao fica atras da flag ia_transcricao_audio (cache de
@@ -1376,9 +1376,9 @@ async function processarMensagem(
     .insert(resTranscricao ? { ...linhaConversa, ...camposTranscricao(resTranscricao) } : linhaConversa)
     .select("id").maybeSingle();
   if (errConv && resTranscricao && ehColunaInexistente(errConv)) {
-    // Funcao publicada antes do SQL 46: grava a mensagem sem o status em vez
+    // Funcao publicada antes do SQL 47: grava a mensagem sem o status em vez
     // de perder o audio.
-    console.warn("[ic-meta-webhook] colunas de transcricao ausentes (SQL 46); audio gravado sem status");
+    console.warn("[ic-meta-webhook] colunas de transcricao ausentes (SQL 47); audio gravado sem status");
     ({ data: convNova, error: errConv } = await supabase.from("crm_conversas")
       .insert(linhaConversa).select("id").maybeSingle());
   }
@@ -1581,7 +1581,7 @@ async function retentarTranscricoesPendentes(sb: Supa): Promise<Record<string, u
       .order("criada_em", { ascending: true })
       .limit(RETENTAR_LOTE);
     if (error) {
-      // Antes do SQL 46 a coluna nao existe: nada a fazer, sem barulho.
+      // Antes do SQL 47 a coluna nao existe: nada a fazer, sem barulho.
       if (!ehColunaInexistente(error)) console.error("[varredor] audios pendentes:", error.message);
       return { pegos: 0 };
     }

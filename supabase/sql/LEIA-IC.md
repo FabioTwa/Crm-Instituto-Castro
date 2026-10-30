@@ -49,6 +49,7 @@ No Supabase, SQL Editor, um arquivo por vez:
 | `44_ic_ia_convite_consulta.sql` | A Jully convida para consulta com especialista (padrão do Instituto): desativa IC15 (forma de pagamento) e troca visita por consulta no IC24; rollback no rodapé | 42 |
 | `45_ic_ia_padrao_instituto.sql` | Exemplos da Jully no padrão do Instituto (29/10): abertura institucional, tom cordial e profissional, emoji com moderação e valores confirmados presencialmente; guarda cópia em `ia_exemplos_conversa_bkp_45` (RLS ligado) e reescreve 19 exemplos; rollback no rodapé | 44 |
 | `46_ic_ia_valores_confirmados.sql` | Valores confirmados pelo Instituto (30/10): IC17 pergunta o atendimento antes do valor e IC18 volta com a consulta com o cirurgião a R$ 500,00 (retorno em até 30 dias, parcelamento no cartão); guarda cópia em `ia_exemplos_conversa_bkp_46` (RLS ligado); rollback no rodapé | 45 |
+| `47_ic_transcricao_status.sql` | Status da transcrição por áudio (`transcricao_status`, `transcricao_erro` em código curto, `transcricao_tentativas`, `transcrita_em`), índice parcial, `ic_saude_transcricao()` só para service_role e `ic_alertas_estado` (memória da rotina de alerta); só aditivo, guarda cópia em `crm_conversas_bkp_47` (RLS ligado); rollback no rodapé | 46 |
 
 Depois do 13, inserir o primeiro usuario (criado antes no Supabase Auth, mesmo
 e-mail) e o numero de WhatsApp: o bloco comentado no fim do 13 mostra como.
