@@ -48,6 +48,7 @@ No Supabase, SQL Editor, um arquivo por vez:
 | `43_ic_ia_assessoria_roteiro.sql` | Exemplo IC02 (Assessoria) no roteiro da equipe do Instituto: valoriza a decisão, explica a Assessoria e pergunta sobre tratamento anterior e nutricionista antes de convidar; rollback no rodapé | 40 |
 | `44_ic_ia_convite_consulta.sql` | A Jully convida para consulta com especialista (padrão do Instituto): desativa IC15 (forma de pagamento) e troca visita por consulta no IC24; rollback no rodapé | 42 |
 | `45_ic_ia_padrao_instituto.sql` | Exemplos da Jully no padrão do Instituto (29/10): abertura institucional, tom cordial e profissional, emoji com moderação e valores confirmados presencialmente; guarda cópia em `ia_exemplos_conversa_bkp_45` (RLS ligado) e reescreve 19 exemplos; rollback no rodapé | 44 |
+| `46_ic_ia_valores_confirmados.sql` | Valores confirmados pelo Instituto (30/10): IC17 pergunta o atendimento antes do valor e IC18 volta com a consulta com o cirurgião a R$ 500,00 (retorno em até 30 dias, parcelamento no cartão); guarda cópia em `ia_exemplos_conversa_bkp_46` (RLS ligado); rollback no rodapé | 45 |
 
 Depois do 13, inserir o primeiro usuario (criado antes no Supabase Auth, mesmo
 e-mail) e o numero de WhatsApp: o bloco comentado no fim do 13 mostra como.

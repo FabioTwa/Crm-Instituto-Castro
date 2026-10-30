@@ -96,7 +96,7 @@ import { dentroDoHorario, partesNoFuso, TZ_PADRAO } from "../_shared/horario.ts"
 import { faseTeste } from "../_shared/ia-teste.ts";
 import { decidirRajada, rajadaDoConfig } from "../_shared/rajada.ts";
 import { decidirFollowup, followupsDoConfig, instrucaoFollowup, podeMandarFollowup, textoFollowupFixo } from "../_shared/ia-followup.ts";
-import { dataHoraLocal, numerosAviso, textoAvisoAgendamento, textoAvisoCancelamento } from "../_shared/aviso-agendamento.ts";
+import { dataHoraLocal, numerosAviso, textoAvisoAgendamento, textoAvisoCancelamento, textoAvisoCentral } from "../_shared/aviso-agendamento.ts";
 import { ETAPA_CONFIRMACAO, horasConfirmacao, horasConfirmacaoCurta, MINIMO_ANTES_MS, precisaLembrete, STATUS_COM_LEMBRETE, textoConfirmacao } from "../_shared/confirmacao-agendamento.ts";
 import { decidirEncerramento, ETAPA_ENCERRAMENTO, jaEncerrada, mensagensDaConversaAtual, minutosEncerramento } from "../_shared/ia-encerramento.ts";
 import { detectarAgendamento, detectarNegociacao, type EventoFunil } from "../_shared/funil-ia.ts";
@@ -126,6 +126,8 @@ import {
   TEXTOS_AGENDAMENTO_ANOTADO,
   TEXTOS_AGENDAMENTO_FALHOU,
   TEXTOS_CANCELAMENTO_FALHOU,
+  TEXTOS_CENTRAL_ENCAMINHADO,
+  TEXTOS_CENTRAL_FALHOU,
   TEXTOS_CONFIRMACAO_ANOTADA,
   TEXTOS_CONSENTIMENTO_NEGADO,
   TEXTOS_ENCERRAMENTO,
@@ -138,6 +140,7 @@ import {
   textoPedidoConsentimento,
   TOOL_CANCELAR_AGENDAMENTO,
   TOOL_CONFIRMAR_AGENDAMENTO,
+  TOOL_ENCAMINHAR_CENTRAL,
   TOOL_PROPOR_AGENDAMENTO,
   type ExemploConversa,
 } from "../_shared/ia-prompt.ts";
@@ -1017,6 +1020,16 @@ async function rodarNaVez(
         marcadores.confirmado_id = conf.agendamento_id;
         if (!textoResposta) textoResposta = sortear(TEXTOS_CONFIRMACAO_ANOTADA);
       }
+    } else if (t.name === TOOL_ENCAMINHAR_CENTRAL) {
+      // Pedido para a central de agendamento analisar (cirurgia por convenio
+      // nao atendido ou duvida sobre exames). Fica no CRM e vai pelo WhatsApp.
+      const enviado = await encaminharCentral(p, cfg, t.input || {});
+      if (enviado) {
+        if (!textoResposta) textoResposta = sortear(TEXTOS_CENTRAL_ENCAMINHADO);
+      } else {
+        // A IA ja tinha escrito "encaminhei": nao afirma o que nao aconteceu.
+        textoResposta = sortear(TEXTOS_CENTRAL_FALHOU);
+      }
     } else {
       await p.log("tools", "ferramenta_desconhecida", { motivo: t.name });
     }
@@ -1170,6 +1183,40 @@ async function chegouMensagemNova(sb: SupabaseClient, clienteId: string, gatilho
     .limit(1);
   if (error || !data || !data.length) return false;
   return String((data[0] as any).id) !== gatilhoId;
+}
+
+// Encaminha o pedido para a central de agendamento: registro no CRM (ia_handoffs)
+// e WhatsApp para os numeros do aviso de agendamento. true = chegou a alguem
+// (ou foi simulado com o envio desligado); false = nada saiu.
+async function encaminharCentral(p: Pipeline, cfg: Record<string, string>, input: any): Promise<boolean> {
+  const assunto = input.assunto === "exames" ? "exames" : "cirurgia_convenio_nao_atendido";
+  const convenio = String(input.convenio || "").trim().slice(0, 120);
+  const procedimento = String(input.procedimento || "").trim().slice(0, 120);
+  const resumo = String(input.resumo || "").trim().slice(0, 300);
+  await p.handoff("pedido_humano", `Central de agendamento (${assunto}): ${[convenio, procedimento, resumo].filter(Boolean).join(" | ")}`.slice(0, 500));
+  const numeros = numerosAviso(cfg.aviso_agendamento_whatsapp);
+  if (!numeros.length) {
+    await p.log("tools", "central_sem_numero", { detalhe: { assunto } });
+    return false;
+  }
+  const appUrl = (Deno.env.get("IC_APP_URL") || "").replace(/\/+$/, "");
+  const texto = textoAvisoCentral({
+    nome: String(p.card?.nome || "").trim(), telefone: p.para, assunto, convenio, procedimento, resumo, linkCrm: appUrl || null,
+  });
+  if (!p.envioLigado || !p.canal) {
+    await p.log("tools", "central_simulado", { detalhe: { para: numeros.length, assunto, texto } });
+    return true;
+  }
+  const canal = p.canal;
+  let algum = false;
+  await p.comVez(async () => {
+    for (const numero of numeros) {
+      const env = await enviarTextoCanal(canal, numero, texto, LOG);
+      if (env.ok) algum = true;
+      await p.log("tools", env.ok ? "central_encaminhado" : "central_falhou", { detalhe: { assunto, status: env.ok ? null : env.status } });
+    }
+  });
+  return algum;
 }
 
 // Avisa quem confirma os agendamentos (crm_ia_config.aviso_agendamento_whatsapp)

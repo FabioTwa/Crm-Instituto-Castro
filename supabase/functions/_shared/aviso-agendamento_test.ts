@@ -1,5 +1,5 @@
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
-import { dataHoraLocal, numerosAviso, telefoneLegivel, textoAvisoAgendamento, textoAvisoCancelamento } from "./aviso-agendamento.ts";
+import { dataHoraLocal, numerosAviso, telefoneLegivel, textoAvisoAgendamento, textoAvisoCancelamento, textoAvisoCentral } from "./aviso-agendamento.ts";
 
 Deno.test("numerosAviso: aceita lista, normaliza e tira repetidos e invalidos", () => {
   assertEquals(numerosAviso(""), []);
@@ -43,4 +43,18 @@ Deno.test("aviso de cancelamento tem nome, telefone, data e motivo", () => {
   assertStringIncludes(t, "(11) 99999-8888");
   assertStringIncludes(t, "27/10 (terça-feira) às 10:30");
   assertStringIncludes(t, "mudou de cidade");
+});
+
+Deno.test("aviso de agendamento por convenio pede a verificacao de elegibilidade", () => {
+  const base = { nome: "Ana", telefone: "5511999998888", servico: "Cirurgia bariátrica", inicioIso: "2026-11-03T13:00:00.000Z" };
+  assertStringIncludes(textoAvisoAgendamento({ ...base, pagamento: "Convênio Amil 400" }), "Verificar a elegibilidade do convênio");
+  assertEquals(textoAvisoAgendamento({ ...base, pagamento: "Particular" }).includes("elegibilidade"), false);
+});
+
+Deno.test("pedido para a central de agendamento", () => {
+  const t = textoAvisoCentral({ nome: "Ana", telefone: "5511999998888", assunto: "cirurgia_convenio_nao_atendido", convenio: "Hapvida Nosso Plano", procedimento: "vesícula", resumo: "" });
+  assertStringIncludes(t, "*Pedido para a central de agendamento*");
+  assertStringIncludes(t, "*Convênio/plano:* Hapvida Nosso Plano");
+  assertStringIncludes(t, "*Cirurgia:* vesícula");
+  assertStringIncludes(t, "(11) 99999-8888");
 });
