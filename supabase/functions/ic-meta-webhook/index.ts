@@ -9,6 +9,8 @@
 //   compartilhado com ic-whatsapp-send para os dois lados gerarem o mesmo canonico).
 // - Transcricao de audio atras da feature flag ic_flag('ia_transcricao_audio')
 //   (cache 60 s). Flag desligada: audio entra com o placeholder, sem chamar o Groq.
+//   Cada audio guarda status/motivo/tentativas/hora (SQL 47, _shared/transcricao.ts).
+//   429 da Groq fica 'pendente' e o varredor tenta de novo (1x por minuto).
 // - Placeholders de midia legiveis: [Imagem recebida], [Vídeo recebido],
 //   [Documento recebido] nome.pdf, [Sticker recebido], [Localização recebida],
 //   [Contato recebido] Nome. Legenda e nome de arquivo preservados.
@@ -99,6 +101,14 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 type Supa = SupabaseClient<any, "public", any>;
 import { canonicoTelefone, soDigitos, telefoneBrPlausivel, variacoesTelefone } from "../_shared/telefone.ts";
 import { icFlag } from "../_shared/flags.ts";
+import {
+  camposTranscricao,
+  MAX_TENTATIVAS,
+  MOTIVO,
+  resultadoSemChamada,
+  type ResultadoTranscricao,
+  transcreverComStatus,
+} from "../_shared/transcricao.ts";
 import { baixarMidiaZapi, envelopeZapi, tokenWebhookZapiValido } from "../_shared/zapi.ts";
 
 type Provedor = "meta" | "zapi";
@@ -154,6 +164,18 @@ function ehColisaoUnicidade(err: any): boolean {
   const code = String(err?.code || "");
   const msg = String(err?.message || "");
   return code === "23505" || msg.includes("duplicate key value");
+}
+
+// Coluna que o banco ainda nao tem (42703 no Postgres, PGRST204 no PostgREST).
+function ehColunaInexistente(err: any): boolean {
+  const code = String(err?.code || "");
+  return code === "42703" || code === "PGRST204";
+}
+
+// Texto gravado quando o audio nao foi transcrito (a tela mostra "Audio (sem
+// transcricao)", sem aviso de erro).
+function placeholderAudio(fromMe: boolean): string {
+  return fromMe ? "[audio enviado]" : "[audio recebido - transcricao indisponivel]";
 }
 
 async function registrarFalhaEntrada(
@@ -507,46 +529,6 @@ async function baixarAudio(
     });
   }
   return audio && audio.id ? await baixarMidiaMeta(String(audio.id)) : null;
-}
-
-// Transcricao de audio via Groq Whisper (mesmo padrao do webhook Z-API).
-// Diferenca: aqui recebe os BYTES ja baixados da Meta, porque a Meta nao entrega
-// URL publica. Chave via secret GROQ_API_KEY (nunca hardcoded). Se o secret faltar
-// ou algo falhar, retorna null e o chamador grava um placeholder.
-async function transcreverAudioGroq(bytes: ArrayBuffer, mimeType: string): Promise<string | null> {
-  const key = Deno.env.get("GROQ_API_KEY") || "";
-  if (!key) {
-    console.warn("[ic-meta-webhook] GROQ_API_KEY ausente; audio gravado sem transcricao");
-    return null;
-  }
-  if (!bytes || bytes.byteLength === 0) return null;
-  try {
-    // WhatsApp entrega ogg/opus; o Whisper do Groq aceita direto.
-    const tipo = mimeType && mimeType.includes("/") ? mimeType.split(";")[0] : "audio/ogg";
-    const ext = tipo.includes("mp4") ? "mp4" : tipo.includes("mpeg") ? "mp3" : "ogg";
-    const blob = new Blob([bytes], { type: tipo });
-    const fd = new FormData();
-    fd.append("file", blob, `audio.${ext}`);
-    fd.append("model", "whisper-large-v3");
-    fd.append("language", "pt");
-    fd.append("response_format", "json");
-    const gr = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}` },
-      body: fd,
-    });
-    if (!gr.ok) {
-      const t = await gr.text().catch(() => "");
-      console.error("[transcrever] Groq falhou:", gr.status, t.slice(0, 300));
-      return null;
-    }
-    const jr: any = await gr.json();
-    const txt = jr && (jr.text || jr.transcription) ? String(jr.text || jr.transcription).trim() : "";
-    return txt || null;
-  } catch (e) {
-    console.error("[transcrever] excecao:", e);
-    return null;
-  }
 }
 
 // ===================================================================
@@ -1010,21 +992,25 @@ async function processarMensagem(
   // AUDIO: transcricao via Groq nos DOIS lados (lead e vendedor), como hoje.
   // Falha suave em qualquer etapa: grava o placeholder e o webhook segue.
   let mensagemFinal: string = conteudo.mensagem;
+  // Status da transcricao deste audio (SQL 47). Fica null para os outros tipos.
+  let resTranscricao: ResultadoTranscricao | null = null;
   if (tipo === "audio") {
     // IC CRM: a transcricao fica atras da flag ia_transcricao_audio (cache de
     // 60 s em _shared/flags.ts). Desligada: nao baixa nem transcreve, grava o
-    // placeholder atual. Ligada: baixa e transcreve.
+    // placeholder atual e marca 'ignorado'. Ligada: baixa e transcreve.
     const transcreverLigado = await icFlag(supabase, "ia_transcricao_audio");
     if (!transcreverLigado) {
       console.log("[ic-meta-webhook] transcricao desligada por flag; audio gravado com placeholder");
-    }
-    const arq = transcreverLigado ? await baixarAudio(provedor, m.audio || {}) : null;
-    const transcricao = arq ? await transcreverAudioGroq(arq.bytes, arq.mimeType) : null;
-    if (transcricao) {
-      mensagemFinal = transcricao;
+      resTranscricao = resultadoSemChamada("ignorado", MOTIVO.flagDesligada);
+    } else if (!m.audio) {
+      resTranscricao = resultadoSemChamada("falhou", MOTIVO.semMidia);
     } else {
-      mensagemFinal = fromMe ? "[audio enviado]" : "[audio recebido - transcricao indisponivel]";
+      const arq = await baixarAudio(provedor, m.audio);
+      resTranscricao = arq
+        ? await transcreverComStatus({ bytes: arq.bytes, mimeType: arq.mimeType })
+        : resultadoSemChamada("falhou", MOTIVO.downloadFalhou);
     }
+    mensagemFinal = resTranscricao.texto || placeholderAudio(fromMe);
   }
 
   // 2) Resolver o LEAD. Na Meta o telefone e sempre real, entao o fluxo normal e
@@ -1374,7 +1360,7 @@ async function processarMensagem(
   // IC CRM: no ECO (fromMe) a linha nasce com autor 'vendedor'. E essa linha que
   // ic-ia-pre-atendimento le como "humano assumiu" (etapa humano_assumiu): a IA
   // fica calada por 24 h depois que alguem da equipe respondeu pelo celular.
-  const { data: convNova, error: errConv } = await supabase.from("crm_conversas").insert({
+  const linhaConversa: Record<string, unknown> = {
     cliente_crm_id: clienteId,
     vendedor_id: vendedor.vendedor_id,
     numero_lead: numeroLeadConversa,
@@ -1385,7 +1371,17 @@ async function processarMensagem(
     zapi_message_id: messageId,
     // Diagnostico: guarda a mensagem crua da Meta e o contexto minimo. Nao vai pra tela.
     payload_raw: { fonte, eco: ehEco, metadata: value && value.metadata, message: m },
-  }).select("id").maybeSingle();
+  };
+  let { data: convNova, error: errConv } = await supabase.from("crm_conversas")
+    .insert(resTranscricao ? { ...linhaConversa, ...camposTranscricao(resTranscricao) } : linhaConversa)
+    .select("id").maybeSingle();
+  if (errConv && resTranscricao && ehColunaInexistente(errConv)) {
+    // Funcao publicada antes do SQL 47: grava a mensagem sem o status em vez
+    // de perder o audio.
+    console.warn("[ic-meta-webhook] colunas de transcricao ausentes (SQL 47); audio gravado sem status");
+    ({ data: convNova, error: errConv } = await supabase.from("crm_conversas")
+      .insert(linhaConversa).select("id").maybeSingle());
+  }
   let conversaGravada = false;
   if (errConv && ehColisaoUnicidade(errConv)) {
     // Perdeu a corrida para outra entrega da mesma mensagem, ou e reenvio do
@@ -1566,6 +1562,62 @@ async function varrerPendentes(URL_SB: string, SR: string): Promise<Record<strin
   return { ok: true, pegas: pendentes.length, processadas: ok, falharam: falhou, teto: VARREDOR_TETO };
 }
 
+// Audio que ficou 'pendente' (limite da Groq) e tentado de novo aqui, uma
+// chamada por audio por minuto, ate MAX_TENTATIVAS. O arquivo e baixado de
+// novo pelo que ficou em payload_raw (link da Z-API ou id da Meta). So troca
+// o texto se a linha ainda tem o placeholder; nunca dispara a IA de novo.
+const RETENTAR_LOTE = 3;
+const RETENTAR_JANELA_H = 6;
+
+async function retentarTranscricoesPendentes(sb: Supa): Promise<Record<string, unknown>> {
+  try {
+    const desde = new Date(Date.now() - RETENTAR_JANELA_H * 3600 * 1000).toISOString();
+    const { data, error } = await sb
+      .from("crm_conversas")
+      .select("id, direcao, mensagem, payload_raw, transcricao_tentativas")
+      .eq("tipo", "audio")
+      .eq("transcricao_status", "pendente")
+      .gte("criada_em", desde)
+      .order("criada_em", { ascending: true })
+      .limit(RETENTAR_LOTE);
+    if (error) {
+      // Antes do SQL 47 a coluna nao existe: nada a fazer, sem barulho.
+      if (!ehColunaInexistente(error)) console.error("[varredor] audios pendentes:", error.message);
+      return { pegos: 0 };
+    }
+    let ok = 0, pendente = 0, falhou = 0;
+    for (const linha of (data || []) as any[]) {
+      const raw = linha.payload_raw || {};
+      const prov: Provedor = raw.fonte === "zapi" ? "zapi" : "meta";
+      const audio = raw.message && raw.message.audio;
+      const anteriores = Number(linha.transcricao_tentativas) || 0;
+      let res: ResultadoTranscricao;
+      if (anteriores >= MAX_TENTATIVAS) {
+        res = resultadoSemChamada("falhou", MOTIVO.limiteEsgotado, anteriores);
+      } else if (!audio) {
+        res = resultadoSemChamada("falhou", MOTIVO.semMidia, anteriores);
+      } else {
+        const arq = await baixarAudio(prov, audio);
+        res = arq
+          ? await transcreverComStatus({ bytes: arq.bytes, mimeType: arq.mimeType, tentativasAnteriores: anteriores, maxNestaRodada: 1 })
+          : resultadoSemChamada("falhou", MOTIVO.downloadFalhou, anteriores);
+      }
+      const upd: Record<string, unknown> = camposTranscricao(res);
+      if (res.texto && /^\[audio/i.test(String(linha.mensagem || "").trim())) upd.mensagem = res.texto;
+      const { error: errUpd } = await sb.from("crm_conversas").update(upd)
+        .eq("id", linha.id).eq("transcricao_status", "pendente");
+      if (errUpd) console.error("[varredor] audio", linha.id, "nao atualizado:", errUpd.message);
+      if (res.status === "ok") ok++;
+      else if (res.status === "pendente") pendente++;
+      else falhou++;
+    }
+    return { pegos: (data || []).length, ok, pendente, falhou };
+  } catch (e) {
+    console.error("[varredor] audios pendentes excecao:", e instanceof Error ? e.message : e);
+    return { pegos: 0 };
+  }
+}
+
 // Marca a linha do envelope cru depois que o processamento termina. Roda
 // DEPOIS da resposta, entao nao atrasa nada. Se esta marcacao falhar, a linha
 // fica 'pendente' - visivel como parada, que e melhor que mentir 'processada'.
@@ -1623,9 +1675,15 @@ Deno.serve(async (req: Request) => {
       try { talvez = await req.clone().json(); } catch (_e) { talvez = null; }
       if (talvez && talvez.varredor === true) {
         if (!URL_SB || !SR) return json({ ok: false, error: "env missing" }, 500);
-        // O cron roda a cada 30 s; o encerramento por inatividade basta 1x por minuto.
-        if (new Date().getUTCSeconds() < 30) dispararEncerramentoInativas(createClient(URL_SB, SR, { auth: { persistSession: false } }));
-        return json(await varrerPendentes(URL_SB, SR));
+        // O cron roda a cada 30 s; o encerramento por inatividade e a nova
+        // tentativa de audio pendente (429 da Groq) bastam 1x por minuto.
+        const sbVarredor = createClient(URL_SB, SR, { auth: { persistSession: false } });
+        let audios: Record<string, unknown> | null = null;
+        if (new Date().getUTCSeconds() < 30) {
+          dispararEncerramentoInativas(sbVarredor);
+          audios = await retentarTranscricoesPendentes(sbVarredor);
+        }
+        return json({ ...(await varrerPendentes(URL_SB, SR)), audios });
       }
     }
   }

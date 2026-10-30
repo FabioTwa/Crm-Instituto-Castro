@@ -138,6 +138,19 @@ Ordem recomendada: `ia_transcricao_audio` → `ia_pre_atendimento` + `ligada`
 (modo sombra; ler `ia_decisoes_log` por alguns dias) → `envio_whatsapp_cloud_api`
 → `agendamento_google`. As flags têm cache de 60 s nas funções.
 
+### Saúde da transcrição de áudio (SQL 47)
+
+Cada áudio em `crm_conversas` guarda `transcricao_status` (`pendente`, `ok`,
+`falhou`, `ignorado`), `transcricao_erro` (código curto, sem dado pessoal),
+`transcricao_tentativas` e `transcrita_em` (`_shared/transcricao.ts`). 429 da
+Groq não é falha final: o webhook tenta 3 vezes na hora e, se continuar, o áudio
+fica `pendente` e o varredor tenta 1 vez por minuto até 6 tentativas no total.
+Nada disso aparece na tela.
+
+```sql
+select public.ic_saude_transcricao();  -- só service_role; o navegador não executa
+```
+
 Outras chaves de `crm_ia_config`: `horario_inicio` ('08:00'), `horario_fim`
 ('19:00'), `max_respostas_por_conversa` ('80' desde o SQL 37), `modelo`, `max_tokens`,
 e as do SQL 37 (Julie): `persona_nome`, `persona_ficha`, `rajada_silencio_segundos`,
