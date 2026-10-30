@@ -13,7 +13,8 @@ Deno.test("urgencia vence duvida clinica quando as duas aparecem", () => {
 Deno.test("duvida clinica: dose, mg e nome de caneta", () => {
   assertEquals(detectarHandoff("Qual a dose certa?")?.motivo, "duvida_clinica");
   assertEquals(detectarHandoff("Posso tomar 2,5 mg?")?.motivo, "duvida_clinica");
-  assertEquals(detectarHandoff("Vocês trabalham com Mounjaro?")?.motivo, "duvida_clinica");
+  assertEquals(detectarHandoff("Vocês trabalham com Ozempic?")?.motivo, "duvida_clinica");
+  assertEquals(detectarHandoff("Qual dose de tirzepatida devo usar?")?.motivo, "duvida_clinica");
   assertEquals(detectarHandoff("Posso tomar junto com o anticoncepcional?")?.motivo, "duvida_clinica");
 });
 
@@ -45,4 +46,9 @@ Deno.test("handoffCalaIA: so a recusa do atendimento automatizado cala a IA", ()
   for (const motivo of ["manual", "pedido_humano", "duvida_clinica", "urgencia", "reclamacao", "erro_ia", "agendamento_confirmado"]) {
     assertEquals(handoffCalaIA({ motivo }), false);
   }
+});
+
+Deno.test("Mounjaro/tirzepatida sem dose passa para a IA (resposta confirmada pelo Instituto)", () => {
+  assertEquals(detectarHandoff("Vocês trabalham com Mounjaro?"), null);
+  assertEquals(detectarHandoff("como funciona o tratamento com tirzepatida"), null);
 });

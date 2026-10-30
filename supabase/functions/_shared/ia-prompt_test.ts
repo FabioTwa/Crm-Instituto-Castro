@@ -88,8 +88,8 @@ Deno.test("atendimento 100% autonomo: nenhum texto fixo nem o prompt promete equ
   for (const t of fixos) assertEquals(/equipe|atendente|te retorna|vai retornar/i.test(t), false, t);
   const sp = montarSystemPrompt({ primeiroNome: null, funil: null, etapa: null, exemplos: [], agoraLocal: "x" });
   assertEquals(sp.includes("encaminhar_humano"), false);
-  assertStringIncludes(sp, "O atendimento é 100% seu");
-  assertEquals(m.FERRAMENTAS.map((f) => f.name).sort(), ["cancelar_agendamento", "confirmar_agendamento", "propor_agendamento"]);
+  assertStringIncludes(sp, "O atendimento é seu: ninguém vai assumir a conversa");
+  assertEquals(m.FERRAMENTAS.map((f) => f.name).sort(), ["cancelar_agendamento", "confirmar_agendamento", "encaminhar_central", "propor_agendamento"]);
 });
 
 Deno.test("cancelamento: acolhe, pergunta o motivo e tenta manter antes de cancelar", () => {
@@ -164,4 +164,15 @@ Deno.test("prompt: com horario ja reservado, manda nao reagendar o mesmo horario
   const com = montarSystemPrompt({ ...base, agendamentoAtual: "29/10 (quinta-feira) às 18:00" });
   assertStringIncludes(com, "A pessoa JÁ TEM horário reservado: 29/10 (quinta-feira) às 18:00.");
   assertStringIncludes(com, "NÃO chame propor_agendamento de novo");
+});
+
+Deno.test("prompt: so os valores confirmados pelo Instituto, parceiro e Mounjaro/tirzepatida", () => {
+  const sp = montarSystemPrompt({ primeiroNome: null, funil: null, etapa: null, exemplos: [], agoraLocal: "x" });
+  assertStringIncludes(sp, "Consulta com o cirurgião: R$ 500,00, com um retorno incluído em até 30 dias e possibilidade de parcelamento no cartão de crédito.");
+  assertStringIncludes(sp, "Avaliação inicial da Assessoria em Emagrecimento: R$ 500,00, com possibilidade de parcelamento no cartão de crédito.");
+  assertStringIncludes(sp, "NUNCA invente, estime ou arredonde um valor");
+  assertStringIncludes(sp, "o parceiro do Instituto é o Hospital San Gennaro");
+  assertStringIncludes(sp, "Para avaliar a indicação de Mounjaro/tirzepatida e definir a dose adequada, é necessário passar por uma consulta.");
+  assertStringIncludes(sp, "nossa central de agendamento realizará essa verificação");
+  for (const t of sp.match(/R\$ ?\d[\d.]*(?:,\d{2})?/g) || []) assertEquals(t, "R$ 500,00", t);
 });

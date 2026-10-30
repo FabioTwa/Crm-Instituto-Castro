@@ -57,6 +57,8 @@ export function textoAvisoAgendamento(a: {
   if (a.formato) linhas.push(`*Formato:* ${a.formato}`);
   if (a.pagamento) linhas.push(`*Pagamento:* ${a.pagamento}`);
   if (a.observacao) linhas.push(`*Obs.:* ${a.observacao}`);
+  // A central verifica a elegibilidade do convenio depois do agendamento (IC, 30/10/2026).
+  if (/conv[eê]nio/i.test(String(a.pagamento || ""))) linhas.push("", "Verificar a elegibilidade do convênio e confirmar a cobertura com o lead.");
   linhas.push("", "Confirme com o lead pelo CRM.");
   if (a.linkCrm) linhas.push(a.linkCrm);
   return linhas.join("\n");
@@ -82,6 +84,33 @@ export function textoAvisoCancelamento(a: {
   ];
   if (a.motivo) linhas.push(`*Motivo:* ${a.motivo}`);
   linhas.push("", "O horário já foi liberado na agenda do CRM.");
+  if (a.linkCrm) linhas.push(a.linkCrm);
+  return linhas.join("\n");
+}
+
+// Pedido que a IA encaminha para a central de agendamento analisar (cirurgia por
+// convenio nao atendido ou duvida sobre exames; confirmado pelo IC em 30/10/2026).
+export function textoAvisoCentral(a: {
+  nome: string;
+  telefone: string;
+  assunto: string;
+  convenio?: string | null;
+  procedimento?: string | null;
+  resumo?: string | null;
+  linkCrm?: string | null;
+}): string {
+  const titulo = a.assunto === "exames" ? "Dúvida sobre exames" : "Cirurgia por convênio não atendido na clínica";
+  const linhas = [
+    "📨 *Pedido para a central de agendamento*",
+    "",
+    `*Assunto:* ${titulo}`,
+    `*Nome:* ${a.nome || "-"}`,
+    `*WhatsApp:* ${telefoneLegivel(a.telefone)}`,
+  ];
+  if (a.convenio) linhas.push(`*Convênio/plano:* ${a.convenio}`);
+  if (a.procedimento) linhas.push(`*${a.assunto === "exames" ? "Exame" : "Cirurgia"}:* ${a.procedimento}`);
+  if (a.resumo) linhas.push(`*Pedido:* ${a.resumo}`);
+  linhas.push("", "A IA disse que a central vai analisar, sem garantir cobertura. Retorne para o lead pelo CRM.");
   if (a.linkCrm) linhas.push(a.linkCrm);
   return linhas.join("\n");
 }
