@@ -43,8 +43,10 @@ function ocorrenciaNaoNegada(texto: string, re: RegExp): string | null {
 const RE_URGENCIA =
   /\b(dor forte|dor muito forte|sangramento|sangrando|vomitando sangue|vomito com sangue|desmai\w*|febre alta|emergencia|urgente|urgencia|passando mal|falta de ar|pronto socorro|pronto-socorro)\b/;
 
+// Mounjaro/tirzepatida ficam de fora: a IA responde com o texto confirmado pelo
+// Instituto (30/10/2026). Pergunta de dose continua caindo aqui por "dose".
 const RE_DUVIDA_CLINICA =
-  /\b(posso tomar|dose|dosagem|\d+\s*mg|mg|remedio|remedios|medicamento|medicamentos|medicacao|ozempic|mounjaro|wegovy|saxenda|tirzepatida|semaglutida|liraglutida|efeito colateral|efeitos colaterais|interage|interacao|diagnostico|exame deu|resultado do exame|resultado dos exames|laudo|e grave|eh grave|sintoma|sintomas)\b/;
+  /\b(posso tomar|dose|dosagem|\d+\s*mg|mg|remedio|remedios|medicamento|medicamentos|medicacao|ozempic|wegovy|saxenda|semaglutida|liraglutida|efeito colateral|efeitos colaterais|interage|interacao|diagnostico|exame deu|resultado do exame|resultado dos exames|laudo|e grave|eh grave|sintoma|sintomas)\b/;
 
 const RE_RECLAMACAO =
   /\b(reclamar|reclamacao|absurdo|absurda|pessimo|pessima|horrivel|procon|processar|processo judicial|advogad[oa]|insatisfeit[oa]|descaso|vergonha)\b/;
