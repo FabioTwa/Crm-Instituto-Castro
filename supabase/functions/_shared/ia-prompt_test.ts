@@ -61,7 +61,7 @@ Deno.test("partesDaResposta: um paragrafo por mensagem, lista junto, no maximo 4
   assertEquals(partesDaResposta("Que bom!\n\nQual dia fica melhor?"), ["Que bom!", "Qual dia fica melhor?"]);
   assertEquals(partesDaResposta("Funciona assim:\n\n• A\n• B\n\nQuer agendar?"), ["Funciona assim:\n\n• A\n• B", "Quer agendar?"]);
   assertEquals(partesDaResposta("a\n\nb\n\nc\n\nd"), ["a", "b", "c", "d"]);
-  assertEquals(partesDaResposta("a\n\nb\n\nc\n\nd\n\ne"), ["a", "b", "c", "d\n\ne"]);
+  assertEquals(partesDaResposta("a\n\nb\n\nc\n\nd\n\ne"), ["a\n\nb", "c", "d", "e"]);
   assertEquals(partesDaResposta("  \n\n "), []);
 });
 
@@ -175,4 +175,35 @@ Deno.test("prompt: so os valores confirmados pelo Instituto, parceiro e Mounjaro
   assertStringIncludes(sp, "Para avaliar a indicação de Mounjaro/tirzepatida e definir a dose adequada, é necessário passar por uma consulta.");
   assertStringIncludes(sp, "nossa central de agendamento realizará essa verificação");
   for (const t of sp.match(/R\$ ?\d[\d.]*(?:,\d{2})?/g) || []) assertEquals(t, "R$ 500,00", t);
+});
+
+Deno.test("partesDaResposta: resposta com mais de 4 blocos nunca vira um balao comprido", () => {
+  const b = (n: number) => "x".repeat(n);
+  // Cinco blocos de 170: nenhum par cabe junto, entao saem 5 baloes curtos.
+  const partes = partesDaResposta([b(170), b(170), b(170), b(170), b(170)].join("\n\n"));
+  assertEquals(partes.length, 5);
+  for (const p of partes) assert(p.length <= 180, String(p.length));
+  // Endereco curto e pergunta curta no fim podem dividir um balao.
+  const curtas = partesDaResposta([b(170), b(170), b(170), b(60), b(80)].join("\n\n"));
+  assertEquals(curtas.length, 4);
+  for (const p of curtas) assert(p.length <= 220, String(p.length));
+});
+
+Deno.test("inicioDaPausa: so quando a pessoa volta depois de horas", async () => {
+  const { inicioDaPausa } = await import("./ia-prompt.ts");
+  const m = (autor: string, criada_em: string) => ({ autor, criada_em });
+  assertEquals(inicioDaPausa([m("ia", "2026-10-30T12:08:00Z"), m("lead", "2026-11-03T11:16:00Z")]), "2026-10-30T12:08:00Z");
+  assertEquals(inicioDaPausa([m("ia", "2026-11-03T11:00:00Z"), m("lead", "2026-11-03T11:16:00Z")]), null);
+  assertEquals(inicioDaPausa([m("lead", "2026-11-03T11:16:00Z")]), null);
+  assertEquals(inicioDaPausa([m("lead", "2026-11-03T11:16:00Z"), m("ia", "2026-11-03T11:17:00Z")]), null);
+});
+
+Deno.test("prompt: retomada natural e coerencia com o que ja disse", () => {
+  const base = { primeiroNome: null, funil: null, etapa: null, exemplos: [], agoraLocal: "x" };
+  const sem = montarSystemPrompt(base);
+  assertStringIncludes(sem, "Nunca abra a retomada pedindo desculpas.");
+  assertStringIncludes(sem, "corrija UMA única vez, só quando a pessoa voltar depois de uma pausa");
+  assert(!sem.includes("AGORA a pessoa voltou"));
+  const com = montarSystemPrompt({ ...base, retomadaDesde: "30/10 (quinta-feira) às 09:08" });
+  assertStringIncludes(com, "a mensagem anterior da conversa foi em 30/10 (quinta-feira) às 09:08");
 });

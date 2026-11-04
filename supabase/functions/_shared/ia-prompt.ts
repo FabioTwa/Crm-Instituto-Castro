@@ -165,6 +165,9 @@ export function paraWhatsApp(texto: string): string {
 // (padrao do Instituto, 29/10/2026: blocos curtos). No maximo `max` mensagens
 // (o resto vai junto na ultima).
 export const MAX_CARACTERES_BLOCO = 180;
+// Dois blocos curtos podem dividir um balao quando a resposta passa de 4
+// mensagens, sem passar de umas 5 linhas no celular.
+export const MAX_CARACTERES_JUNTOS = 220;
 
 // Fim de frase: ".", "!" ou "?" seguido de espaco e letra maiuscula. Abreviacao
 // ("Av.", "Dr.", "Dra.") nao conta como fim de frase.
@@ -196,8 +199,40 @@ export function partesDaResposta(texto: string, max = 4): string[] {
     if (partes.length && /^•/.test(b)) partes[partes.length - 1] += "\n\n" + b;
     else partes.push(...quebrarEmFrases(b));
   }
-  if (partes.length <= max) return partes;
-  return [...partes.slice(0, max - 1), partes.slice(max - 1).join("\n\n")];
+  // Passou do limite de mensagens: junta os vizinhos mais curtos, desde que o
+  // balao continue curto (MAX_CARACTERES_JUNTOS). Se nao der, manda mais
+  // baloes (ate max + 2) em vez de um bloco comprido; so o excesso alem disso
+  // vai junto no ultimo.
+  while (partes.length > max) {
+    let melhor = -1;
+    let menor = Infinity;
+    for (let i = 0; i < partes.length - 1; i++) {
+      const tam = partes[i].length + partes[i + 1].length;
+      if (tam < menor) { menor = tam; melhor = i; }
+    }
+    if (melhor < 0 || menor + 2 > MAX_CARACTERES_JUNTOS) break;
+    partes.splice(melhor, 2, partes[melhor] + "\n\n" + partes[melhor + 1]);
+  }
+  const teto = max + 2;
+  if (partes.length <= teto) return partes;
+  return [...partes.slice(0, teto - 1), partes.slice(teto - 1).join("\n\n")];
+}
+
+// A pessoa voltou a falar depois de uma pausa longa? Devolve o horario (ISO) da
+// mensagem anterior as falas atuais da pessoa quando o intervalo passa de
+// minHoras, ou null. Usado para a IA retomar com um cumprimento natural.
+export const HORAS_PAUSA_RETOMADA = 4;
+export function inicioDaPausa(
+  mensagens: Array<{ autor?: string | null; criada_em?: string | null }>,
+  minHoras: number = HORAS_PAUSA_RETOMADA,
+): string | null {
+  let i = mensagens.length - 1;
+  while (i >= 0 && String(mensagens[i].autor || "").toLowerCase() === "lead") i--;
+  if (i < 0 || i === mensagens.length - 1) return null;
+  const antes = Date.parse(String(mensagens[i].criada_em || ""));
+  const depois = Date.parse(String(mensagens[i + 1].criada_em || ""));
+  if (!Number.isFinite(antes) || !Number.isFinite(depois)) return null;
+  return depois - antes >= minHoras * 3600_000 ? String(mensagens[i].criada_em) : null;
 }
 
 export function montarSystemPrompt(args: {
@@ -210,6 +245,8 @@ export function montarSystemPrompt(args: {
   persona?: { nome?: string | null; ficha?: string | null };
   // Horario ja reservado para a pessoa (ex.: "29/10 (quinta-feira) às 18:00"), ou null.
   agendamentoAtual?: string | null;
+  // A pessoa voltou depois de uma pausa: quando foi a mensagem anterior (ex.: "30/10 (quinta-feira) às 09:08"), ou null.
+  retomadaDesde?: string | null;
 }): string {
   const nome = (args.primeiroNome || "").trim();
   const persona = String(args.persona?.nome || "").trim() || PERSONA_PADRAO.nome;
@@ -328,7 +365,7 @@ Você é sempre a mesma ${persona}, mas muda o jeito de conversar conforme o que
 - Só peça: primeiro nome (se não souber), dia e horário de preferência, formato (presencial ou online), se é convênio (qual e plano) ou particular e, na hora de reservar, o nome completo. Documentos e e-mail para o cadastro são pedidos na recepção, no dia. NÃO peça CPF, data de nascimento, endereço, e-mail, peso, altura, exames, histórico de saúde, nome de remédios nem fotos. Se a pessoa enviar algo assim espontaneamente, não comente o conteúdo e siga para o agendamento.
 
 # Jeito de escrever (siga à risca)
-- Escreva como uma pessoa digita no celular. Quando a resposta tiver duas ideias (uma reação e uma pergunta, ou uma informação e uma pergunta), separe em parágrafos com uma linha em branco: cada parágrafo sai como uma mensagem separada no WhatsApp, com "digitando" entre elas. Cada parágrafo é um bloco curto: 1 ou 2 frases, umas 2 a 3 linhas no celular (no máximo 4). Resposta longa vira mais blocos, nunca um bloco grande.
+- Escreva como uma pessoa digita no celular. Quando a resposta tiver duas ideias (uma reação e uma pergunta, ou uma informação e uma pergunta), separe em parágrafos com uma linha em branco: cada parágrafo sai como uma mensagem separada no WhatsApp, com "digitando" entre elas. Cada parágrafo é um bloco curto: 1 ou 2 frases, umas 2 a 3 linhas no celular (no máximo 4). Resposta longa vira mais blocos, nunca um bloco grande. Assuntos diferentes ficam em parágrafos diferentes (por exemplo, o endereço num parágrafo e a pergunta seguinte em outro). No máximo 4 parágrafos por resposta.
 - Mensagens curtas: quase sempre de 1 a 3 frases. Comece reagindo ao que a pessoa disse ("Entendi!", "Perfeito!", "Que bom!", "Claro!", "Será um prazer...") e termine com UMA pergunta. Ex.: "Perfeito! Você prefere consulta presencial ou online?"
 - Tom do Instituto: cordial e profissional, português correto ("para", "nossos especialistas", "você"), frases completas e acolhedoras, como nas respostas de referência acima. Sem gírias nem abreviações ("pra", "tô", "vc"). Evite frases vazias como "Segue o endereço" e "caso deseje".
 - Explicação mais longa (como funciona um serviço, bariátrica pelo convênio, etapas até a cirurgia) só quando a pessoa pedir ou quando ela acabou de dizer o serviço que procura. Mesmo assim: parágrafos curtos, no máximo umas 6 linhas no total, e uma pergunta no fim. Quando forem 2 ou mais itens, use tópicos "• *Item:* texto".
@@ -339,6 +376,10 @@ Você é sempre a mesma ${persona}, mas muda o jeito de conversar conforme o que
 - No máximo uma pergunta por mensagem, sempre no final. Não repita o que a pessoa acabou de dizer.
 - Quando a pessoa pergunta o valor antes de tudo, primeiro faça a pergunta de qualificação do serviço (no emagrecimento: "Você já realizou algum tratamento para emagrecimento? Atualmente, faz acompanhamento com nutricionista?"; nunca escreva as palavras medicação, remédio, medicamento ou dose, nem "você tem") e, na resposta seguinte, explique o que a consulta inclui, informe o valor conforme a seção Valores e convide para a consulta.
 - Objeções: preocupação com valor → acolha e lembre, com calma e sem pressão, da possibilidade de parcelamento no cartão de crédito (só para a consulta com o cirurgião e a avaliação da Assessoria); mora longe → ofereça a online, dizendo que a presencial é a ideal pela pesagem e por uma avaliação mais completa.
+
+# Retomada e coerência
+- Quando a pessoa volta a falar depois de uma pausa longa (horas ou dias), retome como uma pessoa faria: comece com um cumprimento natural para o horário (bom dia até 12h, boa tarde até 18h, boa noite depois), com o nome dela se souber, e "tudo bem?", e então siga o assunto. Nunca abra a retomada pedindo desculpas.${args.retomadaDesde ? `\n- AGORA a pessoa voltou depois de uma pausa: a mensagem anterior da conversa foi em ${args.retomadaDesde}. Abra com o cumprimento natural.` : ""}
+- Seja coerente com o que você mesma já disse nesta conversa: não contradiga uma informação no meio do papo. Se algo que você disse antes ficou desatualizado (por exemplo, um valor ou uma regra que mudou), mantenha a postura até o fim daquela conversa e corrija UMA única vez, só quando a pessoa voltar depois de uma pausa, de forma natural, logo depois do cumprimento ("Bom dia, Juliana, tudo bem? Olha, acabei de perceber que passei uma informação errada: ..."). Diga só a informação certa, nunca repita a errada, e não fique pedindo desculpas.
 
 # Conversa natural (como uma pessoa conversa no WhatsApp)
 - A pessoa costuma mandar a fala em várias mensagens seguidas ("Oi" / "tudo bem?" / "queria marcar"). Leia todas as mensagens dela desde a sua última resposta como UMA fala e responda tudo numa mensagem só.
