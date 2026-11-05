@@ -14,7 +14,7 @@
 //   6. Agendamentos (Parte 7): aba, modal, status, Google Agenda
 //   7. Ações do Dia: handoffs da IA (Parte 6)
 //   8. Roteamento: view-agendamentos e Meu Perfil (Google)
-//   9. WhatsApp desconectado: tela de reconexão com QR Code
+//   9. WhatsApp desconectado: faixa, bolinha no menu, tela WhatsApp e QR Code
 (function () {
     'use strict';
 
@@ -963,7 +963,7 @@
     var ROTAS = {
         'pipeline': 'view-crm', 'leads': 'view-leads', 'acoes-do-dia': 'view-acoes-dia', 'agendamentos': 'view-agendamentos',
         'usuarios': 'view-usuarios', 'permissoes': 'view-permissoes', 'redistribuir': 'view-redistribuir-leads',
-        'funis': 'view-pipelines', 'historico': 'view-audit-log', 'perfil': 'view-meu-perfil'
+        'funis': 'view-pipelines', 'historico': 'view-audit-log', 'perfil': 'view-meu-perfil', 'whatsapp': 'view-whatsapp'
     };
     var VIEW_PARA_ROTA = {};
     Object.keys(ROTAS).forEach(function (k) { VIEW_PARA_ROTA[ROTAS[k]] = k; });
@@ -1641,18 +1641,21 @@
         });
 
     // =====================================================================
-    // 9. WHATSAPP DESCONECTADO: tela de reconexão com QR Code (Z-API)
+    // 9. WHATSAPP DESCONECTADO: faixa, bolinha no menu, tela WhatsApp e QR Code (Z-API)
     // =====================================================================
-    // A cada minuto (aba visível e usuário logado) consulta ic-whatsapp-conexao.
-    // Se um número cair, TODOS os usuários veem uma faixa de alerta no topo do
-    // CRM. Só o ADMIN vê, na frente do CRM, a tela com o QR Code para reconectar
-    // (quem lê o QR assume o número; a função também recusa o QR a não-admin).
-    // O WhatsApp troca o QR a cada ~20 s: pede um novo a cada 15 s; depois de 3
-    // sem leitura, para e mostra "Gerar novo QR Code" (recomendação da Z-API).
-    // "Lembrar depois" esconde a tela por 5 minutos; a faixa continua, com o
-    // botão "Conectar WhatsApp" para o Admin voltar à tela do QR Code.
-    var IC_CONEXAO = { timer: null, qrTimer: null, statusTimer: null, adiadaAte: 0, qrs: 0, linha: null, emCurso: false };
-    var IC_CONEXAO_INTERVALO = 60000, IC_QR_INTERVALO = 15000, IC_QR_MAX = 3, IC_ADIAR_MS = 5 * 60000;
+    // A cada 30 s (aba visível e usuário logado) consulta ic-whatsapp-conexao. A função lê o
+    // estado no banco (SQL 48) e só pergunta à Z-API 1x por minuto no sistema todo; o aviso
+    // "Ao desconectar" da Z-API grava a queda na hora.
+    // Se um número cair, TODOS os usuários veem uma faixa de alerta no topo do CRM. Só o
+    // ADMIN vê a bolinha no menu, a tela Sistema > WhatsApp e, na frente do CRM, a janela
+    // com o QR Code para reconectar (quem lê o QR assume o número; a função também recusa
+    // o QR a não-admin). Na tela WhatsApp o QR fica na própria tela, sem a janela.
+    // O WhatsApp troca o QR a cada ~20 s: pede um novo a cada 15 s; depois de 3 sem
+    // leitura, para e mostra "Gerar novo QR Code" (recomendação da Z-API).
+    // "Lembrar depois" esconde a janela por 5 minutos; a faixa continua, com o botão
+    // "Conectar WhatsApp" para o Admin abrir a tela WhatsApp.
+    var IC_CONEXAO = { timer: null, qrTimer: null, statusTimer: null, adiadaAte: 0, qrs: 0, linha: null, emCurso: false, ultimo: null };
+    var IC_CONEXAO_INTERVALO = 30000, IC_QR_INTERVALO = 15000, IC_QR_MAX = 3, IC_ADIAR_MS = 5 * 60000, IC_CONFERIR_QR_MS = 5000;
 
     // Resposta fora de 2xx vem em error.context (Response): lê o corpo para
     // ter o código de erro da função (chave_de_acesso, somente_admin...).
@@ -1671,19 +1674,40 @@
             || !!(window._perfilAtualCache && window._perfilAtualCache.is_admin);
     }
 
+    function icWaTelaAtiva() {
+        var v = document.getElementById('view-whatsapp');
+        return !!(v && v.classList.contains('active'));
+    }
+
     async function icConexaoVerificar() {
         if (IC_CONEXAO.emCurso || document.hidden) return;
-        if (typeof currentUser === 'undefined' || !currentUser || typeof supabaseClient === 'undefined') { icConexaoFaixa(null); return; }
+        if (typeof currentUser === 'undefined' || !currentUser || typeof supabaseClient === 'undefined') { icConexaoFaixa(null); icWaBolinha(null); return; }
         if (document.getElementById('modal-ic-whatsapp')) return;
         IC_CONEXAO.emCurso = true;
         try {
             var r = await icConexaoChamar({ acao: 'status' });
             var d = r.data;
             if (!d || !d.ok) return;   // falha na consulta: mantém a faixa como estava
+            IC_CONEXAO.ultimo = d;
             var caida = d.desconectado ? (d.linhas || []).filter(function (l) { return l.conectado === false; })[0] : null;
             icConexaoFaixa(caida || null);
-            if (caida && icConexaoEhAdmin() && Date.now() >= IC_CONEXAO.adiadaAte) icConexaoAbrir(caida);
+            icWaBolinha(d);
+            if (caida && icConexaoEhAdmin() && !icWaTelaAtiva() && Date.now() >= IC_CONEXAO.adiadaAte) icConexaoAbrir(caida);
         } finally { IC_CONEXAO.emCurso = false; }
+    }
+
+    // Bolinha no item WhatsApp do menu (só Admin). d = resposta do 'status'; null = esconde.
+    function icWaBolinha(d) {
+        var b = document.getElementById('ic-wa-bolinha');
+        if (!b) return;
+        var linhas = (d && d.linhas) || [];
+        var conhecidas = linhas.filter(function (l) { return l.conectado === true || l.conectado === false; });
+        if (!icConexaoEhAdmin() || !conhecidas.length) { b.hidden = true; return; }
+        var caiu = conhecidas.some(function (l) { return l.conectado === false; });
+        b.className = 'ic-wa-bolinha ' + (caiu ? 'caiu' : 'ok');
+        b.setAttribute('aria-label', caiu ? 'WhatsApp desconectado' : 'WhatsApp conectado');
+        b.title = caiu ? 'Desconectado' : 'Conectado';
+        b.hidden = false;
     }
 
     // Faixa de alerta no topo do conteúdo (todos os usuários). null = esconde.
@@ -1702,15 +1726,18 @@
         var num = linha.numero ? icFormatarTelefoneBR(linha.numero) : '';
         var admin = icConexaoEhAdmin();
         f.querySelector('[data-ic="texto"]').textContent = 'O WhatsApp' + (num ? ' ' + num : '') + ' do CRM está desconectado. As mensagens não chegam e não são respondidas'
-            + (admin ? '. Clique em Conectar WhatsApp para ler o QR Code e reconectar.' : ' até um administrador reconectar.');
+            + (!admin ? ' até um administrador reconectar.'
+                : icWaTelaAtiva() ? '. Leia o QR Code abaixo com o celular desse número para reconectar.'
+                : '. Clique em Conectar WhatsApp para ler o QR Code e reconectar.');
         var b = f.querySelector('[data-ic="reconectar"]');
-        if (admin && !b) {
+        var mostrarBotao = admin && !icWaTelaAtiva();
+        if (mostrarBotao && !b) {
             b = document.createElement('button'); b.type = 'button'; b.setAttribute('data-ic', 'reconectar');
             b.textContent = 'Conectar WhatsApp';
             b.style.cssText = 'background:#fff;color:var(--ic-danger);border:0;border-radius:6px;padding:8px 16px;font-weight:700;font-size:14px;cursor:pointer;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.2)';
             f.appendChild(b);
-        } else if (!admin && b) { b.remove(); b = null; }
-        if (b) b.onclick = function () { IC_CONEXAO.adiadaAte = 0; icConexaoAbrir(linha); };
+        } else if (!mostrarBotao && b) { b.remove(); b = null; }
+        if (b) b.onclick = function () { IC_CONEXAO.adiadaAte = 0; showView('view-whatsapp'); };
     }
 
     function icConexaoPararTimers() {
@@ -1718,8 +1745,20 @@
         IC_CONEXAO.qrTimer = null; IC_CONEXAO.statusTimer = null;
     }
 
+    // Onde o QR está sendo mostrado: a janela (modal) ou o cartão "Reconectar" da tela WhatsApp.
+    function icQrRaiz() {
+        return document.getElementById('modal-ic-whatsapp') || document.getElementById('ic-wa-reconectar');
+    }
+
+    var IC_QR_HTML = '<div data-ic="qr" class="ic-wa-qr"><span style="font-size:13px;color:var(--ic-muted)">Carregando QR Code...</span></div>'
+        + '<ol class="ic-wa-passos" style="text-align:left">'
+        + '<li>No celular do número, abra o WhatsApp.</li>'
+        + '<li>Toque em <b>Mais opções</b> (ou <b>Configurações</b>) e depois em <b>Dispositivos conectados</b>.</li>'
+        + '<li>Toque em <b>Conectar um dispositivo</b> e aponte a câmera para o QR Code.</li></ol>'
+        + '<div data-ic="aviso" class="ic-wa-aviso erro" style="display:none"></div>';
+
     function icConexaoAbrir(linha) {
-        if (!icConexaoEhAdmin()) return;
+        if (!icConexaoEhAdmin() || icWaTelaAtiva()) return;
         icConexaoPararTimers();
         IC_CONEXAO.linha = linha;
         var id = 'modal-ic-whatsapp';
@@ -1728,13 +1767,7 @@
         m.innerHTML = '<div class="modal-card" style="max-width:440px;text-align:center">'
             + '<div class="modal-header"><h2>WhatsApp desconectado</h2><button type="button" class="modal-close" aria-label="Lembrar depois">&times;</button></div>'
             + '<p data-ic="texto" style="font-size:14px;line-height:1.6;color:var(--ic-text);margin-bottom:12px"></p>'
-            + '<div data-ic="qr" style="width:264px;height:264px;margin:0 auto 12px;border:2px solid var(--ic-border);border-radius:10px;display:flex;align-items:center;justify-content:center;background:#fff">'
-            + '<span style="font-size:13px;color:var(--ic-muted)">Carregando QR Code...</span></div>'
-            + '<ol style="text-align:left;font-size:13px;line-height:1.7;color:var(--ic-text);margin:0 0 12px 20px;padding:0">'
-            + '<li>No celular do número, abra o WhatsApp.</li>'
-            + '<li>Toque em <b>Mais opções</b> (ou <b>Configurações</b>) e depois em <b>Dispositivos conectados</b>.</li>'
-            + '<li>Toque em <b>Conectar um dispositivo</b> e aponte a câmera para o QR Code.</li></ol>'
-            + '<div data-ic="aviso" style="display:none;font-size:13px;color:var(--ic-danger);margin-bottom:8px"></div>'
+            + '<div style="display:flex;flex-direction:column;gap:12px;margin-bottom:12px">' + IC_QR_HTML + '</div>'
             + '<div class="modal-footer"><button type="button" class="btn btn-secondary" data-ic="depois">Lembrar depois</button>'
             + '<button type="button" class="btn btn-primary" data-ic="novo" style="display:none">Gerar novo QR Code</button></div></div>';
         document.body.appendChild(m);
@@ -1750,19 +1783,19 @@
         m.querySelector('[data-ic="novo"]').onclick = function () { icConexaoIniciarQr(); };
         requestAnimationFrame(function () { m.classList.add('active'); });
         icConexaoIniciarQr();
-        IC_CONEXAO.statusTimer = setInterval(icConexaoConferir, 5000);
+        IC_CONEXAO.statusTimer = setInterval(icConexaoConferir, IC_CONFERIR_QR_MS);
     }
 
     function icConexaoFechar() {
         icConexaoPararTimers();
         var m = document.getElementById('modal-ic-whatsapp');
-        if (m) { m.classList.remove('active'); setTimeout(function () { m.remove(); }, 200); }
+        if (m) { m.classList.remove('active'); m.id = ''; setTimeout(function () { m.remove(); }, 200); }
     }
 
     function icConexaoIniciarQr() {
-        var m = document.getElementById('modal-ic-whatsapp'); if (!m) return;
+        var m = icQrRaiz(); if (!m) return;
         IC_CONEXAO.qrs = 0;
-        m.querySelector('[data-ic="novo"]').style.display = 'none';
+        var novo = m.querySelector('[data-ic="novo"]'); if (novo) novo.style.display = 'none';
         m.querySelector('[data-ic="aviso"]').style.display = 'none';
         clearInterval(IC_CONEXAO.qrTimer);
         icConexaoBuscarQr();
@@ -1770,25 +1803,28 @@
     }
 
     async function icConexaoBuscarQr() {
-        var m = document.getElementById('modal-ic-whatsapp'); if (!m || !IC_CONEXAO.linha) return;
+        var m = icQrRaiz(); if (!m || !IC_CONEXAO.linha) return;
         var caixa = m.querySelector('[data-ic="qr"]'), aviso = m.querySelector('[data-ic="aviso"]');
+        var conta = m.querySelector('[data-ic="conta"]');
         if (IC_CONEXAO.qrs >= IC_QR_MAX) {
             clearInterval(IC_CONEXAO.qrTimer); IC_CONEXAO.qrTimer = null;
             caixa.innerHTML = '<span style="font-size:13px;color:var(--ic-muted);padding:16px">O QR Code expirou. Clique em <b>Gerar novo QR Code</b> quando estiver com o celular em mãos.</span>';
-            m.querySelector('[data-ic="novo"]').style.display = '';
+            var novo = m.querySelector('[data-ic="novo"]'); if (novo) novo.style.display = '';
+            if (conta) conta.textContent = '';
             return;
         }
         IC_CONEXAO.qrs++;
         var r = await icConexaoChamar({ acao: 'qrcode', linha_id: IC_CONEXAO.linha.id });
-        if (!document.getElementById('modal-ic-whatsapp')) return;
+        if (icQrRaiz() !== m) return;
         var d = r.data;
         if (d && d.ok && d.ja_conectado) { icConexaoSucesso(); return; }
         if (d && d.ok && /^data:image\/(png|jpeg);base64,/.test(d.imagem || '')) {
             var img = document.createElement('img');
             img.src = d.imagem; img.alt = 'QR Code para conectar o WhatsApp';
-            img.style.cssText = 'width:256px;height:256px;object-fit:contain;image-rendering:pixelated';
+            img.style.cssText = 'width:256px;height:256px;max-width:100%;object-fit:contain;image-rendering:pixelated';
             caixa.innerHTML = ''; caixa.appendChild(img);
             aviso.style.display = 'none';
+            if (conta) conta.textContent = 'QR Code ' + IC_CONEXAO.qrs + ' de ' + IC_QR_MAX + ' · troca sozinho a cada 15 s';
             return;
         }
         var erro = (d && d.erro) || '';
@@ -1799,11 +1835,13 @@
         aviso.style.display = 'block';
     }
 
+    // Enquanto o QR está na tela, confere direto na Z-API (forcar) se já conectou.
     async function icConexaoConferir() {
         if (!IC_CONEXAO.linha) return;
-        var r = await icConexaoChamar({ acao: 'status' });
+        var r = await icConexaoChamar({ acao: 'status', forcar: true });
         var d = r.data;
         if (!d || !d.ok) return;
+        IC_CONEXAO.ultimo = d;
         var l = (d.linhas || []).filter(function (x) { return x.id === IC_CONEXAO.linha.id; })[0];
         if (l && l.conectado === true) icConexaoSucesso();
     }
@@ -1813,7 +1851,184 @@
         icConexaoFaixa(null);
         IC_CONEXAO.linha = null;
         if (typeof showToast === 'function') showToast('WhatsApp conectado de novo.', 'success');
+        if (icWaTelaAtiva()) icWhatsappTela(); else icConexaoVerificar();
     }
+
+    // ---------------------------------------------------------------------
+    // Tela Sistema > WhatsApp (só Admin)
+    // ---------------------------------------------------------------------
+    function icWaDataHora(iso) {
+        if (!iso) return '—';
+        var d = new Date(iso); if (isNaN(d)) return '—';
+        return d.toLocaleDateString('pt-BR') + ' às ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    }
+    function icWaDuracao(ms) {
+        if (ms == null || ms < 0) return '—';
+        var min = Math.round(ms / 60000);
+        if (min < 1) return 'menos de 1 min';
+        if (min < 60) return min + ' min';
+        var h = Math.floor(min / 60), r = min % 60;
+        if (h < 24) return h + ' h' + (r ? ' ' + r + ' min' : '');
+        var dias = Math.floor(h / 24);
+        return dias + (dias === 1 ? ' dia' : ' dias') + (h % 24 ? ' ' + (h % 24) + ' h' : '');
+    }
+    var IC_WA_ORIGEM = { zapi: 'Aviso da Z-API', consulta: 'Conferência automática', tela: 'Tela WhatsApp' };
+
+    window.icWhatsappTela = async function () {
+        var c = document.getElementById('container-whatsapp');
+        if (!c) return;
+        if (!icConexaoEhAdmin()) {
+            c.innerHTML = '<div style="padding:40px;text-align:center;color:var(--ic-muted)">🔒 Apenas admin.</div>';
+            return;
+        }
+        icConexaoFechar();
+        icConexaoPararTimers();
+        IC_CONEXAO.linha = null;
+        c.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div></div>';
+        var rs = await Promise.all([icConexaoChamar({ acao: 'status', forcar: true }), icConexaoChamar({ acao: 'historico' })]);
+        if (!icWaTelaAtiva()) return;
+        var d = rs[0].data, h = rs[1].data;
+        var html = '<h1 style="display:flex;align-items:center;gap:10px">WhatsApp</h1>'
+            + '<div style="font-size:13px;color:var(--ic-muted);margin-bottom:20px">Número do CRM ligado à Z-API. Só administradores veem esta tela.</div>';
+        if (!d || !d.ok) {
+            c.innerHTML = html + '<div class="ic-wa-aviso erro">Não foi possível ler o estado do WhatsApp agora. Tente de novo em instantes.</div>';
+            return;
+        }
+        IC_CONEXAO.ultimo = d;
+        icWaBolinha(d);
+        var linhas = d.linhas || [];
+        if (!linhas.length) {
+            c.innerHTML = html + '<div class="ic-wa-aviso info">Nenhum número Z-API ativo cadastrado.</div>';
+            return;
+        }
+        var caida = null;
+        linhas.forEach(function (l, i) {
+            var chip = l.conectado === true ? '<span class="ic-wa-chip ok">Conectado</span>'
+                : l.conectado === false ? '<span class="ic-wa-chip caiu">Desconectado</span>'
+                : '<span class="ic-wa-chip nd">Sem resposta da Z-API</span>';
+            var rotDesde = l.conectado === false ? 'Caiu em' : 'Conectado desde';
+            var desde = l.desde ? icWaDataHora(l.desde) + (l.conectado === false ? ' (há ' + icWaDuracao(Date.now() - new Date(l.desde).getTime()) + ')' : '') : '—';
+            html += '<div class="ic-wa-grade"><div class="ic-wa-card" data-linha="' + escapeHtml(l.id) + '">'
+                + '<div class="ic-wa-estado"><h3>Situação agora' + (linhas.length > 1 ? ' · ' + escapeHtml(l.nome || '') : '') + '</h3>' + chip + '</div>'
+                + '<dl class="ic-wa-dl"><dt>Número</dt><dd>' + escapeHtml(l.numero ? icFormatarTelefoneBR(l.numero) : '—') + '</dd>'
+                + '<dt>' + rotDesde + '</dt><dd>' + escapeHtml(desde) + '</dd>'
+                + '<dt>Última conferência</dt><dd>' + escapeHtml(icWaDataHora(new Date().toISOString())) + '</dd></dl>'
+                + (l.conectado === false ? '<div class="ic-wa-aviso info">Enquanto estiver desconectado, a assistente virtual não responde ninguém. Quando voltar, ela retoma quem escreveu durante a queda, uma pessoa por vez.</div>' : '')
+                + '<div class="ic-wa-aviso" data-ic="resultado" style="display:none"></div>'
+                + '<div class="ic-wa-acoes"><button type="button" class="btn btn-secondary" data-ic="testar">Testar conexão</button>'
+                + (l.conectado === true ? '<button type="button" class="btn ic-destrutivo" data-ic="desconectar">Desconectar</button>' : '')
+                + '</div></div>';
+            if (l.conectado === false && !caida) {
+                caida = l;
+                html += '<div class="ic-wa-card" id="ic-wa-reconectar"><h3>Reconectar</h3>' + IC_QR_HTML
+                    + '<div data-ic="conta" style="font-size:12px;color:var(--ic-muted);text-align:center"></div>'
+                    + '<div class="ic-wa-acoes" style="justify-content:center"><button type="button" class="btn btn-primary" data-ic="novo" style="display:none">Gerar novo QR Code</button></div></div>';
+            } else {
+                html += '<div class="ic-wa-card"><h3>Como o CRM percebe uma queda</h3><ol class="ic-wa-passos">'
+                    + '<li><b>Na hora</b>: a Z-API avisa o CRM assim que o celular cai.</li>'
+                    + '<li><b>Em até 1 minuto</b>: conferência automática, caso o aviso não chegue.</li>'
+                    + '<li>A faixa vermelha aparece para toda a equipe em até 30 s.</li></ol>'
+                    + '<div style="font-size:12px;color:var(--ic-muted)">Testar conexão também liga os avisos da Z-API para este número.</div></div>';
+            }
+            html += '</div>';
+        });
+        html += '<div class="ic-wa-card"><h3>Histórico de conexões</h3>';
+        var evs = (h && h.ok && h.eventos) || [];
+        if (!h || !h.ok) html += '<div class="ic-wa-aviso erro">Não foi possível carregar o histórico.</div>';
+        else if (!evs.length) html += '<div style="color:var(--ic-muted);font-size:13px">Nenhuma queda ou reconexão registrada ainda.</div>';
+        else {
+            html += '<div style="overflow-x:auto"><table class="ic-wa-tabela"><thead><tr><th>Quando</th><th>O que houve</th><th>Quem avisou</th><th>Quem fez</th><th>Tempo fora</th></tr></thead><tbody>';
+            evs.forEach(function (e) {
+                var ok = e.estado === 'conectado';
+                var fora = ok ? '—' : icWaDuracao(e.fora_ms) + (e.em_aberto ? ' (em aberto)' : '');
+                html += '<tr><td>' + escapeHtml(icWaDataHora(e.quando)) + '</td>'
+                    + '<td><span class="ic-wa-chip ' + (ok ? 'ok' : 'caiu') + '">' + (ok ? 'Conectou' : 'Desconectou') + '</span></td>'
+                    + '<td>' + escapeHtml(IC_WA_ORIGEM[e.origem] || e.origem || '—') + '</td>'
+                    + '<td>' + escapeHtml(e.usuario || '—') + '</td>'
+                    + '<td>' + escapeHtml(fora) + '</td></tr>';
+            });
+            html += '</tbody></table></div>';
+        }
+        html += '</div>';
+        c.innerHTML = html;
+
+        c.querySelectorAll('[data-ic="testar"]').forEach(function (b) {
+            b.onclick = function () { icWaTestar(b); };
+        });
+        c.querySelectorAll('[data-ic="desconectar"]').forEach(function (b) {
+            b.onclick = function () { icWaDesconectar(b); };
+        });
+        if (caida) {
+            IC_CONEXAO.linha = caida;
+            var novo = c.querySelector('#ic-wa-reconectar [data-ic="novo"]');
+            if (novo) novo.onclick = function () { icConexaoIniciarQr(); };
+            icConexaoIniciarQr();
+            IC_CONEXAO.statusTimer = setInterval(icConexaoConferir, IC_CONFERIR_QR_MS);
+        }
+        icConexaoFaixa(caida);
+    };
+
+    function icWaResultado(card, tom, texto) {
+        var el = card && card.querySelector('[data-ic="resultado"]');
+        if (!el) return;
+        el.className = 'ic-wa-aviso ' + tom;
+        el.textContent = texto;
+        el.style.display = 'block';
+    }
+
+    async function icWaTestar(btn) {
+        var card = btn.closest('[data-linha]');
+        var id = card && card.getAttribute('data-linha');
+        if (!id) return;
+        btn.disabled = true; var rot = btn.textContent; btn.textContent = 'Testando...';
+        var r = await icConexaoChamar({ acao: 'testar', linha_id: id });
+        btn.disabled = false; btn.textContent = rot;
+        var d = r.data;
+        if (!d || !d.ok) {
+            icWaResultado(card, 'erro', d && d.erro === 'zapi_indisponivel'
+                ? 'A Z-API não respondeu agora. Confira se a instância está ativa no painel da Z-API e tente de novo.'
+                : 'Não foi possível testar agora. Tente de novo em instantes.');
+            return;
+        }
+        var avisos = d.avisos === 'ok' ? ' Avisos de queda da Z-API ligados.'
+            : d.avisos === 'falhou' ? ' Não foi possível ligar os avisos de queda da Z-API; a conferência automática continua valendo.' : '';
+        if (d.conectado) icWaResultado(card, 'ok', 'Tudo certo: o WhatsApp está conectado' + (d.celular_online === false ? ', mas o celular parece sem internet.' : '.') + avisos);
+        else icWaResultado(card, 'erro', 'O WhatsApp está desconectado. Leia o QR Code para reconectar.' + avisos);
+        if (!!d.conectado !== !!card.querySelector('[data-ic="desconectar"]')) setTimeout(function () { if (icWaTelaAtiva()) icWhatsappTela(); }, 1500);
+    }
+
+    function icWaDesconectar(btn) {
+        var card = btn.closest('[data-linha]');
+        var id = card && card.getAttribute('data-linha');
+        if (!id) return;
+        icConfirmar('Desconectar o WhatsApp do CRM?\n\nA assistente virtual para de responder e as mensagens deixam de chegar até alguém ler o QR Code de novo. Fica registrado no histórico quem desconectou.',
+            'Desconectar', async function () {
+                btn.disabled = true;
+                var r = await icConexaoChamar({ acao: 'desconectar', linha_id: id });
+                var d = r.data;
+                if (!d || !d.ok) {
+                    btn.disabled = false;
+                    icWaResultado(card, 'erro', 'A Z-API não desconectou. ' + (d && d.conectado === true ? 'O WhatsApp continua conectado.' : 'Tente de novo em instantes.'));
+                    return;
+                }
+                if (typeof showToast === 'function') showToast('WhatsApp desconectado.', 'success');
+                if (icWaTelaAtiva()) icWhatsappTela();
+            }, true);
+    }
+
+    // Saiu da tela WhatsApp: para o QR e a conferência da tela; a faixa volta a ter o botão.
+    envolver('showView', function (viewId) {
+        if (viewId !== 'view-whatsapp' && document.getElementById('ic-wa-reconectar')) {
+            icConexaoPararTimers();
+            IC_CONEXAO.linha = null;
+            var c = document.getElementById('container-whatsapp'); if (c) c.innerHTML = '';
+        }
+        var f = document.getElementById('ic-faixa-whatsapp');
+        if (f && IC_CONEXAO.ultimo) {
+            var caida = (IC_CONEXAO.ultimo.linhas || []).filter(function (l) { return l.conectado === false; })[0];
+            icConexaoFaixa(caida || null);
+        }
+    });
 
     window.icConexaoVerificar = icConexaoVerificar;
     document.addEventListener('visibilitychange', function () { if (!document.hidden) icConexaoVerificar(); });

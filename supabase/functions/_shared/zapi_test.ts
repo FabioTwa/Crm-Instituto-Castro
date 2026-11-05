@@ -1,6 +1,9 @@
 import { assert, assertEquals } from "jsr:@std/assert";
 import {
   corpoTextoZapi,
+  eventoConexaoZapi,
+  interpretarAcaoZapi,
+  urlAvisoConexaoZapi,
   msLeitura,
   segundosDigitando,
   urlLerMensagemZapi,
@@ -194,4 +197,33 @@ Deno.test("leitura: tempo cresce com o texto, de 2 a 8 s, e URL do read-message"
   assertEquals(msLeitura(50), 4000);
   assertEquals(msLeitura(5000), 8000);
   assertEquals(urlLerMensagemZapi({ instancia: "INST", token: "TOK", clientToken: "CT" }), "https://api.z-api.io/instances/INST/token/TOK/read-message");
+});
+
+Deno.test("aviso de conexao: conectado, desconectado e o resto nao e aviso", () => {
+  assertEquals(eventoConexaoZapi({ type: "ConnectedCallback", instanceId: "ABC", phone: "5511999999999", connected: true }), {
+    conectado: true, instancia: "ABC",
+  });
+  assertEquals(eventoConexaoZapi({ type: "DisconnectedCallback", instanceId: " ABC ", disconnected: true }), {
+    conectado: false, instancia: "ABC",
+  });
+  assertEquals(eventoConexaoZapi({ type: "ReceivedCallback", instanceId: "ABC" }), null);
+  assertEquals(eventoConexaoZapi(null), null);
+  assertEquals(eventoConexaoZapi("x"), null);
+});
+
+Deno.test("conexao: URLs de desconectar e dos avisos; aviso aponta para a porta da Z-API", () => {
+  const canal = { instancia: "ABC", token: "t", clientToken: "c" };
+  assertEquals(urlInstanciaZapi(canal, "disconnect"), "https://api.z-api.io/instances/ABC/token/t/disconnect");
+  assertEquals(urlInstanciaZapi(canal, "update-webhook-disconnected"), "https://api.z-api.io/instances/ABC/token/t/update-webhook-disconnected");
+  assertEquals(
+    urlAvisoConexaoZapi("https://x.supabase.co/", "a b"),
+    "https://x.supabase.co/functions/v1/ic-meta-webhook?provedor=zapi&token=a%20b",
+  );
+});
+
+Deno.test("acao na Z-API: so 2xx sem erro e sucesso", () => {
+  assertEquals(interpretarAcaoZapi(200, { value: true }), { ok: true });
+  assertEquals(interpretarAcaoZapi(200, { error: "Instance not found" }).ok, false);
+  assertEquals(interpretarAcaoZapi(0, { message: "falha de conexao" }).ok, false);
+  assertEquals(interpretarAcaoZapi(401, {}).ok, false);
 });

@@ -1505,37 +1505,24 @@ async function vigiarConexao(
   const linhaId = String(linha.id);
   const s = await statusZapi(canal, LOG);
   if (!s.ok) return { linha: linhaId, decisao: "status_indisponivel" };
-  const { data: abertas, error } = await sb
-    .from("ic_whatsapp_quedas")
-    .select("id")
-    .eq("linha_id", linhaId)
-    .is("reconectado_em", null)
-    .limit(1);
+  // SQL 48: o mesmo registro do aviso da Z-API e da tela (abre/fecha a queda
+  // em ic_whatsapp_quedas e so entra no historico quando o estado muda).
+  const { data: reg, error } = await sb.rpc("ic_whatsapp_registrar_estado", {
+    p_linha_id: linhaId,
+    p_conectado: s.conectado,
+    p_origem: "consulta",
+    p_queda_desde: s.conectado ? null : new Date(agora.getTime() - FOLGA_DESCONEXAO_MS).toISOString(),
+  });
   if (error) {
-    console.error(LOG, "ic_whatsapp_quedas falhou (SQL 41 aplicado?):", error.message);
+    console.error(LOG, "registrar estado do WhatsApp falhou (SQL 48 aplicado?):", error.message);
     return { linha: linhaId, decisao: "erro_banco" };
   }
-  const aberta = abertas && abertas.length ? String((abertas[0] as any).id) : null;
+  const mudou = !!(reg as any)?.mudou;
   if (!s.conectado) {
-    if (aberta) return { linha: linhaId, decisao: "desconectado" };
-    const { error: errIns } = await sb.from("ic_whatsapp_quedas").insert({
-      linha_id: linhaId,
-      desconectado_em: new Date(agora.getTime() - FOLGA_DESCONEXAO_MS).toISOString(),
-    });
-    // 23505: outra rodada abriu ao mesmo tempo (indice unico da queda aberta).
-    if (errIns && errIns.code !== "23505") console.error(LOG, "abrir queda falhou:", errIns.message);
-    else console.warn(LOG, "WhatsApp desconectado, queda registrada:", linhaId);
-    return { linha: linhaId, decisao: "queda_registrada" };
+    if (mudou) console.warn(LOG, "WhatsApp desconectado, queda registrada:", linhaId);
+    return { linha: linhaId, decisao: mudou ? "queda_registrada" : "desconectado" };
   }
-  if (aberta) {
-    const { error: errUpd } = await sb
-      .from("ic_whatsapp_quedas")
-      .update({ reconectado_em: agora.toISOString() })
-      .eq("id", aberta)
-      .is("reconectado_em", null);
-    if (errUpd) console.error(LOG, "fechar queda falhou:", errUpd.message);
-    else console.log(LOG, "WhatsApp reconectado:", linhaId);
-  }
+  if (mudou) console.log(LOG, "WhatsApp reconectado:", linhaId);
   const { data: aColetar } = await sb
     .from("ic_whatsapp_quedas")
     .select("id, desconectado_em, reconectado_em")
