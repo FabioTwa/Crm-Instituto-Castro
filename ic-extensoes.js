@@ -2032,7 +2032,20 @@
 
     window.icConexaoVerificar = icConexaoVerificar;
     document.addEventListener('visibilitychange', function () { if (!document.hidden) icConexaoVerificar(); });
-    setTimeout(icConexaoVerificar, 5000);
+    // Ao abrir ou atualizar a página (e logo depois do login): confere assim que o usuário e o
+    // perfil estiverem carregados, sem esperar o ciclo de 30 s. Se o número estiver caído, o
+    // Admin já vê a janela com o QR Code na frente de tudo (fora da tela WhatsApp, que já é o QR).
+    function icConexaoAoAbrir() {
+        var tentativas = 0;
+        var t = setInterval(function () {
+            tentativas++;
+            var pronto = typeof currentUser !== 'undefined' && currentUser && typeof supabaseClient !== 'undefined'
+                && window._perfilAtualCache;
+            if (pronto || tentativas >= 40) { clearInterval(t); if (pronto) { IC_CONEXAO.adiadaAte = 0; icConexaoVerificar(); } }
+        }, 500);
+    }
+    icConexaoAoAbrir();
+    envolver('handleLogin', function () { icConexaoAoAbrir(); });
     IC_CONEXAO.timer = setInterval(icConexaoVerificar, IC_CONEXAO_INTERVALO);
 
     window.crmSalvarCampo = function (campo, valor) {   // compatibilidade: chamadas antigas pelo nome
