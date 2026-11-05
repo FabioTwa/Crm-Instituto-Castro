@@ -36,7 +36,7 @@ callback é protegido por um `state` assinado (HS256 com `IC_INTERNAL_SECRET`,
 - `{acao:"desconectar", linha_id}` (Admin): grava a queda com quem fez e chama `GET /disconnect` da Z-API.
 - `{acao:"historico"}` (Admin): últimas 50 quedas e reconexões (`ic_whatsapp_conexao_eventos`) com quem fez e tempo fora.
 
-O front consulta o status a cada 30 s. Se um número cair, todos os usuários veem a faixa de alerta no topo do CRM; o Admin vê a bolinha vermelha no item **WhatsApp** do menu (Sistema), a janela com o QR Code na frente do CRM (novo QR a cada 15 s, até 3; "Lembrar depois" esconde por 5 min) e a tela **Sistema > WhatsApp** (estado, QR na tela, Testar conexão, Desconectar com confirmação, histórico). O aviso "Ao desconectar" da Z-API chega ao `ic-meta-webhook`, que grava a queda na hora (`ic_whatsapp_registrar_estado`, origem `zapi`).
+O front consulta o status a cada 30 s. Se um número cair, todos os usuários veem a faixa de alerta no topo do CRM; o Admin vê a bolinha vermelha no item **WhatsApp** do menu (Sistema), a janela com o QR Code na frente do CRM (novo QR a cada 15 s, até 3; "Lembrar depois" esconde por 5 min) e a tela **Sistema > WhatsApp** (estado, QR na tela, Testar conexão, Desconectar com confirmação, histórico). O aviso "Ao desconectar" da Z-API chega ao `ic-meta-webhook`, que grava a queda na hora (`ic_whatsapp_registrar_estado`, origem `zapi`). Troca de número (SQL 49): ao conectar, o número que leu o QR Code (aviso "Ao conectar" da Z-API ou `GET /device`) vai junto; se for outro, o cadastro do CRM passa a usar o novo número sozinho. As mensagens já chegam pela instância da Z-API, não pelo número.
 
 **`ic-whatsapp-send`** (POST, `Authorization: Bearer <jwt do usuário>`)
 
