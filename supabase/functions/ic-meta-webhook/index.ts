@@ -1751,7 +1751,7 @@ async function entradaZapi(req: Request, url: URL): Promise<Response> {
   // Aviso "Ao conectar" / "Ao desconectar" (SQL 48): grava o estado na hora,
   // abre/fecha a queda e entra no historico. Nao vira mensagem.
   const conexao = eventoConexaoZapi(bruto);
-  if (conexao) return await registrarConexaoZapi(URL_SB, SR, conexao.instancia, conexao.conectado, LOGZ);
+  if (conexao) return await registrarConexaoZapi(URL_SB, SR, conexao.instancia, conexao.conectado, conexao.numero, LOGZ);
 
   const { envelope, tipo } = envelopeZapi(bruto);
   if (envelope._ic_ignorado) {
@@ -1791,7 +1791,11 @@ async function entradaZapi(req: Request, url: URL): Promise<Response> {
 // Aviso de conexao da Z-API. So aceita instancia cadastrada (ativa, provedor
 // zapi). Responde 200 mesmo sem achar a linha (nao da pista a quem testa);
 // 500 so se o banco falhar, para a Z-API reenviar.
-async function registrarConexaoZapi(URL_SB: string, SR: string, instancia: string, conectado: boolean, LOGZ: string): Promise<Response> {
+// numero: celular que leu o QR Code (vem no ConnectedCallback). Se for outro
+// (chip de teste trocado pelo oficial), a SQL 49 atualiza o cadastro.
+async function registrarConexaoZapi(
+  URL_SB: string, SR: string, instancia: string, conectado: boolean, numero: string | null, LOGZ: string,
+): Promise<Response> {
   if (!instancia) return json({ ok: true, ignored: "conexao sem instancia" });
   const sb = createClient(URL_SB, SR, { auth: { persistSession: false } });
   const { data: linhas, error } = await sb
@@ -1810,12 +1814,19 @@ async function registrarConexaoZapi(URL_SB: string, SR: string, instancia: strin
     return json({ ok: true, ignored: "instancia desconhecida" });
   }
   for (const l of linhas as any[]) {
-    const { data, error: errR } = await sb.rpc("ic_whatsapp_registrar_estado", {
+    const args: Record<string, unknown> = {
       p_linha_id: l.id,
       p_conectado: conectado,
       p_origem: "zapi",
       p_queda_desde: conectado ? null : new Date(Date.now() - FOLGA_DESCONEXAO_MS).toISOString(),
-    });
+    };
+    if (conectado && numero) args.p_numero = numero;
+    let { data, error: errR } = await sb.rpc("ic_whatsapp_registrar_estado", args);
+    if (errR && "p_numero" in args) {
+      console.warn(LOGZ, "conexao: registrar com numero falhou (SQL 49 aplicado?):", errR.message);
+      delete args.p_numero;
+      ({ data, error: errR } = await sb.rpc("ic_whatsapp_registrar_estado", args));
+    }
     if (errR) {
       console.error(LOGZ, "conexao: registrar estado falhou (SQL 48 aplicado?):", errR.message);
       return json({ ok: false, error: "erro_banco" }, 500);

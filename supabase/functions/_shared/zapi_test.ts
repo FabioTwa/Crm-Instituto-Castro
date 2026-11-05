@@ -2,6 +2,7 @@ import { assert, assertEquals } from "jsr:@std/assert";
 import {
   corpoTextoZapi,
   eventoConexaoZapi,
+  numeroCelularZapi,
   interpretarAcaoZapi,
   urlAvisoConexaoZapi,
   msLeitura,
@@ -201,10 +202,11 @@ Deno.test("leitura: tempo cresce com o texto, de 2 a 8 s, e URL do read-message"
 
 Deno.test("aviso de conexao: conectado, desconectado e o resto nao e aviso", () => {
   assertEquals(eventoConexaoZapi({ type: "ConnectedCallback", instanceId: "ABC", phone: "5511999999999", connected: true }), {
-    conectado: true, instancia: "ABC",
+    conectado: true, instancia: "ABC", numero: "5511999999999",
   });
+  assertEquals(eventoConexaoZapi({ type: "ConnectedCallback", instanceId: "ABC" })?.numero, null);
   assertEquals(eventoConexaoZapi({ type: "DisconnectedCallback", instanceId: " ABC ", disconnected: true }), {
-    conectado: false, instancia: "ABC",
+    conectado: false, instancia: "ABC", numero: null,
   });
   assertEquals(eventoConexaoZapi({ type: "ReceivedCallback", instanceId: "ABC" }), null);
   assertEquals(eventoConexaoZapi(null), null);
@@ -226,4 +228,11 @@ Deno.test("acao na Z-API: so 2xx sem erro e sucesso", () => {
   assertEquals(interpretarAcaoZapi(200, { error: "Instance not found" }).ok, false);
   assertEquals(interpretarAcaoZapi(0, { message: "falha de conexao" }).ok, false);
   assertEquals(interpretarAcaoZapi(401, {}).ok, false);
+});
+
+Deno.test("numero do celular conectado: so digitos de 10 a 15", () => {
+  assertEquals(numeroCelularZapi("+55 (11) 98888-7777"), "5511988887777");
+  assertEquals(numeroCelularZapi("123"), null);
+  assertEquals(numeroCelularZapi(null), null);
+  assertEquals(numeroCelularZapi("1".repeat(16)), null);
 });
