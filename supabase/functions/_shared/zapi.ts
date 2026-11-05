@@ -329,7 +329,15 @@ export async function enviarTextoZapi(args: {
 //   que exige chave de acesso, { challenge: {...} } (concluir pelo painel).
 // O WhatsApp troca o QR a cada ~20 s; o front pede um novo a cada 15 s.
 
-export function urlInstanciaZapi(canal: CanalZapi, recurso: "status" | "qr-code/image" | "chats"): string {
+export type RecursoInstanciaZapi =
+  | "status"
+  | "qr-code/image"
+  | "chats"
+  | "disconnect"
+  | "update-webhook-connected"
+  | "update-webhook-disconnected";
+
+export function urlInstanciaZapi(canal: CanalZapi, recurso: RecursoInstanciaZapi): string {
   return `${ZAPI_API}/instances/${encodeURIComponent(canal.instancia)}/token/${encodeURIComponent(canal.token)}/${recurso}`;
 }
 
@@ -393,6 +401,84 @@ export async function statusZapi(canal: CanalZapi, prefixoLog = "[zapi]"): Promi
 export async function qrCodeZapi(canal: CanalZapi, prefixoLog = "[zapi]"): Promise<QrZapi> {
   const r = await getZapi(urlInstanciaZapi(canal, "qr-code/image"), canal.clientToken, prefixoLog);
   return interpretarQrZapi(r.status, r.data);
+}
+
+// ---------------------------------------------------------------------------
+// CONEXAO: avisos da Z-API, desconectar e apontar os avisos (tela WhatsApp)
+// ---------------------------------------------------------------------------
+// Conferido no cliente da Z-API que ja roda em producao na Plataforma WA
+// (mesma conta Z-API) e em developer.z-api.io:
+// - Webhook "Ao conectar":    { type: "ConnectedCallback", instanceId, phone, connected: true, momment }
+// - Webhook "Ao desconectar": { type: "DisconnectedCallback", instanceId, momment, error, disconnected: true }
+// - GET /disconnect -> { value: true }
+// - PUT /update-webhook-connected | /update-webhook-disconnected  { value: url } -> { value: true }
+//   (so estes dois: o aviso de mensagens "Ao receber" NAO e tocado)
+
+export type EventoConexaoZapi = { conectado: boolean; instancia: string };
+
+// null = nao e aviso de conexao (segue o caminho normal de mensagem).
+export function eventoConexaoZapi(e: any): EventoConexaoZapi | null {
+  if (!e || typeof e !== "object") return null;
+  const instancia = String(e.instanceId || "").trim();
+  if (e.type === "ConnectedCallback") return { conectado: true, instancia };
+  if (e.type === "DisconnectedCallback") return { conectado: false, instancia };
+  return null;
+}
+
+// URL do aviso de conexao: a mesma porta das mensagens (ic-meta-webhook,
+// ?provedor=zapi&token=). Nunca logar: leva o segredo.
+export function urlAvisoConexaoZapi(supabaseUrl: string, segredo: string): string {
+  return `${supabaseUrl.replace(/\/$/, "")}/functions/v1/ic-meta-webhook?provedor=zapi&token=${encodeURIComponent(segredo)}`;
+}
+
+async function chamarZapi(
+  url: string, clientToken: string, LOG: string, metodo: "GET" | "PUT", corpo?: unknown,
+): Promise<{ status: number; data: any }> {
+  if (metodo === "GET") return await getZapi(url, clientToken, LOG);
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 12000);
+  try {
+    const r = await fetch(url, {
+      method: metodo,
+      headers: { "Client-Token": clientToken, "Content-Type": "application/json" },
+      body: JSON.stringify(corpo ?? {}),
+      signal: ctl.signal,
+    });
+    const txt = await r.text().catch(() => "");
+    let data: any = {};
+    try {
+      data = JSON.parse(txt);
+    } catch (_e) {
+      data = { message: txt.slice(0, 200) };
+    }
+    return { status: r.status, data };
+  } catch (e) {
+    console.error(LOG, "Z-API sem resposta:", e instanceof Error ? e.message : e);
+    return { status: 0, data: { message: "falha de conexao" } };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+export type ResultadoAcaoZapi = { ok: true } | { ok: false; status: number; detalhe: string };
+
+export function interpretarAcaoZapi(status: number, data: any): ResultadoAcaoZapi {
+  if (status >= 200 && status < 300 && !(data && data.error)) return { ok: true };
+  return { ok: false, status, detalhe: String((data && (data.error || data.message)) || `Z-API devolveu ${status}`).slice(0, 200) };
+}
+
+export async function desconectarZapi(canal: CanalZapi, prefixoLog = "[zapi]"): Promise<ResultadoAcaoZapi> {
+  const r = await chamarZapi(urlInstanciaZapi(canal, "disconnect"), canal.clientToken, prefixoLog, "GET");
+  return interpretarAcaoZapi(r.status, r.data);
+}
+
+export async function apontarAvisosConexaoZapi(canal: CanalZapi, url: string, prefixoLog = "[zapi]"): Promise<ResultadoAcaoZapi> {
+  for (const recurso of ["update-webhook-connected", "update-webhook-disconnected"] as const) {
+    const r = await chamarZapi(urlInstanciaZapi(canal, recurso), canal.clientToken, prefixoLog, "PUT", { value: url });
+    const res = interpretarAcaoZapi(r.status, r.data);
+    if (!res.ok) return res;
+  }
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------------------

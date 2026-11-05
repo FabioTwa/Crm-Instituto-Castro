@@ -239,6 +239,37 @@
             background: rgba(255,255,255,0.3);
         }
 
+        /* ===== WHATSAPP: bolinha no menu e tela (ic-extensoes.js, seção 9) ===== */
+        .ic-wa-bolinha { width: 9px; height: 9px; border-radius: 50%; margin-left: auto; flex-shrink: 0; box-shadow: 0 0 0 2px var(--ic-white); }
+        .ic-wa-bolinha.ok { background: #3FB34F; }
+        .ic-wa-bolinha.caiu { background: var(--ic-danger); animation: ic-wa-pulsa 1.6s ease-in-out infinite; }
+        @keyframes ic-wa-pulsa { 50% { box-shadow: 0 0 0 5px var(--ic-danger-soft); } }
+        @media (prefers-reduced-motion: reduce) { .ic-wa-bolinha.caiu { animation: none; } }
+        .ic-wa-grade { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 16px; align-items: start; margin-bottom: 16px; }
+        @media (max-width: 900px) { .ic-wa-grade { grid-template-columns: 1fr; } }
+        .ic-wa-card { background: var(--ic-white); border: 1px solid var(--ic-border); border-radius: 10px; padding: 18px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+        .ic-wa-card h3 { font-size: 15px; color: var(--ic-primary); margin: 0; }
+        .ic-wa-estado { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .ic-wa-chip { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 4px 12px; font-weight: 700; font-size: 13px; }
+        .ic-wa-chip::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+        .ic-wa-chip.ok { background: var(--ic-green-soft); color: #3E8E2F; }
+        .ic-wa-chip.caiu { background: var(--ic-danger-soft); color: var(--ic-danger); }
+        .ic-wa-chip.nd { background: var(--ic-bg-ice); color: var(--ic-muted); }
+        .ic-wa-dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; margin: 0; font-size: 13px; }
+        .ic-wa-dl dt { color: var(--ic-muted); }
+        .ic-wa-dl dd { margin: 0; color: var(--ic-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
+        .ic-wa-acoes { display: flex; flex-wrap: wrap; gap: 8px; }
+        .ic-wa-aviso { border-radius: 8px; padding: 10px 12px; font-size: 13px; line-height: 1.5; }
+        .ic-wa-aviso.ok { background: var(--ic-green-soft); color: #2F6B24; }
+        .ic-wa-aviso.info { background: var(--ic-accent-soft); color: var(--ic-accent-dark); }
+        .ic-wa-aviso.erro { background: var(--ic-danger-soft); color: var(--ic-danger); }
+        .ic-wa-qr { width: 264px; max-width: 100%; height: 264px; margin: 0 auto; border: 2px solid var(--ic-border); border-radius: 10px; display: flex; align-items: center; justify-content: center; background: #fff; text-align: center; }
+        .ic-wa-passos { margin: 0 0 0 20px; padding: 0; font-size: 13px; line-height: 1.7; color: var(--ic-text); }
+        .ic-wa-tabela { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 560px; }
+        .ic-wa-tabela th { text-align: left; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ic-muted); font-weight: 700; padding: 8px 10px; border-bottom: 1px solid var(--ic-border-strong); }
+        .ic-wa-tabela td { padding: 9px 10px; border-bottom: 1px solid var(--ic-border); color: var(--ic-primary); font-variant-numeric: tabular-nums; }
+        .ic-wa-tabela td .ic-wa-chip { font-size: 12px; padding: 2px 10px; }
+
         /* ===== SIDEBAR SECTION SEPARATOR ===== */
         .sidebar-section {
             font-size: 10px;
@@ -6290,6 +6321,12 @@
     <div class="sidebar-section" onclick="toggleSidebarGroup('sg-sistema')">Sistema <span class="section-arrow">▾</span></div>
     <div class="sidebar-group" id="sg-sistema">
 
+    <!-- WhatsApp: só Admin (não entra no catálogo de telas; ic-extensoes.js, seção 9). A bolinha mostra o estado. -->
+    <button class="sidebar-item" id="nav-whatsapp" onclick="showView('view-whatsapp')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-12.6 7.3L3 21l2.3-5.2A8.5 8.5 0 1 1 21 11.5z"/></svg>
+        WhatsApp
+        <span class="ic-wa-bolinha" id="ic-wa-bolinha" role="img" aria-label="Estado do WhatsApp desconhecido" hidden></span>
+    </button>
     <button class="sidebar-item" id="nav-usuarios" onclick="showView('view-usuarios')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
         Usuários
@@ -6626,6 +6663,8 @@
         <!-- ===== VIEW JORNADA DO LEAD ===== -->
         <div class="modal-overlay" id="modal-timeline-jornada"><div class="modal-card" style="max-width:700px;max-height:85vh;overflow-y:auto"><div id="modal-timeline-jornada-content"></div></div></div>
         <!-- ===== VIEW HISTÓRICO DE ALTERAÇÕES (audit log) ===== -->
+        <!-- ===== VIEW WHATSAPP (só Admin): estado, QR Code, testar, desconectar e histórico ===== -->
+        <div id="view-whatsapp" class="view"><div id="container-whatsapp"><div class="loading-container"><div class="loading-spinner"></div></div></div></div>
         <div id="view-audit-log" class="view"><div id="container-audit"><div class="loading-container"><div class="loading-spinner"></div></div></div></div>
 
         <!-- ===== VIEWS FASES 3-5 ===== -->
@@ -7171,6 +7210,7 @@ function showView(viewId) {
     if (viewId === 'view-vendas-excluidas') { if (typeof loadVendasExcluidas === 'function') loadVendasExcluidas(); }
     if (viewId === 'view-config-asaas') { if (typeof loadConfigAsaas === 'function') loadConfigAsaas(); }
     if (viewId === 'view-audit-log') { if (typeof loadAuditLog === 'function') loadAuditLog(); }
+    if (viewId === 'view-whatsapp') { if (typeof icWhatsappTela === 'function') icWhatsappTela(); }
     if (viewId === 'view-fin-entradas') { if (typeof loadFinEntradas === 'function') loadFinEntradas(); }
     if (viewId === 'view-fin-saidas') { if (typeof loadFinSaidas === 'function') loadFinSaidas(); }
     if (viewId === 'view-fin-fluxo-caixa') { if (typeof loadFinFluxoCaixa === 'function') loadFinFluxoCaixa(); }
@@ -7215,6 +7255,8 @@ function showView(viewId) {
     var navTrilha = document.getElementById('nav-trilha');
     if (navTrilha) navTrilha.classList.toggle('active', viewId === 'view-trilha');
     if (navUsuarios) navUsuarios.classList.toggle('active', viewId === 'view-usuarios');
+    var navWhatsapp = document.getElementById('nav-whatsapp');
+    if (navWhatsapp) navWhatsapp.classList.toggle('active', viewId === 'view-whatsapp');
     var navPermissoes = document.getElementById('nav-permissoes');
     if (navPermissoes) navPermissoes.classList.toggle('active', viewId === 'view-permissoes');
     if (navMeuPerfil) navMeuPerfil.classList.toggle('active', viewId === 'view-meu-perfil');
@@ -13790,6 +13832,7 @@ async function loadAuditLog() {
     html += '<option value="clientes_crm"' + (filtroTabela === 'clientes_crm' ? ' selected' : '') + '>Leads</option>';
     html += '<option value="crm_funis"' + (filtroTabela === 'crm_funis' ? ' selected' : '') + '>Funis</option>';
     html += '<option value="vendas"' + (filtroTabela === 'vendas' ? ' selected' : '') + '>Vendas</option>';
+    html += '<option value="whatsapp"' + (filtroTabela === 'whatsapp' ? ' selected' : '') + '>WhatsApp</option>';
     html += '</select>';
     html += '<select id="audit-op" aria-label="Operação" onchange="window._auditFiltroOp=this.value;loadAuditLog()">';
     html += '<option value="">Todas as operações</option>';

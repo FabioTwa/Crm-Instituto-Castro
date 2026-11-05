@@ -99,7 +99,8 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 type Supa = SupabaseClient<any, "public", any>;
 import { canonicoTelefone, soDigitos, telefoneBrPlausivel, variacoesTelefone } from "../_shared/telefone.ts";
 import { icFlag } from "../_shared/flags.ts";
-import { baixarMidiaZapi, envelopeZapi, tokenWebhookZapiValido } from "../_shared/zapi.ts";
+import { FOLGA_DESCONEXAO_MS } from "../_shared/retomada-queda.ts";
+import { baixarMidiaZapi, envelopeZapi, eventoConexaoZapi, tokenWebhookZapiValido } from "../_shared/zapi.ts";
 
 type Provedor = "meta" | "zapi";
 
@@ -1714,7 +1715,8 @@ Deno.serve(async (req: Request) => {
 // ENTRADA DA Z-API (fase de treino)
 //
 // Mesmas garantias das outras portas. Autenticidade: segredo
-// ZAPI_WEBHOOK_TOKEN na URL (a Z-API nao assina o webhook). Evento que nao e
+// ZAPI_WEBHOOK_TOKEN na URL (a Z-API nao assina o webhook). Aviso de conexao
+// (conectou/caiu) grava o estado (SQL 48). Outro evento que nao e
 // mensagem de conversa (grupo, status, conexao, eco do proprio envio pela API)
 // responde 200 sem gravar nada.
 // -------------------------------------------------------------------
@@ -1746,6 +1748,11 @@ async function entradaZapi(req: Request, url: URL): Promise<Response> {
   } catch (_e) {
     return json({ ok: true, ignored: "payload nao-json" });
   }
+  // Aviso "Ao conectar" / "Ao desconectar" (SQL 48): grava o estado na hora,
+  // abre/fecha a queda e entra no historico. Nao vira mensagem.
+  const conexao = eventoConexaoZapi(bruto);
+  if (conexao) return await registrarConexaoZapi(URL_SB, SR, conexao.instancia, conexao.conectado, LOGZ);
+
   const { envelope, tipo } = envelopeZapi(bruto);
   if (envelope._ic_ignorado) {
     console.log(LOGZ, "ignorado:", tipo);
@@ -1779,6 +1786,43 @@ async function entradaZapi(req: Request, url: URL): Promise<Response> {
     espera.call((globalThis as any).EdgeRuntime, trabalho);
   }
   return json({ ok: true, ack: true, entrada: entradaId });
+}
+
+// Aviso de conexao da Z-API. So aceita instancia cadastrada (ativa, provedor
+// zapi). Responde 200 mesmo sem achar a linha (nao da pista a quem testa);
+// 500 so se o banco falhar, para a Z-API reenviar.
+async function registrarConexaoZapi(URL_SB: string, SR: string, instancia: string, conectado: boolean, LOGZ: string): Promise<Response> {
+  if (!instancia) return json({ ok: true, ignored: "conexao sem instancia" });
+  const sb = createClient(URL_SB, SR, { auth: { persistSession: false } });
+  const { data: linhas, error } = await sb
+    .from("vendedores_whatsapp")
+    .select("id")
+    .eq("ativo", true)
+    .eq("provedor", "zapi")
+    .eq("zapi_instancia", instancia)
+    .limit(5);
+  if (error) {
+    console.error(LOGZ, "conexao: vendedores_whatsapp falhou:", error.message);
+    return json({ ok: false, error: "erro_banco" }, 500);
+  }
+  if (!linhas || !linhas.length) {
+    console.warn(LOGZ, "conexao: instancia nao cadastrada");
+    return json({ ok: true, ignored: "instancia desconhecida" });
+  }
+  for (const l of linhas as any[]) {
+    const { data, error: errR } = await sb.rpc("ic_whatsapp_registrar_estado", {
+      p_linha_id: l.id,
+      p_conectado: conectado,
+      p_origem: "zapi",
+      p_queda_desde: conectado ? null : new Date(Date.now() - FOLGA_DESCONEXAO_MS).toISOString(),
+    });
+    if (errR) {
+      console.error(LOGZ, "conexao: registrar estado falhou (SQL 48 aplicado?):", errR.message);
+      return json({ ok: false, error: "erro_banco" }, 500);
+    }
+    console.log(LOGZ, conectado ? "WhatsApp conectado (aviso)" : "WhatsApp desconectado (aviso)", l.id, (data as any)?.mudou ? "mudou" : "sem mudanca");
+  }
+  return json({ ok: true, conexao: conectado ? "conectado" : "desconectado" });
 }
 
 // Todo o processamento vive aqui, fora do caminho da resposta. Nada do que
