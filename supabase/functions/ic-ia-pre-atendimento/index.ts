@@ -121,6 +121,7 @@ import {
   FERRAMENTAS,
   montarSystemPrompt,
   paraWhatsApp,
+  inicioDaPausa,
   partesDaResposta,
   sortear,
   TEXTOS_AGENDAMENTO_ANOTADO,
@@ -926,6 +927,10 @@ async function rodarNaVez(
     calendario: calendarioDiasUteis(agoraSp.ano, agoraSp.mes, agoraSp.dia),
     persona: { nome: cfg.persona_nome, ficha: cfg.persona_ficha },
     agendamentoAtual: agendado ? dataHoraLocal(agendado.inicio) : null,
+    retomadaDesde: (() => {
+      const desde = inicioDaPausa(ctx.mensagens);
+      return desde ? dataHoraLocal(desde) : null;
+    })(),
   });
   const maxTokens = Math.max(256, Number(cfg.max_tokens || "1024") || 1024);
   const r = await chamarClaude({ apiKey, modelo: p.modelo, maxTokens, system, messages });
