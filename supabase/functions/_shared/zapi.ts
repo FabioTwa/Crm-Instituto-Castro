@@ -335,7 +335,8 @@ export type RecursoInstanciaZapi =
   | "chats"
   | "disconnect"
   | "update-webhook-connected"
-  | "update-webhook-disconnected";
+  | "update-webhook-disconnected"
+  | "device";
 
 export function urlInstanciaZapi(canal: CanalZapi, recurso: RecursoInstanciaZapi): string {
   return `${ZAPI_API}/instances/${encodeURIComponent(canal.instancia)}/token/${encodeURIComponent(canal.token)}/${recurso}`;
@@ -411,18 +412,33 @@ export async function qrCodeZapi(canal: CanalZapi, prefixoLog = "[zapi]"): Promi
 // - Webhook "Ao conectar":    { type: "ConnectedCallback", instanceId, phone, connected: true, momment }
 // - Webhook "Ao desconectar": { type: "DisconnectedCallback", instanceId, momment, error, disconnected: true }
 // - GET /disconnect -> { value: true }
+// - GET /device -> { phone, name, ... } (celular conectado)
 // - PUT /update-webhook-connected | /update-webhook-disconnected  { value: url } -> { value: true }
 //   (so estes dois: o aviso de mensagens "Ao receber" NAO e tocado)
 
-export type EventoConexaoZapi = { conectado: boolean; instancia: string };
+export type EventoConexaoZapi = { conectado: boolean; instancia: string; numero: string | null };
 
 // null = nao e aviso de conexao (segue o caminho normal de mensagem).
 export function eventoConexaoZapi(e: any): EventoConexaoZapi | null {
   if (!e || typeof e !== "object") return null;
   const instancia = String(e.instanceId || "").trim();
-  if (e.type === "ConnectedCallback") return { conectado: true, instancia };
-  if (e.type === "DisconnectedCallback") return { conectado: false, instancia };
+  if (e.type === "ConnectedCallback") return { conectado: true, instancia, numero: numeroCelularZapi(e.phone) };
+  if (e.type === "DisconnectedCallback") return { conectado: false, instancia, numero: null };
   return null;
+}
+
+// Numero do celular conectado (aviso "Ao conectar" ou GET /device): so digitos,
+// 10 a 15. Qualquer outra coisa vira null (nao troca o numero cadastrado).
+export function numeroCelularZapi(v: unknown): string | null {
+  const d = String(v ?? "").replace(/\D/g, "");
+  return d.length >= 10 && d.length <= 15 ? d : null;
+}
+
+// GET /device -> { phone, name, ... }: o numero que leu o QR Code.
+export async function celularConectadoZapi(canal: CanalZapi, prefixoLog = "[zapi]"): Promise<string | null> {
+  const r = await getZapi(urlInstanciaZapi(canal, "device"), canal.clientToken, prefixoLog);
+  if (r.status < 200 || r.status >= 300) return null;
+  return numeroCelularZapi(r.data && r.data.phone);
 }
 
 // URL do aviso de conexao: a mesma porta das mensagens (ic-meta-webhook,

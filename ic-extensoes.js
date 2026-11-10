@@ -1654,6 +1654,14 @@
     // leitura, para e mostra "Gerar novo QR Code" (recomendação da Z-API).
     // "Lembrar depois" esconde a janela por 5 minutos; a faixa continua, com o botão
     // "Conectar WhatsApp" para o Admin abrir a tela WhatsApp.
+    // Numero OFICIAL do Instituto (pedido do IC, 06/11/2026): os avisos mandam ler o QR
+    // Code com o celular DESTE numero, qualquer que seja o cadastrado/conectado agora.
+    var IC_WA_OFICIAL = { digitos: '5511956620954', exibir: '(11) 95662-0954' };
+    function icWaEhOficial(numero) {
+        var d = String(numero || '').replace(/\D/g, '');
+        if (d.length === 10 || d.length === 11) d = '55' + d;
+        return d === IC_WA_OFICIAL.digitos;
+    }
     var IC_CONEXAO = { timer: null, qrTimer: null, statusTimer: null, adiadaAte: 0, qrs: 0, linha: null, emCurso: false, ultimo: null };
     var IC_CONEXAO_INTERVALO = 30000, IC_QR_INTERVALO = 15000, IC_QR_MAX = 3, IC_ADIAR_MS = 5 * 60000, IC_CONFERIR_QR_MS = 5000;
 
@@ -1723,12 +1731,11 @@
             f.innerHTML = '<span data-ic="texto" style="flex:1;min-width:200px"></span>';
             main.insertBefore(f, main.firstChild);
         }
-        var num = linha.numero ? icFormatarTelefoneBR(linha.numero) : '';
         var admin = icConexaoEhAdmin();
-        f.querySelector('[data-ic="texto"]').textContent = 'O WhatsApp' + (num ? ' ' + num : '') + ' do CRM está desconectado. As mensagens não chegam e não são respondidas'
+        f.querySelector('[data-ic="texto"]').textContent = 'O WhatsApp oficial ' + IC_WA_OFICIAL.exibir + ' do CRM está desconectado. As mensagens não chegam e não são respondidas'
             + (!admin ? ' até um administrador reconectar.'
                 : icWaTelaAtiva() ? '. Leia o QR Code abaixo com o celular desse número para reconectar.'
-                : '. Clique em Conectar WhatsApp para ler o QR Code e reconectar.');
+                : '. Clique em Conectar WhatsApp para ler o QR Code com o celular desse número.');
         var b = f.querySelector('[data-ic="reconectar"]');
         var mostrarBotao = admin && !icWaTelaAtiva();
         if (mostrarBotao && !b) {
@@ -1771,9 +1778,9 @@
             + '<div class="modal-footer"><button type="button" class="btn btn-secondary" data-ic="depois">Lembrar depois</button>'
             + '<button type="button" class="btn btn-primary" data-ic="novo" style="display:none">Gerar novo QR Code</button></div></div>';
         document.body.appendChild(m);
-        var num = linha.numero ? icFormatarTelefoneBR(linha.numero) : '';
-        m.querySelector('[data-ic="texto"]').textContent = 'O WhatsApp' + (num ? ' ' + num : '')
-            + ' do CRM foi desconectado. Enquanto isso, as mensagens não chegam e não são respondidas. Leia o QR Code abaixo com o celular desse número para reconectar.';
+        m.querySelector('[data-ic="texto"]').textContent = 'O WhatsApp oficial ' + IC_WA_OFICIAL.exibir
+            + ' do CRM foi desconectado. Enquanto isso, as mensagens não chegam e não são respondidas. Leia o QR Code abaixo com o celular do número '
+            + IC_WA_OFICIAL.exibir + ' para reconectar.';
         var adiar = function () {
             IC_CONEXAO.adiadaAte = Date.now() + IC_ADIAR_MS;
             icConexaoFechar();
@@ -1910,9 +1917,13 @@
             var desde = l.desde ? icWaDataHora(l.desde) + (l.conectado === false ? ' (há ' + icWaDuracao(Date.now() - new Date(l.desde).getTime()) + ')' : '') : '—';
             html += '<div class="ic-wa-grade"><div class="ic-wa-card" data-linha="' + escapeHtml(l.id) + '">'
                 + '<div class="ic-wa-estado"><h3>Situação agora' + (linhas.length > 1 ? ' · ' + escapeHtml(l.nome || '') : '') + '</h3>' + chip + '</div>'
-                + '<dl class="ic-wa-dl"><dt>Número</dt><dd>' + escapeHtml(l.numero ? icFormatarTelefoneBR(l.numero) : '—') + '</dd>'
+                + '<dl class="ic-wa-dl"><dt>Número oficial</dt><dd>' + escapeHtml(IC_WA_OFICIAL.exibir) + '</dd>'
+                + '<dt>' + (l.conectado === true ? 'Conectado agora' : 'Último conectado') + '</dt><dd>' + escapeHtml(l.numero ? icFormatarTelefoneBR(l.numero) : '—') + '</dd>'
                 + '<dt>' + rotDesde + '</dt><dd>' + escapeHtml(desde) + '</dd>'
                 + '<dt>Última conferência</dt><dd>' + escapeHtml(icWaDataHora(new Date().toISOString())) + '</dd></dl>'
+                + (l.conectado === true && l.numero && !icWaEhOficial(l.numero)
+                    ? '<div class="ic-wa-aviso atencao">Conectado com outro número (final ' + escapeHtml(String(l.numero).replace(/\D/g, '').slice(-4))
+                      + '). O número oficial é <span style="white-space:nowrap">' + escapeHtml(IC_WA_OFICIAL.exibir) + '</span>.</div>' : '')
                 + (l.conectado === false ? '<div class="ic-wa-aviso info">Enquanto estiver desconectado, a assistente virtual não responde ninguém. Quando voltar, ela retoma quem escreveu durante a queda, uma pessoa por vez.</div>' : '')
                 + '<div class="ic-wa-aviso" data-ic="resultado" style="display:none"></div>'
                 + '<div class="ic-wa-acoes"><button type="button" class="btn btn-secondary" data-ic="testar">Testar conexão</button>'
@@ -2032,7 +2043,20 @@
 
     window.icConexaoVerificar = icConexaoVerificar;
     document.addEventListener('visibilitychange', function () { if (!document.hidden) icConexaoVerificar(); });
-    setTimeout(icConexaoVerificar, 5000);
+    // Ao abrir ou atualizar a página (e logo depois do login): confere assim que o usuário e o
+    // perfil estiverem carregados, sem esperar o ciclo de 30 s. Se o número estiver caído, o
+    // Admin já vê a janela com o QR Code na frente de tudo (fora da tela WhatsApp, que já é o QR).
+    function icConexaoAoAbrir() {
+        var tentativas = 0;
+        var t = setInterval(function () {
+            tentativas++;
+            var pronto = typeof currentUser !== 'undefined' && currentUser && typeof supabaseClient !== 'undefined'
+                && window._perfilAtualCache;
+            if (pronto || tentativas >= 40) { clearInterval(t); if (pronto) { IC_CONEXAO.adiadaAte = 0; icConexaoVerificar(); } }
+        }, 500);
+    }
+    icConexaoAoAbrir();
+    envolver('handleLogin', function () { icConexaoAoAbrir(); });
     IC_CONEXAO.timer = setInterval(icConexaoVerificar, IC_CONEXAO_INTERVALO);
 
     window.crmSalvarCampo = function (campo, valor) {   // compatibilidade: chamadas antigas pelo nome

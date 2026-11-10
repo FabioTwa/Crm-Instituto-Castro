@@ -47,6 +47,7 @@ import { ehAdmin, usuarioAtivo } from "../_shared/auth.ts";
 import { canalDaLinha, provedorDaLinha } from "../_shared/whatsapp-envio.ts";
 import {
   apontarAvisosConexaoZapi,
+  celularConectadoZapi,
   desconectarZapi,
   qrCodeZapi,
   statusZapi,
@@ -70,23 +71,37 @@ function estadoDoBanco(linha: any): boolean | null {
   return null;
 }
 
-type Registro = { conectado: boolean; desde: string | null };
+type Registro = { conectado: boolean; desde: string | null; numero: string | null };
 
+// Ao CONECTAR com o canal em maos, pergunta a Z-API qual celular leu o QR
+// Code e manda junto: se for outro numero (chip de teste trocado pelo
+// oficial), a SQL 49 atualiza o cadastro. Sem SQL 49, grava sem o numero.
 async function registrar(
   sb: SupabaseClient, linhaId: string, conectado: boolean, origem: "consulta" | "tela", usuarioId: string | null,
+  canal: CanalZapi | null = null,
 ): Promise<Registro | null> {
-  const { data, error } = await sb.rpc("ic_whatsapp_registrar_estado", {
+  const args: Record<string, unknown> = {
     p_linha_id: linhaId,
     p_conectado: conectado,
     p_origem: origem,
     p_usuario_id: usuarioId,
-  });
+  };
+  if (conectado && canal) {
+    const numero = await celularConectadoZapi(canal, LOG);
+    if (numero) args.p_numero = numero;
+  }
+  let { data, error } = await sb.rpc("ic_whatsapp_registrar_estado", args);
+  if (error && "p_numero" in args) {
+    console.warn(LOG, "registrar com numero falhou (SQL 49 aplicado?):", error.message);
+    delete args.p_numero;
+    ({ data, error } = await sb.rpc("ic_whatsapp_registrar_estado", args));
+  }
   if (error) {
     console.error(LOG, "registrar estado falhou (SQL 48 aplicado?):", error.message);
     return null;
   }
   if ((data as any)?.mudou) console.log(LOG, conectado ? "WhatsApp conectado" : "WhatsApp desconectado", "(", origem, ")", linhaId);
-  return { conectado, desde: (data as any)?.desde ?? null };
+  return { conectado, desde: (data as any)?.desde ?? null, numero: (data as any)?.numero ?? null };
 }
 
 async function reservar(sb: SupabaseClient, linhaId: string): Promise<boolean> {
@@ -138,6 +153,7 @@ Deno.serve(async (req: Request) => {
       const forcar = admin && payload.forcar === true;
       const out = await Promise.all(zapi.map(async (l) => {
         const base = { id: String(l.id), nome: l.vendedor_nome || null, numero: l.numero_whatsapp || null };
+        const estavaConectado = estadoDoBanco(l) === true;
         let conectado = estadoDoBanco(l);
         let celular: boolean | null = null;
         let desde: string | null = l.zapi_estado_desde || null;
@@ -148,10 +164,17 @@ Deno.serve(async (req: Request) => {
             // Conferencia do Admin com a tela/QR aberta que acha o numero de
             // volta: credita a ele a reconexao (a queda nunca e "dele").
             const dele = forcar && s.conectado;
-            const reg = await registrar(sb, String(l.id), s.conectado, dele ? "tela" : "consulta", dele ? auth.usuario.id : null);
+            // Confere qual celular esta conectado so quando voltou agora ou o
+            // Admin pediu (troca de numero), nao a cada minuto.
+            const conferirNumero = s.conectado && (forcar || !estavaConectado);
+            const reg = await registrar(sb, String(l.id), s.conectado, dele ? "tela" : "consulta", dele ? auth.usuario.id : null,
+              conferirNumero ? canal : null);
             conectado = s.conectado;
             celular = s.celularOnline;
-            if (reg) desde = reg.desde;
+            if (reg) {
+              desde = reg.desde;
+              if (reg.numero) base.numero = reg.numero;
+            }
           } else {
             console.warn(LOG, "status indisponivel:", s.status, s.detalhe);
           }
@@ -224,7 +247,7 @@ Deno.serve(async (req: Request) => {
     if (acao === "qrcode") {
       const s = await statusZapi(canal, LOG);
       if (s.ok && s.conectado) {
-        await registrar(sb, linhaId, true, "tela", auth.usuario.id);
+        await registrar(sb, linhaId, true, "tela", auth.usuario.id, canal);
         return json({ ok: true, ja_conectado: true });
       }
       const qr = await qrCodeZapi(canal, LOG);
@@ -239,7 +262,7 @@ Deno.serve(async (req: Request) => {
     if (acao === "testar") {
       const s = await statusZapi(canal, LOG);
       if (!s.ok) return json({ ok: false, erro: "zapi_indisponivel", detalhe: s.status === 0 ? "sem_resposta" : "recusou" }, 502);
-      await registrar(sb, linhaId, s.conectado, "consulta", null);
+      const reg = await registrar(sb, linhaId, s.conectado, "consulta", null, canal);
       let avisos: "ok" | "falhou" | "sem_segredo" = "sem_segredo";
       const segredo = Deno.env.get("ZAPI_WEBHOOK_TOKEN") || "";
       if (segredo) {
@@ -248,7 +271,7 @@ Deno.serve(async (req: Request) => {
         if (!r.ok) console.warn(LOG, "apontar avisos de conexao falhou:", r.status, r.detalhe);
         else console.log(LOG, "avisos de conexao apontados para o ic-meta-webhook por", auth.usuario.id);
       }
-      return json({ ok: true, conectado: s.conectado, celular_online: s.celularOnline, avisos });
+      return json({ ok: true, conectado: s.conectado, celular_online: s.celularOnline, avisos, numero: reg?.numero ?? null });
     }
 
     // desconectar: grava ANTES (com quem fez), porque o aviso da Z-API pode
@@ -262,7 +285,7 @@ Deno.serve(async (req: Request) => {
     }
     console.warn(LOG, "desconectar recusado:", d.status, d.detalhe);
     const s = await statusZapi(canal, LOG);
-    if (s.ok && s.conectado) await registrar(sb, linhaId, true, "consulta", null);
+    if (s.ok && s.conectado) await registrar(sb, linhaId, true, "consulta", null, canal);
     return json({ ok: false, erro: "zapi_recusou", conectado: s.ok ? s.conectado : null }, 502);
   } catch (e) {
     return erroGenerico(LOG, e);
