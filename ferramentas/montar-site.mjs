@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 const raiz = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const destino = path.join(raiz, 'site');
 
-const ARQUIVOS = ['index.html', 'encaixes.js', 'encaixes-depois.js', 'ic-extensoes.js', 'ic-validacao.js'];
+const ARQUIVOS = ['index.html', 'favicon.ico', 'encaixes.js', 'encaixes-depois.js', 'ic-extensoes.js', 'ic-validacao.js'];
 const PASTAS = ['assets'];
 
 function falhar(msg) {
