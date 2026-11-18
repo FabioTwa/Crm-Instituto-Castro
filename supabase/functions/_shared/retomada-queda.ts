@@ -16,7 +16,7 @@
 //
 // Logica pura (sem banco) para ser testavel.
 
-import { canonicoTelefone, telefoneBrPlausivel } from "./telefone.ts";
+import { canonicoTelefone, telefonePlausivel } from "./telefone.ts";
 import type { ChatZapi } from "./zapi.ts";
 
 export const ETAPA_RETOMADA_QUEDA = "retomada_queda";
@@ -56,7 +56,7 @@ export function selecionarChatsDaQueda(
     if (c.grupo || c.ultimaEm == null || c.telefone.includes("@")) continue;
     if (c.ultimaEm < a.desconectadoEm || c.ultimaEm > a.ate) continue;
     const tel = canonicoTelefone(c.telefone);
-    if (!telefoneBrPlausivel(tel) || ignorar.has(tel)) continue;
+    if (!telefonePlausivel(tel) || ignorar.has(tel)) continue;
     const ja = porTelefone.get(tel);
     if (!ja || c.ultimaEm > ja.ultimaEm) porTelefone.set(tel, { telefone: tel, nome: c.nome, ultimaEm: c.ultimaEm });
   }

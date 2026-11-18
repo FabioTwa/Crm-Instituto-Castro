@@ -76,7 +76,7 @@
 //   nao mudar comportamento nenhum. Decisao do Alexandre: anotar, nao renomear.
 // - Nunca grava mensagem vazia (placeholderPorTipo).
 // - anuncio_id e ctwa_token NUNCA sao sobrescritos: vale o primeiro anuncio.
-// - Card so nasce com telefone brasileiro plausivel (telefoneBrPlausivel).
+// - Card so nasce com telefone plausivel, do Brasil ou de fora (telefonePlausivel).
 //
 // O QUE MUDA EM RELACAO AO Z-API:
 // a) GET de verificacao com hub.mode / hub.verify_token / hub.challenge.
@@ -97,7 +97,7 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 
 // Cliente sem tipos gerados do banco (o schema nao e tipado aqui).
 type Supa = SupabaseClient<any, "public", any>;
-import { canonicoTelefone, soDigitos, telefoneBrPlausivel, variacoesTelefone } from "../_shared/telefone.ts";
+import { canonicoTelefone, soDigitos, telefonePlausivel, variacoesTelefone } from "../_shared/telefone.ts";
 import { icFlag } from "../_shared/flags.ts";
 import { FOLGA_DESCONEXAO_MS } from "../_shared/retomada-queda.ts";
 import { baixarMidiaZapi, envelopeZapi, eventoConexaoZapi, tokenWebhookZapiValido } from "../_shared/zapi.ts";
@@ -312,7 +312,7 @@ async function cardVivoNoFunil(
 // NORMALIZACAO DE TELEFONE
 // E o que segura o reconhecimento dos cards antigos. Nao mexer.
 //
-// IC CRM: soDigitos, variacoesTelefone, canonicoTelefone e telefoneBrPlausivel
+// IC CRM: soDigitos, variacoesTelefone, canonicoTelefone e telefonePlausivel
 // moram agora em ../_shared/telefone.ts (importados no topo), com o MESMO
 // codigo, para que ic-whatsapp-send gere o mesmo canonico que este webhook.
 // mesmoNumero e ehLid continuam aqui porque so o webhook os usa.
@@ -339,8 +339,8 @@ function ehLid(valor: string): boolean {
   return v.replace(/\D/g, "").length > 13;
 }
 
-// telefoneBrPlausivel ("55" + 10 ou 11 digitos): importada de ../_shared/telefone.ts.
-// So criamos card quando o numero passa nela. Card errado e pior do que nao criar.
+// telefonePlausivel (Brasil, ou fora do Brasil com codigo do pais): importada de
+// ../_shared/telefone.ts. So criamos card quando o numero passa nela.
 
 function ehMensagemDeCampanha(texto: string): boolean {
   if (!texto) return false;
@@ -1059,10 +1059,10 @@ async function processarMensagem(
     }
   }
 
-  // REGRA DE SEGURANCA: so cria card com telefone brasileiro plausivel (12 ou 13
-  // digitos, 55...) e NUNCA com identificador estranho. Card errado e pior do que
-  // nao criar.
-  const podeCriarCard = !phoneEhLid && telefoneBrPlausivel(canonico);
+  // REGRA DE SEGURANCA: so cria card com telefone plausivel e NUNCA com identificador
+  // estranho (LID). Desde 18/11/2026 vale tambem numero de fora do Brasil, com o codigo
+  // do pais (pedido do Fabio: turista ou quem mora fora tambem marca consulta).
+  const podeCriarCard = !phoneEhLid && telefonePlausivel(canonico);
 
   // Detectar campanha (heuristica basica: menciona 'anuncio' ou tem URL). So em RECEBIDA.
   let campanhaOrigemNova: string | null = null;

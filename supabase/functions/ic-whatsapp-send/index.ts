@@ -48,7 +48,7 @@ import { corsHeaders, erroGenerico, json } from "../_shared/http.ts";
 import { usuarioAtivo } from "../_shared/auth.ts";
 import { assinarMensagem } from "../_shared/texto.ts";
 import { icFlag } from "../_shared/flags.ts";
-import { canonicoTelefone, telefoneBrPlausivel } from "../_shared/telefone.ts";
+import { canonicoTelefone, telefonePlausivel } from "../_shared/telefone.ts";
 import type { ResultadoEnvio } from "../_shared/whatsapp-cloud.ts";
 import { canalDoVendedor, enviarModeloCanal, enviarTextoCanal, modeloValido } from "../_shared/whatsapp-envio.ts";
 
@@ -105,7 +105,7 @@ Deno.serve(async (req: Request) => {
     if (!card) return json({ ok: false, erro: "card_nao_encontrado" }, 404);
 
     const para = canonicoTelefone(String((card as any).numero_whatsapp || (card as any).telefone || ""));
-    if (!telefoneBrPlausivel(para)) return json({ ok: false, erro: "card_sem_numero" }, 400);
+    if (!telefonePlausivel(para)) return json({ ok: false, erro: "card_sem_numero" }, 400);
 
     const vendedorId = (card as any).vendedor_id ? String((card as any).vendedor_id) : "";
     if (!vendedorId) return json({ ok: false, erro: "card_sem_vendedor" }, 400);

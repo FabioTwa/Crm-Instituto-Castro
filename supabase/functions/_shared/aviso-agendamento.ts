@@ -4,14 +4,14 @@
 // Esses numeros tambem contam como "da casa" no webhook: o eco do aviso nunca
 // vira card de lead. Logica pura (sem banco) para ser testavel.
 
-import { canonicoTelefone, telefoneBrPlausivel } from "./telefone.ts";
+import { canonicoTelefone, telefonePlausivel } from "./telefone.ts";
 import { partesNoFuso, TZ_PADRAO } from "./horario.ts";
 
 export function numerosAviso(valor: string | null | undefined): string[] {
   const out: string[] = [];
   for (const parte of String(valor || "").split(/[,;\n]/)) {
     const c = canonicoTelefone(parte.trim());
-    if (c && telefoneBrPlausivel(c) && !out.includes(c)) out.push(c);
+    if (c && telefonePlausivel(c) && !out.includes(c)) out.push(c);
   }
   return out;
 }

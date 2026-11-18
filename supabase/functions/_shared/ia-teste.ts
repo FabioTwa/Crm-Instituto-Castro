@@ -10,13 +10,13 @@
 //
 // Assim da para treinar no numero real (coexistencia) conversando a partir de
 // celulares da equipe, sem a IA falar com nenhum paciente.
-import { canonicoTelefone, telefoneBrPlausivel } from "./telefone.ts";
+import { canonicoTelefone, telefonePlausivel } from "./telefone.ts";
 
 export function numerosTeste(valor: string | null | undefined): string[] {
   const lista = String(valor || "")
     .split(/[,;\n]+/)
     .map((x) => canonicoTelefone(x))
-    .filter((x) => telefoneBrPlausivel(x));
+    .filter((x) => telefonePlausivel(x));
   return [...new Set(lista)];
 }
 
