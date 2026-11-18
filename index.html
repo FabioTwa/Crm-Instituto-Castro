@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>IC CRM — Instituto Castro</title>
 
     <!-- Ícone da aba (símbolo do Instituto Castro) -->
@@ -6243,6 +6243,12 @@
         .toast-container { bottom: calc(24px + var(--ic-barra-h)); }
         .crm-fila { bottom: calc(18px + var(--ic-barra-h)); }
         @media (max-width: 700px) { .crm-fila { bottom: calc(12px + var(--ic-barra-h)); } }
+
+        /* Sem zoom no celular e no tablet (pedido do Fabio, 18/11/2026): a tela já vem ajustada.
+           A meta viewport trava o zoom no Android; aqui o gesto de pinça e o toque duplo param também no
+           iPhone, que ignora user-scalable=no. A rolagem continua normal. O bloqueio do gesto de pinça
+           do Safari (gesturestart) fica em ic-barra.js. */
+        @media (max-width: 1023px) { html { touch-action: pan-x pan-y; } }
 
     </style>
 </head>

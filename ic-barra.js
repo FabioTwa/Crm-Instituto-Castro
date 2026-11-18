@@ -177,5 +177,11 @@
     };
     window.icBarraFecharFolha = function () { fecharFolha(false); };
 
+    // Sem zoom no celular e no tablet: o Safari do iPhone ignora user-scalable=no da meta viewport,
+    // então o gesto de pinça é barrado aqui (gesturestart/gesturechange só existem no Safari).
+    ['gesturestart', 'gesturechange'].forEach(function (tipo) {
+        document.addEventListener(tipo, function (e) { if (!LARGO.matches) e.preventDefault(); }, { passive: false });
+    });
+
     montarBarra();
 })();
