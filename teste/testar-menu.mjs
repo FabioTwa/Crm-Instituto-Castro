@@ -25,7 +25,7 @@ igual('ordem do menu lateral', ids(M.ITENS), ['leads', 'acoes-dia', 'crm', 'agen
 
 // ---- barra: ordem aprovada e sem buraco
 igual('barra do admin na ordem aprovada', ids(M.itensBarra(ADMIN)), ['crm', 'leads', 'acoes-dia', 'agendamentos']);
-igual('barra mostra os nomes curtos', M.itensBarra(ADMIN).map((i) => i.curto), ['Pipeline', 'Leads', 'Ações do Dia', 'Agendamentos']);
+igual('barra mostra os nomes curtos', M.itensBarra(ADMIN).map((i) => i.curto), ['Pipeline', 'Leads', 'Ações', 'Agenda']);
 igual('barra: item sem acesso some (atendente sem Leads)', ids(M.itensBarra(ATENDENTE)), ['crm', 'acoes-dia', 'agendamentos']);
 igual('barra: recepção só com Leads e Pipeline', ids(M.itensBarra(RECEPCAO)), ['crm', 'leads']);
 igual('barra sem login fica vazia', ids(M.itensBarra(null)), []);

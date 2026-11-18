@@ -174,7 +174,7 @@ async function testarCelular(browser, base) {
     check('botão antigo do topo saiu', (await page.locator('.mobile-menu-btn').count()) === 0);
     check('topo só com o logo', await page.$eval('.ic-topbar', (t) => t.querySelectorAll('button').length === 0 && !!t.querySelector('img')));
     const itens = await rotulosBarra(page);
-    check('itens certos na ordem certa', JSON.stringify(itens) === JSON.stringify(['Pipeline', 'Leads', 'Ações do Dia', 'Agendamentos', 'Mais']), itens);
+    check('itens certos na ordem certa', JSON.stringify(itens) === JSON.stringify(['Pipeline', 'Leads', 'Ações', 'Agenda', 'Mais']), itens);
     const geo = await page.evaluate(() => {
         const r = document.getElementById('ic-barra').getBoundingClientRect();
         const lista = document.getElementById('ic-barra-lista').getBoundingClientRect();
@@ -210,7 +210,7 @@ async function testarCelular(browser, base) {
     check('aviso (toast) aparece acima da barra', !!toast && toast[0] <= toast[1] + 0.5, toast);
 
     // ---- rolando até o fim, o conteúdo termina acima da barra
-    for (const rotulo of ['Pipeline', 'Ações do Dia', 'Leads']) {
+    for (const rotulo of ['Pipeline', 'Ações', 'Leads']) {
         await irPara(page, rotulo);
         await page.waitForTimeout(900);
         await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
@@ -307,7 +307,7 @@ async function testarCelular(browser, base) {
     check('botão voltar fecha a folha', (await page.locator('#ic-mais-folha').count()) === 0);
 
     // item da barra: troca a cor
-    await irPara(page, 'Ações do Dia');
+    await irPara(page, 'Ações');
     await page.waitForSelector('#view-acoes-dia.active');
     const acoes = await page.$eval('[data-menu-id="acoes-dia"]', (b) => [getComputedStyle(b).color, b.getAttribute('aria-current')]);
     check('item da barra acende ao abrir a tela', acoes[0] === MARCA && acoes[1] === 'page', acoes);
@@ -351,7 +351,7 @@ async function testarCelular(browser, base) {
     const p2 = await ctx2.newPage();
     await entrar(p2, base, 'atendente');
     const b2 = await rotulosBarra(p2);
-    check('atendente: barra sem Leads (sem buraco)', JSON.stringify(b2) === JSON.stringify(['Pipeline', 'Ações do Dia', 'Agendamentos', 'Mais']), b2);
+    check('atendente: barra sem Leads (sem buraco)', JSON.stringify(b2) === JSON.stringify(['Pipeline', 'Ações', 'Agenda', 'Mais']), b2);
     const larguras = await p2.$$eval('#ic-barra-lista > li', (ls) => ls.map((l) => Math.round(l.getBoundingClientRect().width)));
     check('posições de largura igual', new Set(larguras).size === 1, larguras);
     await abrirMenu(p2);
