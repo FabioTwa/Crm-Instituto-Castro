@@ -80,7 +80,7 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 import { corsHeaders, erroGenerico, json } from "../_shared/http.ts";
 import { chamadaInternaValida, headersInternos, tokenDoHeader, usuarioAtivo } from "../_shared/auth.ts";
 import { iaConfig, icFlag } from "../_shared/flags.ts";
-import { canonicoTelefone, soDigitos, telefoneBrPlausivel, variacoesTelefone } from "../_shared/telefone.ts";
+import { canonicoTelefone, soDigitos, telefonePlausivel, variacoesTelefone } from "../_shared/telefone.ts";
 import { canalDaLinha, canalDoVendedor, type CanalEnvio, enviarTextoCanal, provedorDaLinha } from "../_shared/whatsapp-envio.ts";
 import { type CanalZapi, type ChatZapi, chatsZapi, lerMensagemZapi, mensagensChatZapi, msLeitura, segundosDigitando, statusZapi } from "../_shared/zapi.ts";
 import { detectarHandoff, handoffCalaIA, RESPOSTA_URGENCIA } from "../_shared/handoff-regras.ts";
@@ -554,7 +554,7 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
   }
   p.card = card;
   p.para = canonicoTelefone(String((card as any).numero_whatsapp || (card as any).telefone || ""));
-  if (!telefoneBrPlausivel(p.para)) {
+  if (!telefonePlausivel(p.para)) {
     await p.log("flags", "card_sem_numero");
     return { ok: false, erro: "card_sem_numero" };
   }
@@ -1127,7 +1127,7 @@ async function encerrarInativas(sb: SupabaseClient): Promise<Record<string, unkn
   let encerradas = 0;
   for (const card of (cards as any[]) || []) {
     const para = canonicoTelefone(String(card.numero_whatsapp || card.telefone || ""));
-    if (!telefoneBrPlausivel(para)) continue;
+    if (!telefonePlausivel(para)) continue;
     const fase = faseTeste(cfg, para);
     if (!fase.atende) continue;
 
@@ -1290,7 +1290,7 @@ async function retomarInativas(sb: SupabaseClient, cfg: Record<string, string>, 
   for (const card of (cards as any[]) || []) {
     if (enviadas >= RETOMADAS_POR_RODADA) break;
     const para = canonicoTelefone(String(card.numero_whatsapp || card.telefone || ""));
-    if (!telefoneBrPlausivel(para)) continue;
+    if (!telefonePlausivel(para)) continue;
     const fase = faseTeste(cfg, para);
     if (!fase.atende) continue;
     const { data: recentes } = await sb
@@ -1387,7 +1387,7 @@ async function lembrarConfirmacoes(sb: SupabaseClient): Promise<Record<string, u
     const card = cards && cards.length ? (cards[0] as any) : null;
     if (!card) continue;
     const para = canonicoTelefone(String(card.numero_whatsapp || card.telefone || ag.telefone_lead || ""));
-    if (!telefoneBrPlausivel(para)) continue;
+    if (!telefonePlausivel(para)) continue;
     const fase = faseTeste(cfg, para);
     if (!fase.atende) continue;
     const { data: cons } = await sb
@@ -1730,7 +1730,7 @@ async function retomarUma(
   sb: SupabaseClient, cfg: Record<string, string>, rq: ConfigRetomadaQueda, item: any,
 ): Promise<{ estado: "enviada" | "ignorada" | "falhou"; motivo: string | null }> {
   const tel = canonicoTelefone(String(item.telefone || ""));
-  if (!telefoneBrPlausivel(tel)) return { estado: "ignorada", motivo: "telefone_invalido" };
+  if (!telefonePlausivel(tel)) return { estado: "ignorada", motivo: "telefone_invalido" };
   const fase = faseTeste(cfg, tel);
   if (!fase.atende) return { estado: "ignorada", motivo: "fora_dos_numeros_teste" };
   const { data: linha } = await sb.from("vendedores_whatsapp").select("*").eq("id", item.linha_id).maybeSingle();
@@ -2061,7 +2061,7 @@ async function encerrarPelaEquipe(req: Request, sb: SupabaseClient, body: any): 
     .maybeSingle();
   if (!card) return semMensagem("card_nao_encontrado");
   const para = canonicoTelefone(String((card as any).numero_whatsapp || (card as any).telefone || ""));
-  if (!telefoneBrPlausivel(para)) return semMensagem("telefone_invalido");
+  if (!telefonePlausivel(para)) return semMensagem("telefone_invalido");
   const fase = faseTeste(cfg, para);
   if (!fase.atende) return semMensagem("fora_dos_numeros_teste");
   const { data: ultLead } = await sb
