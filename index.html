@@ -6778,25 +6778,8 @@ async function logAudit(acao, tabela, registroId, dadosAntes, dadosDepois) {
     }
 }
 
-// Sessão — auto-logout APENAS após 10 min sem qualquer atividade
-var _ultimaAtividade = Date.now();
-function _registrarAtividade() { _ultimaAtividade = Date.now(); }
-document.addEventListener('click', _registrarAtividade);
-document.addEventListener('keydown', _registrarAtividade);
-document.addEventListener('scroll', _registrarAtividade, true);
-document.addEventListener('mousemove', _registrarAtividade);
-document.addEventListener('touchstart', _registrarAtividade);
-
-setInterval(function() {
-    if (!currentUser) return;
-    if (Date.now() - _ultimaAtividade > 10 * 60 * 1000) {
-        try { supabaseClient.auth.signOut(); } catch(e) {}
-        try { localStorage.removeItem('ic_fallback_user'); } catch(e) {}
-        currentUser = null;
-        showToast('Sessão encerrada por inatividade (10 min). Faça login novamente.', 'info');
-        setTimeout(function() { window.location.reload(); }, 2000);
-    }
-}, 60 * 1000);
+// Sessão — SEM logout automático por inatividade (pedido do Fabio, 18/11/2026).
+// A sessão só termina quando o usuário clica em "Sair" (signOut em handleLogout()).
 // Sessão Supabase Auth refresca automaticamente via autoRefreshToken: true (createClient)
 
 // ===================================================================
