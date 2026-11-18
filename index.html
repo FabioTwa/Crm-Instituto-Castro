@@ -6657,8 +6657,20 @@
 // ===================================================================
 const SUPABASE_URL = window.IC_CONFIG.SUPABASE_URL; // o valor vem de config.js, nunca do codigo
 const SUPABASE_ANON_KEY = window.IC_CONFIG.SUPABASE_ANON_KEY; // o valor vem de config.js, nunca do codigo
+// Sessão vale só enquanto a ABA estiver aberta (pedido do Fabio, 18/11/2026):
+// o token fica em sessionStorage, que o navegador apaga ao fechar a aba.
+// Atualizar a página (F5) mantém o login; abrir o CRM numa aba nova pede login.
+// Limpa o token antigo que versões anteriores guardavam em localStorage.
+try {
+    Object.keys(localStorage).forEach(function (k) {
+        if (/^sb-.*-auth-token$/.test(k)) localStorage.removeItem(k);
+    });
+    localStorage.removeItem('ic_fallback_user');
+} catch (e) { /* storage bloqueado: sem efeito */ }
+var _icAuthStorage;
+try { window.sessionStorage.setItem('ic_teste_storage', '1'); window.sessionStorage.removeItem('ic_teste_storage'); _icAuthStorage = window.sessionStorage; } catch (e) { _icAuthStorage = undefined; }
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    auth: { autoRefreshToken: true, persistSession: true, detectSessionInUrl: true }
+    auth: { autoRefreshToken: true, persistSession: true, detectSessionInUrl: true, storage: _icAuthStorage }
 });
 
 // ===================================================================
@@ -16310,7 +16322,7 @@ document.addEventListener('DOMContentLoaded', function() {
     window._bootStart = Date.now();
     // Havia token guardado? Decide se a ausencia de sessao e primeiro acesso
     // (vai pro login) ou sessao vencida (mensagem propria).
-    try { window._icTinhaToken = Object.keys(localStorage).some(function (k) { return /^sb-.*-auth-token$/.test(k); }); } catch (e) { window._icTinhaToken = false; }
+    try { window._icTinhaToken = Object.keys(sessionStorage).some(function (k) { return /^sb-.*-auth-token$/.test(k); }); } catch (e) { window._icTinhaToken = false; }
     var _bootLogo = document.getElementById('boot-logo');
     var _loginImg = document.querySelector('.login-logo img');
     if (_bootLogo && _loginImg) _bootLogo.src = _loginImg.src;
