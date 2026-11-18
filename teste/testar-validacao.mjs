@@ -62,6 +62,36 @@ igual('erro tel curto', V.icTelefoneErro('12345') !== null, true);
 igual('erro tel celular sem 9', V.icTelefoneErro('(11) 88456-7712'), 'Celular deve começar com 9 depois do DDD.');
 igual('erro tel ok', V.icTelefoneErro('(11) 98456-7712'), null);
 igual('erro tel DDD zero', V.icTelefoneErro('(01) 98456-7712'), 'DDD inválido.');
+igual('erro tel DDD 10', V.icTelefoneErro('(10) 98456-7712'), 'DDD inválido.');
+// ---- Telefone de outro país (com o código do país)
+igual('E.164 Reino Unido com +', V.icTelefoneParaE164('+44 7700 900123'), '447700900123');
+igual('E.164 Reino Unido sem + (12 dígitos)', V.icTelefoneParaE164('447700900123'), '447700900123');
+igual('E.164 EUA com + (11 dígitos)', V.icTelefoneParaE164('+1 (202) 555-0123'), '12025550123');
+igual('E.164 Portugal com +', V.icTelefoneParaE164('+351 912 345 678'), '351912345678');
+igual('E.164 sem + e 11 dígitos continua Brasil', V.icTelefoneParaE164('12925550123'), '5512925550123');
+igual('E.164 +55 com tamanho errado é inválido', V.icTelefoneParaE164('+55 11 9845'), null);
+// Com "+", vale o código digitado: "+11 98456-7712" é lido como país 1 (EUA/Canadá), não como Brasil.
+igual('E.164 com + respeita o código digitado', V.icTelefoneParaE164('+11 98456-7712'), '11984567712');
+igual('E.164 estrangeiro curto demais', V.icTelefoneParaE164('+44 1234'), null);
+igual('E.164 estrangeiro longo demais (LID)', V.icTelefoneParaE164('+12345678901234'), null);
+igual('E.164 começando com 0 é inválido', V.icTelefoneParaE164('+0044 7700 900123'), null);
+igual('estrangeiro detectado', V.icTelefoneEstrangeiro('447700900123'), true);
+igual('brasileiro não é estrangeiro', V.icTelefoneEstrangeiro('5511984567712'), false);
+igual('formatar estrangeiro com +', V.icTelefoneFormatar('447700900123'), '+447700900123');
+igual('formatar estrangeiro já com +', V.icTelefoneFormatar('+44 7700 900123'), '+447700900123');
+igual('formatar +55 continua BR', V.icTelefoneFormatar('+55 11 98456-7712'), '(11) 98456-7712');
+igual('máscara + sozinho', V.icTelefoneMascara('+'), '+');
+igual('máscara +5 (digitando)', V.icTelefoneMascara('+5'), '+5');
+igual('máscara +55 (digitando)', V.icTelefoneMascara('+55'), '+55');
+igual('máscara +55 com DDD', V.icTelefoneMascara('+5511984567712'), '+55 (11) 98456-7712');
+igual('máscara +55 refeita sobre si mesma', V.icTelefoneMascara('+55 (11) 98456-7712'), '+55 (11) 98456-7712');
+igual('máscara estrangeiro', V.icTelefoneMascara('+44 7700 900123'), '+447700900123');
+igual('máscara estrangeiro corta em 13 dígitos', V.icTelefoneMascara('+4477009001234567'), '+4477009001234');
+igual('máscara colou estrangeiro sem +', V.icTelefoneMascara('447700900123'), '+447700900123');
+igual('erro tel estrangeiro ok', V.icTelefoneErro('+44 7700 900123'), null);
+igual('erro tel estrangeiro ok (EUA)', V.icTelefoneErro('+1 202 555 0123'), null);
+igual('erro tel estrangeiro curto', V.icTelefoneErro('+44 1234'), 'Informe o telefone com DDD: (11) 98456-7712. De outro país, comece com + e o código do país: +44 7700 900123.');
+igual('erro tel +55 errado', V.icTelefoneErro('+55 11 9845') !== null, true);
 
 // ---- E-mail
 igual('email normaliza caixa e espaços', V.icEmailNormalizar('  Fulano@Exemplo.COM '), { ok: true, valor: 'fulano@exemplo.com', erro: null });

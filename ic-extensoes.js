@@ -52,22 +52,16 @@
         return icOrigemRotulo(cl.origem);   // lista oficial em ic-validacao.js
     };
 
-    // Telefone BR formatado: (11) 99999-9999 / (11) 3333-4444. Entrada pode vir com 55.
+    // Telefone formatado: (11) 99999-9999 / (11) 3333-4444; de outro país, +447700900123.
     window.icFormatarTelefoneBR = function (tel) {
         return icTelefoneFormatar(tel);   // implementação única e testada em ic-validacao.js
     };
 
-    // Validação de formato BR (Parte 3.6). Devolve a mensagem de erro ou null.
+    // Validação do telefone do cadastro (Brasil com DDD ou outro país com o código). Devolve a
+    // mensagem de erro ou null. Implementação única em ic-validacao.js (icTelefoneErro).
     // A duplicidade por funil é do banco (índice único), não daqui.
     window.icValidarTelefoneBR = function (tel) {
-        var d = String(tel || '').replace(/\D/g, '');
-        if (!d) return 'Telefone é obrigatório.';
-        if (d.length >= 12 && d.indexOf('55') === 0) d = d.slice(2);
-        if (d.length !== 10 && d.length !== 11) return 'Informe um telefone brasileiro com DDD: (11) 99999-9999.';
-        var ddd = parseInt(d.slice(0, 2), 10);
-        if (isNaN(ddd) || ddd < 11 || ddd > 99 || d[0] === '0') return 'DDD inválido.';
-        if (d.length === 11 && d[2] !== '9') return 'Celular com 11 dígitos precisa começar com 9 depois do DDD.';
-        return null;
+        return icTelefoneErro(tel);
     };
 
     window.icErroInline = function (id, html) {
