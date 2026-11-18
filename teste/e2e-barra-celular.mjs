@@ -169,6 +169,10 @@ async function testarCelular(browser, base) {
     const page = await ctx.newPage();
     await entrar(page, base, 'admin');
 
+    // ---- sem zoom no celular
+    const zoom = await page.evaluate(() => ({ meta: document.querySelector('meta[name=viewport]').content, toque: getComputedStyle(document.documentElement).touchAction }));
+    check('zoom travado no celular (meta viewport e gesto de pinça)', /maximum-scale=1(\.0)?\b/.test(zoom.meta) && /user-scalable=no/.test(zoom.meta) && zoom.toque === 'pan-x pan-y', zoom);
+
     // ---- barra
     check('menu lateral não aparece', !(await visivel(page, '#ic-sidebar')));
     check('botão antigo do topo saiu', (await page.locator('.mobile-menu-btn').count()) === 0);
