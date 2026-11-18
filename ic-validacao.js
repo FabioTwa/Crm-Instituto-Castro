@@ -60,44 +60,78 @@
 
     // ----------------------------------------------------------- TELEFONE
     // Armazenamento: E.164 sem "+", ex.: 5511984567712 (o webhook casa por esse formato).
-    // Entrada aceita: (11) 98456-7712, 11984567712, +55 11 98456-7712, 1133334444 (fixo de 8 dígitos).
+    // Brasil: (11) 98456-7712, 11984567712, +55 11 98456-7712, 1133334444 (fixo de 8 dígitos).
+    // Outro país: com o código do país, ex.: +44 7700 900123 ou 447700900123 (8 a 13 dígitos,
+    // a mesma regra das funções do servidor, _shared/telefone.ts telefonePlausivel).
+    // Com "+", vale o código do país digitado. Sem "+", 10 ou 11 dígitos são do Brasil.
+    function comMais(t) { return /^\s*\+/.test(String(t == null ? '' : t)); }
+
+    // Número de fora do Brasil já com o código do país (só dígitos). null se não for.
+    function telefoneExterior(d) {
+        return /^[1-9]\d{7,12}$/.test(d) && d.indexOf('55') !== 0 ? d : null;
+    }
+
     function icTelefoneParaE164(t) {
         var d = digitos(t);
         if (!d) return null;
-        if (d.length === 10 || d.length === 11) return '55' + d;
+        if (comMais(t) && d.indexOf('55') !== 0) return telefoneExterior(d);
+        if (d.length === 10 || d.length === 11) return comMais(t) ? null : '55' + d;
         if ((d.length === 12 || d.length === 13) && d.indexOf('55') === 0) return d;
-        return null;
+        return telefoneExterior(d);
+    }
+
+    // true quando o número é de fora do Brasil (para a tela mostrar "+" e o código do país).
+    function icTelefoneEstrangeiro(t) {
+        var e = icTelefoneParaE164(t);
+        return !!e && e.indexOf('55') !== 0;
     }
 
     // Exibição: (11) 98456-7712 (celular) ou (11) 3333-4444 (fixo). Aceita DDI 55.
-    // Número que não casa com nenhum formato (estrangeiro, legado) volta como veio.
+    // Fora do Brasil: +447700900123. Número que não casa com nenhum formato (legado) volta como veio.
     function icTelefoneFormatar(t) {
         var d = digitos(t);
-        if (d.length >= 12 && d.indexOf('55') === 0) d = d.slice(2);
-        if (d.length === 11) return '(' + d.slice(0, 2) + ') ' + d.slice(2, 7) + '-' + d.slice(7);
-        if (d.length === 10) return '(' + d.slice(0, 2) + ') ' + d.slice(2, 6) + '-' + d.slice(6);
+        if (!comMais(t) || d.indexOf('55') === 0) {
+            var br = d;
+            if (br.length >= 12 && br.indexOf('55') === 0) br = br.slice(2);
+            if (br.length === 11) return '(' + br.slice(0, 2) + ') ' + br.slice(2, 7) + '-' + br.slice(7);
+            if (br.length === 10) return '(' + br.slice(0, 2) + ') ' + br.slice(2, 6) + '-' + br.slice(6);
+        }
+        if (icTelefoneEstrangeiro(t)) return '+' + d;
         return t == null ? '' : String(t);
     }
 
-    // Máscara enquanto digita (sem DDI): (11) 98456-7712
-    function icTelefoneMascara(t) {
-        var d = digitos(t);
-        if (d.length > 11 && d.indexOf('55') === 0) d = d.slice(2);
+    function mascaraBr(d) {
         d = d.slice(0, 11);
-        var s = '';
+        var corte = d.length > 10 ? 7 : 6, s = '';
         if (d.length) s = '(' + d.slice(0, 2);
-        if (d.length >= 3) s += ') ' + d.slice(2, d.length > 10 ? 7 : 6);
-        if (d.length > (d.length > 10 ? 7 : 6)) s += '-' + d.slice(d.length > 10 ? 7 : 6);
+        if (d.length >= 3) s += ') ' + d.slice(2, corte);
+        if (d.length > corte) s += '-' + d.slice(corte);
         return s;
     }
+
+    // Máscara enquanto digita: (11) 98456-7712. Começou com "+": +55 (11) 98456-7712 para o Brasil;
+    // outro código de país fica +447700900123 (só dígitos, no máximo 13, sem formato de outro país).
+    function icTelefoneMascara(t) {
+        var d = digitos(t);
+        if (comMais(t)) {
+            if (d.length > 2 && d.indexOf('55') === 0) return '+55 ' + mascaraBr(d.slice(2));
+            return '+' + d.slice(0, 13);
+        }
+        if (d.length > 11 && d.indexOf('55') === 0) return mascaraBr(d.slice(2));
+        if (d.length > 11) return '+' + d.slice(0, 13);   // colou número de fora sem o "+"
+        return mascaraBr(d);
+    }
+
+    var ERRO_TEL_FORMATO = 'Informe o telefone com DDD: (11) 98456-7712. De outro país, comece com + e o código do país: +44 7700 900123.';
 
     function icTelefoneErro(t) {
         var d = digitos(t);
         if (!d) return 'Telefone é obrigatório.';
-        var ddd = icTelefoneParaE164(d);
-        if (!ddd) return 'Informe um telefone brasileiro com DDD: (11) 98456-7712.';
-        var local = ddd.slice(2);
-        if (local.charAt(0) === '0' || local.charAt(1) === '0') return 'DDD inválido.';
+        var e164 = icTelefoneParaE164(t);
+        if (!e164) return ERRO_TEL_FORMATO;
+        if (e164.indexOf('55') !== 0) return null;   // fora do Brasil: só o tamanho é conferido
+        var local = e164.slice(2);
+        if (local.charAt(0) === '0' || local.charAt(1) === '0' || local.slice(0, 2) === '10') return 'DDD inválido.';
         if (local.length === 11 && local.charAt(2) !== '9') return 'Celular deve começar com 9 depois do DDD.';
         return null;
     }
@@ -226,6 +260,7 @@
         icCpfDigitos: icCpfDigitos, icCpfMascara: icCpfMascara, icCpfValido: icCpfValido, icCpfNormalizar: icCpfNormalizar,
         icCpfFormatar: icCpfFormatar, icCpfMascararParaLog: icCpfMascararParaLog,
         icTelefoneParaE164: icTelefoneParaE164, icTelefoneFormatar: icTelefoneFormatar, icTelefoneMascara: icTelefoneMascara, icTelefoneErro: icTelefoneErro,
+        icTelefoneEstrangeiro: icTelefoneEstrangeiro,
         icEmailNormalizar: icEmailNormalizar,
         IC_ORIGENS: IC_ORIGENS, icOrigemChave: icOrigemChave, icOrigemRotulo: icOrigemRotulo,
         icMoedaFormatar: icMoedaFormatar, icMoedaMascara: icMoedaMascara, icMoedaParaNumero: icMoedaParaNumero,

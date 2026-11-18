@@ -6373,7 +6373,8 @@
                     <div class="form-row">
                         <div class="form-group">
                             <label>Telefone <span class="required">*</span></label>
-                            <input type="text" class="form-input" name="telefone" placeholder="(11) 99999-9999" required autocomplete="off" inputmode="tel" maxlength="16" data-ic-mask="tel" oninput="icLimparErroInline('crm-add-telefone-erro')">
+                            <input type="text" class="form-input" name="telefone" placeholder="(11) 99999-9999" required autocomplete="off" inputmode="tel" maxlength="20" data-ic-mask="tel" oninput="icLimparErroInline('crm-add-telefone-erro')">
+                            <div class="ic-meta" style="margin-top:4px">De outro país: comece com + e o código do país.</div>
                             <div class="ic-erro-inline" id="crm-add-telefone-erro" style="display:none;color:var(--ic-danger);font-size:12px;margin-top:4px"></div>
                         </div>
                         <div class="form-group">
@@ -12320,7 +12321,7 @@ async function handleAddClienteCRM(e) {
         return;
     }
 
-    // [ic] Telefone: validação de formato BR no front (10 ou 11 dígitos, DDD válido);
+    // [ic] Telefone: Brasil com DDD (10 ou 11 dígitos) ou outro país com "+" e o código do país;
     // a trava de duplicidade por funil continua no banco (índice crm_card_unico_por_funil).
     var telefoneVal = form.elements['telefone'].value.trim();
     var telErro = icValidarTelefoneBR(telefoneVal);
