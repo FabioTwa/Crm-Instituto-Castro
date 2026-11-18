@@ -29,7 +29,7 @@ const TOKENS_ALPHA = ['--ic-border', '--ic-border-strong', '--ic-overlay'];
 // Seletores em que esses tokens podem ser background (overlay e divisor).
 const SELETOR_PERMITIDO = /overlay|crm-conv-modal|::before|::after|divider/i;
 // Superfícies que PRECISAM ter fundo opaco no CSS final.
-const SUPERFICIES_OPACAS = ['.modal-card', '.crm-conv-card', '.crm-fila', '.month-picker-dropdown', '.inad-multi-dropdown', '.login-card', '.sidebar', '.toast'];
+const SUPERFICIES_OPACAS = ['.modal-card', '.crm-conv-card', '.crm-fila', '.month-picker-dropdown', '.inad-multi-dropdown', '.login-card', '.sidebar', '.toast', '.ic-barra', '.ic-mais-folha'];
 const OPACO = /^(var\(--ic-(white|bg|bg-ice|bg-card|primary|accent|secondary|danger|muted)\)|var\(--bg-sidebar\)|#[0-9a-f]{6}\b)/i;
 
 // ---------- constantes de cor ----------
