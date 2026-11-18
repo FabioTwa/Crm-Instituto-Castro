@@ -68,7 +68,6 @@
         .sidebar-logout-btn { color: var(--ic-muted); }
         .sidebar-logout-btn:hover { color: var(--ic-danger); background: var(--ic-danger-soft); }
         .ic-topbar { background: var(--ic-white); border-bottom: 2px solid var(--ic-border); }
-        .mobile-menu-btn { color: var(--ic-primary); background: transparent; }
 
         /* Boot e login (Parte 3.1) */
         .app-boot-loading { background: var(--ic-bg); }
@@ -230,7 +229,7 @@
                (aplicar-tema-ic.mjs reprova a execução se isso acontecer).
            Fica no fim do bloco do tema para ganhar das regras anteriores.
            ===================================================================== */
-        .modal-overlay, .crm-conv-modal, .ic-drawer-overlay, .doc-preview-overlay { background: var(--ic-overlay); }
+        .modal-overlay, .crm-conv-modal, .doc-preview-overlay { background: var(--ic-overlay); }
         .modal-overlay { position: fixed; inset: 0; z-index: var(--z-modal-overlay); }
         .doc-preview-overlay { z-index: var(--z-modal-overlay); }
         .modal-card, .crm-conv-card { background: var(--ic-white); border: 2px solid var(--ic-border-strong); box-shadow: var(--ic-sombra-modal) !important; opacity: 1; }
@@ -469,3 +468,94 @@
             .ic-cal-mes-ev span, .ic-cal-mes-ev b { display: none; }
             .ic-cal-mes-ev { justify-content: center; }
         }
+
+        /* =====================================================================
+           BARRA DE NAVEGAÇÃO DO CELULAR E DO TABLET (até 1023px)
+           Itens em ic-menu.js (lista única, a mesma do menu lateral); montagem e folha "Mais" em ic-barra.js.
+           No computador (1024px ou mais) nada daqui aparece e --ic-barra-h vale 0.
+           Camadas: a barra e a folha ficam acima do conteúdo, das barras fixas e dos menus suspensos
+           (--z-dropdown), e abaixo de gavetas (--z-drawer), janelas (--z-modal) e avisos (--z-toast).
+           Cores: ativo no azul da marca (--ic-secondary, 6,3:1 sobre branco; o --ic-accent dá 3,6:1 e
+           não passa em 4,5:1); normal no cinza de texto secundário (--ic-muted, 4,6:1).
+           ===================================================================== */
+        :root { --ic-barra-h: 0px; }
+        .ic-barra { display: none; }
+        @media (max-width: 1023px) {
+            /* Altura total da barra: 64px úteis + a área da barra de gestos do iPhone. */
+            :root { --ic-barra-h: calc(64px + env(safe-area-inset-bottom, 0px)); }
+
+            /* Menu lateral sai; o topo fica só com o logo. */
+            .sidebar { display: none !important; }
+            .ic-topbar {
+                display: flex; align-items: center; justify-content: center;
+                position: fixed; top: 0; left: 0; right: 0; z-index: calc(var(--z-sidebar) + 2);
+                height: calc(56px + env(safe-area-inset-top, 0px));
+                padding: env(safe-area-inset-top, 0px) max(12px, env(safe-area-inset-right, 0px)) 0 max(12px, env(safe-area-inset-left, 0px));
+            }
+            .ic-topbar-logo { height: 32px; width: auto; display: block; }
+
+            /* Conteúdo: começa abaixo do topo e termina acima da barra. */
+            .main-content {
+                margin-left: 0;
+                padding: calc(72px + env(safe-area-inset-top, 0px)) max(var(--ic-content-gutter), env(safe-area-inset-right, 0px)) calc(20px + var(--ic-barra-h)) max(var(--ic-content-gutter), env(safe-area-inset-left, 0px));
+            }
+
+            .ic-barra {
+                display: block; position: fixed; left: 0; right: 0; bottom: 0;
+                z-index: calc(var(--z-dropdown) + 3);
+                background: var(--ic-white); border-top: 1px solid var(--ic-border-strong); box-shadow: none;
+                padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+            }
+            .ic-barra-lista { display: flex; height: 64px; margin: 0; padding: 0; list-style: none; }
+            .ic-barra-lista > li { flex: 1 1 0; min-width: 0; display: flex; }
+            .ic-barra-item {
+                flex: 1 1 auto; min-width: 44px; min-height: 44px; margin: 0; padding: 8px 2px;
+                display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+                background: transparent; border: 0; border-radius: 0; box-shadow: none; cursor: pointer;
+                color: var(--ic-muted); font-family: 'Manrope', sans-serif; font-size: 12px; line-height: 16px; font-weight: 500;
+                letter-spacing: 0; text-transform: none; -webkit-tap-highlight-color: transparent;
+            }
+            .ic-barra-item svg { width: 24px; height: 24px; flex: 0 0 auto; }
+            .ic-barra-rotulo { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .ic-barra-item.ativo { color: var(--ic-secondary); font-weight: 700; }
+            .ic-barra-item:hover { background: transparent; color: var(--ic-secondary); }
+            .ic-barra-item:focus-visible { outline: 2px solid var(--ic-secondary); outline-offset: -4px; }
+
+            /* Folha "Mais": só existe no HTML enquanto está aberta. */
+            .ic-mais-overlay {
+                position: fixed; inset: 0; z-index: calc(var(--z-dropdown) + 1);
+                background: var(--ic-overlay);
+            }
+            .ic-mais-folha {
+                position: fixed; left: env(safe-area-inset-left, 0px); right: env(safe-area-inset-right, 0px); bottom: var(--ic-barra-h);
+                z-index: calc(var(--z-dropdown) + 2);
+                display: flex; flex-direction: column;
+                max-height: calc(100vh - var(--ic-barra-h) - 48px);
+                max-height: calc(100dvh - var(--ic-barra-h) - 48px);
+                overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+                background: var(--ic-white); border-radius: 16px 16px 0 0; padding: 8px 0;
+                animation: icMaisSobe 160ms ease-out;
+            }
+            .ic-mais-alca { flex: 0 0 auto; width: 36px; height: 4px; border-radius: 2px; background: var(--ic-muted); opacity: .45; margin: 4px auto 8px; }
+            .ic-mais-lista { margin: 0; padding: 0; list-style: none; }
+            .ic-mais-item {
+                display: flex; align-items: center; gap: 16px; width: 100%; min-height: 48px; margin: 0; padding: 0 20px;
+                background: transparent; border: 0; border-radius: 0; box-shadow: none; cursor: pointer; text-align: left;
+                color: var(--ic-primary); font-family: 'Manrope', sans-serif; font-size: 15px; font-weight: 600;
+                letter-spacing: 0; text-transform: none;
+            }
+            .ic-mais-item svg { width: 24px; height: 24px; flex: 0 0 auto; color: var(--ic-muted); }
+            .ic-mais-item:hover { background: var(--ic-bg-ice); }
+            .ic-mais-item.ativo, .ic-mais-item.ativo svg { color: var(--ic-secondary); }
+            .ic-mais-item.ativo { font-weight: 700; }
+            .ic-mais-item:focus-visible { outline: 2px solid var(--ic-secondary); outline-offset: -2px; }
+            /* Com a folha aberta a página de trás não rola. */
+            html.ic-mais-aberta, html.ic-mais-aberta body { overflow: hidden; overscroll-behavior: none; }
+        }
+        @keyframes icMaisSobe { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+        @media (prefers-reduced-motion: reduce) { .ic-mais-folha { animation: none; } }
+
+        /* O que já fica preso embaixo da tela sobe a altura da barra (0 no computador). */
+        .toast-container { bottom: calc(24px + var(--ic-barra-h)); }
+        .crm-fila { bottom: calc(18px + var(--ic-barra-h)); }
+        @media (max-width: 700px) { .crm-fila { bottom: calc(12px + var(--ic-barra-h)); } }

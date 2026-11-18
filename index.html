@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>IC CRM — Instituto Castro</title>
 
     <!-- Ícone da aba (símbolo do Instituto Castro) -->
@@ -1226,15 +1226,6 @@
         }
 
         @media (max-width: 768px) {
-            .sidebar {
-                transform: translateX(-100%);
-                transition: transform 0.3s;
-            }
-
-            .sidebar.open {
-                transform: translateX(0);
-            }
-
             .main-content {
                 margin-left: 0;
                 /* Conteudo comeca abaixo da barra superior: 56 da barra
@@ -1264,36 +1255,13 @@
                 grid-template-columns: 1fr;
             }
 
-            .mobile-menu-btn {
-                display: flex !important;
-            }
-
             .kanban-board {
                 padding-bottom: 24px;
             }
         }
 
-        /* Barra e fundo escurecido so existem no celular; acima de 768px
-           ficam fora do layout, como o proprio botao ja ficava. */
-        .ic-topbar, .ic-drawer-overlay { display: none; }
-
-        .mobile-menu-btn {
-            display: none;
-            position: fixed;
-            top: 16px;
-            left: 16px;
-            z-index: calc(var(--z-sidebar) + 1);
-            width: 40px;
-            height: 40px;
-            border-radius: var(--border-radius);
-            background: var(--bg-sidebar);
-            color: var(--ic-white);
-            border: none;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            font-size: 20px;
-        }
+        /* Topo do celular/tablet: só existe até 1023px (ver o bloco da barra de navegação no fim do tema). */
+        .ic-topbar { display: none; }
         /* ===== IMPORTAR ASAAS ===== */
         .asaas-import-box {
             background: linear-gradient(135deg, var(--ic-secondary-soft) 0%, var(--ic-accent-soft) 100%);
@@ -5465,69 +5433,8 @@
                 max-width: calc(100vw - 24px);
             }
 
-            /* ===== PASSO 9: menu vira gaveta, e a barra que fecha o buraco =====
-               Dois problemas no mesmo lugar. Primeiro: a sidebar estava
-               parada por cima do conteudo. Medido em 430px, com a tela de
-               login carregada e sem a classe .open, ela ocupava 0..240 em
-               position:fixed com z-index 100 e pointer-events ativo - ou seja,
-               engolia todo toque na faixa esquerda de qualquer tela. A regra
-               antiga de translateX(-100%) existia no arquivo e simplesmente
-               nao chegava a casar com o elemento: a varredura do CSSOM voltou
-               zero regra de transform aplicavel a ela. Aqui o estado passa a
-               ser explicito e verificavel, e visibility:hidden garante que a
-               gaveta fechada nao recebe toque nem que o transform falhe.
-
-               Segundo: o botao do menu era fixed solto e voltava a cobrir o
-               conteudo assim que a pagina rolava - o residuo que ficou
-               declarado no commit do botao. Agora ele mora numa barra opaca
-               de largura inteira, e o conteudo passa por baixo dela em vez de
-               por baixo de um quadrado no meio do texto. */
-            /* A gaveta passa POR CIMA da barra: com a sidebar em z 100 e a
-               barra em 102, os 56px do topo da gaveta ficavam cobertos e o
-               logo aparecia cortado ao meio. Ordem agora, de tras
-               para a frente: conteudo, fundo escuro (101), barra (102),
-               gaveta (103). */
-            .ic-topbar {
-                display: flex;
-                position: fixed;
-                top: 0; left: 0; right: 0;
-                height: 56px;
-                display: flex;
-                align-items: center;
-                padding: 0 12px;
-                background: var(--bg-sidebar);
-                z-index: calc(var(--z-sidebar) + 2);
-            }
-            .mobile-menu-btn {
-                position: static !important;
-                top: auto !important;
-                left: auto !important;
-            }
-            .sidebar {
-                z-index: calc(var(--z-sidebar) + 3);
-                transform: translateX(-100%) !important;
-                visibility: hidden;
-                transition: transform .28s ease, visibility 0s linear .28s;
-            }
-            .sidebar.open {
-                transform: translateX(0) !important;
-                visibility: visible;
-                transition: transform .28s ease, visibility 0s;
-            }
-            .ic-drawer-overlay {
-                display: block;
-                position: fixed;
-                inset: 0;
-                background: var(--ic-overlay);
-                z-index: calc(var(--z-sidebar) + 1);
-                opacity: 0;
-                pointer-events: none;
-                transition: opacity .28s ease;
-            }
-            /* O estado da gaveta mora numa classe so. showView ja remove .open
-               ao trocar de tela, e com :has o fundo escuro sai junto sem
-               precisar de mais nenhuma chamada espalhada pelo codigo. */
-            body:has(.sidebar.open) .ic-drawer-overlay { opacity: 1; pointer-events: auto; }
+            /* A gaveta lateral e o botão do topo saíram: até 1023px a navegação é a barra de
+               baixo (bloco "BARRA DE NAVEGAÇÃO DO CELULAR" no fim do tema). */
 
             /* PASSO 8: alvo de toque de 44px.
                Vale tambem para botao dentro de tabela. Tentei primeiro um
@@ -5539,10 +5446,10 @@
                desde o Passo 1, entao nao empurra a pagina. */
             button, select, input[type="date"], input[type="month"],
             .btn-primary, .btn-secondary, .sidebar-item,
-            .dp-card-copy-btn, .mobile-menu-btn {
+            .dp-card-copy-btn {
                 min-height: 44px;
             }
-            button, .dp-card-copy-btn, .mobile-menu-btn { min-width: 44px; }
+            button, .dp-card-copy-btn { min-width: 44px; }
 
             /* PASSO 7: coluna do identificador fica parada ao rolar.
                Rolar para a direita levava o nome embora e sobrava "R$ 2.970"
@@ -5845,7 +5752,6 @@
         .sidebar-logout-btn { color: var(--ic-muted); }
         .sidebar-logout-btn:hover { color: var(--ic-danger); background: var(--ic-danger-soft); }
         .ic-topbar { background: var(--ic-white); border-bottom: 2px solid var(--ic-border); }
-        .mobile-menu-btn { color: var(--ic-primary); background: transparent; }
 
         /* Boot e login (Parte 3.1) */
         .app-boot-loading { background: var(--ic-bg); }
@@ -6007,7 +5913,7 @@
                (aplicar-tema-ic.mjs reprova a execução se isso acontecer).
            Fica no fim do bloco do tema para ganhar das regras anteriores.
            ===================================================================== */
-        .modal-overlay, .crm-conv-modal, .ic-drawer-overlay, .doc-preview-overlay { background: var(--ic-overlay); }
+        .modal-overlay, .crm-conv-modal, .doc-preview-overlay { background: var(--ic-overlay); }
         .modal-overlay { position: fixed; inset: 0; z-index: var(--z-modal-overlay); }
         .doc-preview-overlay { z-index: var(--z-modal-overlay); }
         .modal-card, .crm-conv-card { background: var(--ic-white); border: 2px solid var(--ic-border-strong); box-shadow: var(--ic-sombra-modal) !important; opacity: 1; }
@@ -6247,6 +6153,97 @@
             .ic-cal-mes-ev { justify-content: center; }
         }
 
+        /* =====================================================================
+           BARRA DE NAVEGAÇÃO DO CELULAR E DO TABLET (até 1023px)
+           Itens em ic-menu.js (lista única, a mesma do menu lateral); montagem e folha "Mais" em ic-barra.js.
+           No computador (1024px ou mais) nada daqui aparece e --ic-barra-h vale 0.
+           Camadas: a barra e a folha ficam acima do conteúdo, das barras fixas e dos menus suspensos
+           (--z-dropdown), e abaixo de gavetas (--z-drawer), janelas (--z-modal) e avisos (--z-toast).
+           Cores: ativo no azul da marca (--ic-secondary, 6,3:1 sobre branco; o --ic-accent dá 3,6:1 e
+           não passa em 4,5:1); normal no cinza de texto secundário (--ic-muted, 4,6:1).
+           ===================================================================== */
+        :root { --ic-barra-h: 0px; }
+        .ic-barra { display: none; }
+        @media (max-width: 1023px) {
+            /* Altura total da barra: 64px úteis + a área da barra de gestos do iPhone. */
+            :root { --ic-barra-h: calc(64px + env(safe-area-inset-bottom, 0px)); }
+
+            /* Menu lateral sai; o topo fica só com o logo. */
+            .sidebar { display: none !important; }
+            .ic-topbar {
+                display: flex; align-items: center; justify-content: center;
+                position: fixed; top: 0; left: 0; right: 0; z-index: calc(var(--z-sidebar) + 2);
+                height: calc(56px + env(safe-area-inset-top, 0px));
+                padding: env(safe-area-inset-top, 0px) max(12px, env(safe-area-inset-right, 0px)) 0 max(12px, env(safe-area-inset-left, 0px));
+            }
+            .ic-topbar-logo { height: 32px; width: auto; display: block; }
+
+            /* Conteúdo: começa abaixo do topo e termina acima da barra. */
+            .main-content {
+                margin-left: 0;
+                padding: calc(72px + env(safe-area-inset-top, 0px)) max(var(--ic-content-gutter), env(safe-area-inset-right, 0px)) calc(20px + var(--ic-barra-h)) max(var(--ic-content-gutter), env(safe-area-inset-left, 0px));
+            }
+
+            .ic-barra {
+                display: block; position: fixed; left: 0; right: 0; bottom: 0;
+                z-index: calc(var(--z-dropdown) + 3);
+                background: var(--ic-white); border-top: 1px solid var(--ic-border-strong); box-shadow: none;
+                padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+            }
+            .ic-barra-lista { display: flex; height: 64px; margin: 0; padding: 0; list-style: none; }
+            .ic-barra-lista > li { flex: 1 1 0; min-width: 0; display: flex; }
+            .ic-barra-item {
+                flex: 1 1 auto; min-width: 44px; min-height: 44px; margin: 0; padding: 8px 2px;
+                display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+                background: transparent; border: 0; border-radius: 0; box-shadow: none; cursor: pointer;
+                color: var(--ic-muted); font-family: 'Manrope', sans-serif; font-size: 12px; line-height: 16px; font-weight: 500;
+                letter-spacing: 0; text-transform: none; -webkit-tap-highlight-color: transparent;
+            }
+            .ic-barra-item svg { width: 24px; height: 24px; flex: 0 0 auto; }
+            .ic-barra-rotulo { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .ic-barra-item.ativo { color: var(--ic-secondary); font-weight: 700; }
+            .ic-barra-item:hover { background: transparent; color: var(--ic-secondary); }
+            .ic-barra-item:focus-visible { outline: 2px solid var(--ic-secondary); outline-offset: -4px; }
+
+            /* Folha "Mais": só existe no HTML enquanto está aberta. */
+            .ic-mais-overlay {
+                position: fixed; inset: 0; z-index: calc(var(--z-dropdown) + 1);
+                background: var(--ic-overlay);
+            }
+            .ic-mais-folha {
+                position: fixed; left: env(safe-area-inset-left, 0px); right: env(safe-area-inset-right, 0px); bottom: var(--ic-barra-h);
+                z-index: calc(var(--z-dropdown) + 2);
+                display: flex; flex-direction: column;
+                max-height: calc(100vh - var(--ic-barra-h) - 48px);
+                max-height: calc(100dvh - var(--ic-barra-h) - 48px);
+                overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+                background: var(--ic-white); border-radius: 16px 16px 0 0; padding: 8px 0;
+                animation: icMaisSobe 160ms ease-out;
+            }
+            .ic-mais-alca { flex: 0 0 auto; width: 36px; height: 4px; border-radius: 2px; background: var(--ic-muted); opacity: .45; margin: 4px auto 8px; }
+            .ic-mais-lista { margin: 0; padding: 0; list-style: none; }
+            .ic-mais-item {
+                display: flex; align-items: center; gap: 16px; width: 100%; min-height: 48px; margin: 0; padding: 0 20px;
+                background: transparent; border: 0; border-radius: 0; box-shadow: none; cursor: pointer; text-align: left;
+                color: var(--ic-primary); font-family: 'Manrope', sans-serif; font-size: 15px; font-weight: 600;
+                letter-spacing: 0; text-transform: none;
+            }
+            .ic-mais-item svg { width: 24px; height: 24px; flex: 0 0 auto; color: var(--ic-muted); }
+            .ic-mais-item:hover { background: var(--ic-bg-ice); }
+            .ic-mais-item.ativo, .ic-mais-item.ativo svg { color: var(--ic-secondary); }
+            .ic-mais-item.ativo { font-weight: 700; }
+            .ic-mais-item:focus-visible { outline: 2px solid var(--ic-secondary); outline-offset: -2px; }
+            /* Com a folha aberta a página de trás não rola. */
+            html.ic-mais-aberta, html.ic-mais-aberta body { overflow: hidden; overscroll-behavior: none; }
+        }
+        @keyframes icMaisSobe { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+        @media (prefers-reduced-motion: reduce) { .ic-mais-folha { animation: none; } }
+
+        /* O que já fica preso embaixo da tela sobe a altura da barra (0 no computador). */
+        .toast-container { bottom: calc(24px + var(--ic-barra-h)); }
+        .crm-fila { bottom: calc(18px + var(--ic-barra-h)); }
+        @media (max-width: 700px) { .crm-fila { bottom: calc(12px + var(--ic-barra-h)); } }
+
     </style>
 </head>
 <body>
@@ -6257,11 +6254,6 @@
     <div class="app-boot-spinner"></div>
 </div>
 
-<!-- Barra superior do celular: o botao do menu mora aqui em vez de flutuar
-     solto sobre o conteudo. Fica fora de app-authenticated para nao entrar no
-     layout de colunas; ela mesma se esconde acima de 768px. -->
-<div class="ic-topbar"><button class="mobile-menu-btn" onclick="icAlternarMenu()" aria-label="Abrir menu" aria-expanded="false" aria-controls="ic-sidebar">&#9776;</button></div>
-<div class="ic-drawer-overlay" onclick="icFecharMenu()"></div>
 
 <!-- ===== VIEW LOGIN ===== -->
 <div id="view-login" class="view active">
@@ -6291,70 +6283,19 @@
 <!-- ===== LAYOUT AUTENTICADO ===== -->
 <div id="app-authenticated" class="app-layout" style="display:none">
 
+    <!-- Topo do celular e do tablet (até 1023px): só o logo. A navegação mora na barra de baixo
+         (#ic-barra). É fixed, então não entra no layout de colunas; acima de 1023px fica escondido. -->
+    <header class="ic-topbar"><img class="ic-topbar-logo" src="assets/logo-instituto-castro.svg" alt="Instituto Castro"></header>
+
     <!-- Sidebar -->
     <aside class="sidebar" id="ic-sidebar">
         <div class="sidebar-logo" onclick="showView('view-crm')" title="Ir para o Pipeline">
                         <img src="assets/logo-instituto-castro.svg" alt="Instituto Castro"><span class="ic-logo-legenda">IC CRM</span>
         </div>
-<nav class="sidebar-nav">
-    <div class="sidebar-section" onclick="toggleSidebarGroup('sg-vendas')">Atendimento <span class="section-arrow">▾</span></div>
-    <div class="sidebar-group" id="sg-vendas">
-    <button class="sidebar-item" id="nav-leads" onclick="showView('view-leads')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
-        Leads
-    </button>
-
-    <button class="sidebar-item" id="nav-acoes-dia" onclick="showView('view-acoes-dia')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M8 14l2 2 4-4"/></svg>
-        Ações do Dia
-    </button>
-
-    <button class="sidebar-item" id="nav-crm" onclick="showView('view-crm')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
-        CRM / Pipeline
-    </button>
-
-    <button class="sidebar-item" id="nav-agendamentos" onclick="showView('view-agendamentos')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg>
-        Agendamentos
-    </button>
-
-    <!-- Jornada do Lead e Analise de Leads sairam do menu: viram secoes da tela Leads.
-         As rotas view-jornada-lead e view-analise-leads continuam existindo. -->
-
-    </div><!-- end sg-vendas -->
-    <div class="sidebar-divider"></div>
-    <div class="sidebar-section" onclick="toggleSidebarGroup('sg-sistema')">Sistema <span class="section-arrow">▾</span></div>
-    <div class="sidebar-group" id="sg-sistema">
-
-    <!-- WhatsApp: só Admin (não entra no catálogo de telas; ic-extensoes.js, seção 9). A bolinha mostra o estado. -->
-    <button class="sidebar-item" id="nav-whatsapp" onclick="showView('view-whatsapp')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-12.6 7.3L3 21l2.3-5.2A8.5 8.5 0 1 1 21 11.5z"/></svg>
-        WhatsApp
-        <span class="ic-wa-bolinha" id="ic-wa-bolinha" role="img" aria-label="Estado do WhatsApp desconhecido" hidden></span>
-    </button>
-    <button class="sidebar-item" id="nav-usuarios" onclick="showView('view-usuarios')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-        Usuários
-    </button>
-    <button class="sidebar-item" id="nav-permissoes" onclick="showView('view-permissoes')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-        Permissões
-    </button>
-    <button class="sidebar-item" id="nav-redistribuir-leads" onclick="showView('view-redistribuir-leads')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
-        Redistribuir Leads
-    </button>
-    <button class="sidebar-item" id="nav-audit-log" onclick="showView('view-audit-log')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>
-        Histórico de Alterações
-    </button>
-    <button class="sidebar-item" id="nav-meu-perfil" onclick="showView('view-meu-perfil')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-        Meu Perfil
-    </button>
-    </div><!-- end sg-sistema -->
-</nav>
+<!-- Itens do menu: lista única em ic-menu.js (a mesma da barra do celular). -->
+<nav class="sidebar-nav" id="ic-menu-lateral" aria-label="Menu principal"></nav>
+<script src="ic-menu.js"></script>
+<script>document.getElementById('ic-menu-lateral').innerHTML = IcMenu.htmlLateral();</script>
         <div class="sidebar-footer">
             <div class="sidebar-avatar" id="user-avatar">U</div>
             <div class="sidebar-user-info">
@@ -6365,6 +6306,10 @@
             </button>
         </div>
     </aside>
+
+    <!-- Barra de navegação do celular e do tablet (até 1023px). Itens montados por ic-barra.js a partir
+         de ic-menu.js, com a mesma regra de acesso do menu lateral. A folha "Mais" só existe aberta. -->
+    <nav class="ic-barra" id="ic-barra" aria-label="Menu do celular"><ul class="ic-barra-lista" id="ic-barra-lista"></ul></nav>
 
     <!-- Conteudo principal -->
     <main class="main-content">
@@ -7343,6 +7288,7 @@ async function handleLogout() {
     document.querySelectorAll('.sidebar-group').forEach(function(g) { g.style.display = ''; });
     document.querySelectorAll('.sidebar-section').forEach(function(s) { s.style.display = ''; });
     document.querySelectorAll('.sidebar-divider').forEach(function(d) { d.style.display = ''; });
+    if (typeof icBarraDefinirAcesso === 'function') icBarraDefinirAcesso(null);
     showView('view-login');
 }
 
@@ -15068,49 +15014,20 @@ async function aplicarPermissoesSidebar() {
     document.querySelectorAll('.sidebar-section').forEach(function(s) { s.style.display = ''; });
     document.querySelectorAll('.sidebar-divider').forEach(function(d) { d.style.display = ''; });
 
-    if (!currentUser) return;
-
-    // Carregar permissões granulares (novo sistema)
-    await carregarPermissoesUsuario();
-
-    // Admin: mostra tudo (já blindado)
-    if (window._perfilAtualCache && window._perfilAtualCache.is_admin) return;
-
-    // Tem permissões granulares no novo sistema?
-    var temNovo = window._permissoesCache && Object.keys(window._permissoesCache).length > 0;
-
-    var permitidas = [];
-    if (temNovo) {
-        // Usar matriz nova: pega telas com pode_visualizar=true
-        Object.keys(window._permissoesCache).forEach(function(chave) {
-            if (window._permissoesCache[chave].visualizar) permitidas.push(chave);
-        });
-    } else {
-        // FALLBACK: sistema antigo (perfil_permissoes.telas_permitidas)
-        var userResult = await supabaseClient.from('users').select('perfil').eq('email', currentUser.email).single();
-        if (!userResult.data) return;
-        var perfil = userResult.data.perfil || 'Vendedor';
-        if (perfil === 'Admin') return;
-        var perfilResult = await supabaseClient.from('perfil_permissoes').select('telas_permitidas').eq('perfil', perfil).single();
-        if (perfilResult.data) {
-            try { permitidas = JSON.parse(perfilResult.data.telas_permitidas || '[]'); } catch(e) { permitidas = []; }
-        }
-    }
-
-    // Se array vazio, só mostra Dashboard e Meu Perfil
-    if (permitidas.length === 0) permitidas = ['view-dashboard', 'view-meu-perfil'];
-
-    var sempreVisiveis = ['view-meu-perfil', 'view-dashboard'];
+    // A regra de quem vê cada item mora em ic-menu.js (IcMenu.podeVerTela) e vale para o menu
+    // lateral e para a barra do celular. Aqui só se descobre o acesso da pessoa.
+    // Enquanto carrega, a barra acompanha o reset do menu lateral (tudo visível com login). Assim, se a
+    // consulta de permissões falhar ou demorar, ninguém fica sem navegação no celular.
+    if (typeof icBarraDefinirAcesso === 'function') icBarraDefinirAcesso(currentUser ? { admin: true } : null);
+    var acesso = await icMenuCarregarAcesso();
+    if (typeof icBarraDefinirAcesso === 'function') icBarraDefinirAcesso(acesso);
+    if (!acesso || acesso.admin) return;   // sem login: nada a esconder ainda; Admin: mostra tudo
 
     document.querySelectorAll('.sidebar-item').forEach(function(btn) {
         var onclick = btn.getAttribute('onclick') || '';
         var match = onclick.match(/showView\('([^']+)'\)/);
         if (!match) return;
-        var viewId = match[1];
-
-        if (sempreVisiveis.indexOf(viewId) >= 0) return;
-
-        btn.style.display = permitidas.indexOf(viewId) >= 0 ? '' : 'none';
+        btn.style.display = IcMenu.podeVerTela(match[1], acesso) ? '' : 'none';
     });
 
     // Esconder seções (categorias) que ficaram sem itens visíveis
@@ -15131,6 +15048,42 @@ async function aplicarPermissoesSidebar() {
             }
         }
     });
+}
+
+// Acesso da pessoa logada, no formato de IcMenu: null (sem login), { admin: true } ou
+// { admin: false, permitidas: [...] }. Mesma origem de sempre: matriz nova de permissões
+// (pode_visualizar) ou, na falta dela, a lista antiga do perfil (perfil_permissoes).
+async function icMenuCarregarAcesso() {
+    if (!currentUser) return null;
+
+    // Carregar permissões granulares (novo sistema)
+    await carregarPermissoesUsuario();
+
+    // Admin: mostra tudo (já blindado)
+    if (window._perfilAtualCache && window._perfilAtualCache.is_admin) return { admin: true };
+
+    // Tem permissões granulares no novo sistema?
+    var temNovo = window._permissoesCache && Object.keys(window._permissoesCache).length > 0;
+
+    var permitidas = [];
+    if (temNovo) {
+        // Usar matriz nova: pega telas com pode_visualizar=true
+        Object.keys(window._permissoesCache).forEach(function(chave) {
+            if (window._permissoesCache[chave].visualizar) permitidas.push(chave);
+        });
+    } else {
+        // FALLBACK: sistema antigo (perfil_permissoes.telas_permitidas)
+        var userResult = await supabaseClient.from('users').select('perfil').eq('email', currentUser.email).single();
+        if (!userResult.data) return { admin: true };   // como antes: sem a linha do usuário, o menu não escondia nada
+        var perfil = userResult.data.perfil || 'Vendedor';
+        if (perfil === 'Admin') return { admin: true };
+        var perfilResult = await supabaseClient.from('perfil_permissoes').select('telas_permitidas').eq('perfil', perfil).single();
+        if (perfilResult.data) {
+            try { permitidas = JSON.parse(perfilResult.data.telas_permitidas || '[]'); } catch(e) { permitidas = []; }
+        }
+    }
+    // Lista vazia: IcMenu.podeVerTela trata como ['view-dashboard', 'view-meu-perfil'], como antes.
+    return { admin: false, permitidas: permitidas };
 }
 
 async function renderPermissoesNoModal(containerId, telasPermitidas) {
@@ -17667,57 +17620,9 @@ function crmFilaAplicar() {
 }
 
 // ===================================================================
-// PASSO 9: gaveta do menu
+// Menu do celular: a gaveta lateral e o botão do topo saíram. No celular e no
+// tablet (até 1023px) a navegação é a barra de baixo, em ic-barra.js.
 // ===================================================================
-// Abrir e fechar passam a ter um dono. Antes o botao chamava um
-// classList.toggle inline e nao havia como fechar sem acertar o botao de
-// novo: sem fundo escurecido, sem Esc, sem gesto. Quem fecha ao trocar de
-// tela continua sendo o showView, que ja remove .open - o fundo escuro sai
-// junto porque o CSS le o estado da propria classe.
-function icMenuAberto() {
-    var sb = document.getElementById('ic-sidebar');
-    return !!(sb && sb.classList.contains('open'));
-}
-function icAbrirMenu() {
-    var sb = document.getElementById('ic-sidebar');
-    if (!sb) return;
-    sb.classList.add('open');
-    var b = document.querySelector('.mobile-menu-btn');
-    if (b) b.setAttribute('aria-expanded', 'true');
-}
-function icFecharMenu() {
-    var sb = document.getElementById('ic-sidebar');
-    if (!sb) return;
-    sb.classList.remove('open');
-    var b = document.querySelector('.mobile-menu-btn');
-    if (b) b.setAttribute('aria-expanded', 'false');
-}
-function icAlternarMenu() { icMenuAberto() ? icFecharMenu() : icAbrirMenu(); }
-
-(function () {
-    document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape' && icMenuAberto()) icFecharMenu();
-    });
-
-    // Gesto: arrastar para a esquerda fecha a gaveta aberta; arrastar da
-    // borda esquerda para a direita abre. O limite de 60px de percurso e de
-    // 40px de desvio vertical evita disparar durante rolagem da lista.
-    var x0 = null, y0 = null, naBorda = false;
-    document.addEventListener('touchstart', function (e) {
-        var t = e.touches[0]; if (!t) return;
-        x0 = t.clientX; y0 = t.clientY; naBorda = t.clientX <= 24;
-    }, { passive: true });
-    document.addEventListener('touchend', function (e) {
-        if (x0 == null) return;
-        var t = e.changedTouches[0]; if (!t) { x0 = null; return; }
-        var dx = t.clientX - x0, dy = Math.abs(t.clientY - y0);
-        if (dy <= 40 && Math.abs(dx) >= 60) {
-            if (dx < 0 && icMenuAberto()) icFecharMenu();
-            else if (dx > 0 && naBorda && !icMenuAberto() && matchMedia('(max-width: 768px)').matches) icAbrirMenu();
-        }
-        x0 = null; y0 = null; naBorda = false;
-    }, { passive: true });
-})();
 
 // ===================================================================
 // FAIXA QUE ROLA: sombra so quando ha o que rolar
@@ -17813,5 +17718,6 @@ function icTentarDeNovo() {
 <script src="ic-validacao.js"></script>
 <script src="encaixes-depois.js"></script>
 <script src="ic-extensoes.js"></script>
+<script src="ic-barra.js"></script>
 </body>
 </html>
