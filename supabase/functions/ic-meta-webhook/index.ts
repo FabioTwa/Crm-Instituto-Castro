@@ -776,12 +776,15 @@ async function carregarVendedores(supabase: Supa): Promise<string | null> {
   vendedorCache = mapa;
   vendedorPorZapiInstancia = porZapi;
   vendedorPorZapiNumero = porZapiNumero;
-  // Quem recebe o aviso de agendamento da IA (SQL 37) tambem e da casa: o eco
-  // do aviso nao pode virar card de lead.
-  const { data: aviso } = await supabase.from("crm_ia_config").select("valor").eq("chave", "aviso_agendamento_whatsapp").maybeSingle();
-  for (const parte of String((aviso as any)?.valor || "").split(/[,;\n]/)) {
-    const c = canonicoTelefone(parte.trim());
-    if (c) numeros.add(c);
+  // Quem recebe o aviso de agendamento da IA (SQL 37) e o call center do
+  // pre-agendamento (SQL 51) tambem sao da casa: o eco do aviso nao pode virar
+  // card de lead.
+  const { data: avisos } = await supabase.from("crm_ia_config").select("valor").in("chave", ["aviso_agendamento_whatsapp", "callcenter_whatsapp"]);
+  for (const linha of (avisos as any[]) || []) {
+    for (const parte of String(linha?.valor || "").split(/[,;\n]/)) {
+      const c = canonicoTelefone(parte.trim());
+      if (c) numeros.add(c);
+    }
   }
   numerosDaCasa = numeros;
   vendedorCacheEm = Date.now();

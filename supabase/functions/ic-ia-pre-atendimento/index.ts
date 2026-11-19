@@ -18,6 +18,13 @@
 // handoff agendamento_confirmado (so historico), e a IA segue respondendo.
 // ATENDIMENTO 100% AUTONOMO (22/10/2026): nao existe atendente. A IA nunca diz
 // que vai passar para a equipe; so a recusa do consentimento (LGPD) a cala.
+// PRE-AGENDAMENTO (SQL 51, reuniao com o IC em 19/11/2026), so com
+// crm_ia_config.modo_pre_agendamento='true': a Jully oferece um dia com dois
+// horarios, PRE-reserva, diz que a equipe de agendamento fala com o lead pelo
+// WhatsApp do call center (callcenter_whatsapp, rodizio por card) e manda o
+// resumo para la (avisarCallCenter). Depois nao segue a conversa daquele lead
+// enquanto houver horario futuro: um lembrete por dia (etapa 6b), sem lembrete
+// de confirmacao 24 h antes. Desligado = fluxo de antes, sem diferenca.
 // Publicar: supabase functions deploy ic-ia-pre-atendimento --no-verify-jwt
 //
 // PIPELINE (cada etapa grava uma linha em ia_decisoes_log com etapa_pipeline e decisao):
@@ -96,7 +103,17 @@ import { dentroDoHorario, partesNoFuso, TZ_PADRAO } from "../_shared/horario.ts"
 import { faseTeste } from "../_shared/ia-teste.ts";
 import { decidirRajada, rajadaDoConfig } from "../_shared/rajada.ts";
 import { decidirFollowup, followupsDoConfig, instrucaoFollowup, podeMandarFollowup, textoFollowupFixo } from "../_shared/ia-followup.ts";
-import { dataHoraLocal, numerosAviso, textoAvisoAgendamento, textoAvisoCancelamento, textoAvisoCentral } from "../_shared/aviso-agendamento.ts";
+import {
+  dataHoraLocal,
+  modoPreAgendamento,
+  numeroCallCenterDoLead,
+  numerosAviso,
+  telefoneLegivel,
+  textoAvisoAgendamento,
+  textoAvisoCallCenter,
+  textoAvisoCancelamento,
+  textoAvisoCentral,
+} from "../_shared/aviso-agendamento.ts";
 import {
   agendamentoOnline,
   ETAPA_CONFIRMACAO,
@@ -128,7 +145,8 @@ import {
 } from "../_shared/retomada-queda.ts";
 import {
   calendarioDiasUteis,
-  FERRAMENTAS,
+  contatoDaEquipe,
+  ferramentasDaIA,
   montarSystemPrompt,
   paraWhatsApp,
   inicioDaPausa,
@@ -150,7 +168,9 @@ import {
   TEXTOS_VALOR_PESSOALMENTE,
   textoForaDoHorario,
   textoHorarioOcupado,
+  textoAposPassagem,
   textoPedidoConsentimento,
+  textoPreAgendamentoAnotado,
   TOOL_CANCELAR_AGENDAMENTO,
   TOOL_CONFIRMAR_AGENDAMENTO,
   TOOL_ENCAMINHAR_CENTRAL,
@@ -169,6 +189,17 @@ const TIMEOUT_ANTHROPIC_MS = 25000;
 function limiteContexto(cfg: Record<string, string>): number {
   const n = Math.floor(Number(cfg.contexto_mensagens || "30"));
   return Number.isFinite(n) ? Math.min(60, Math.max(5, n)) : 30;
+}
+
+// Pre-agendamento (reuniao com o IC, 19/11/2026; crm_ia_config.modo_pre_agendamento):
+// a Jully PRE-reserva o horario e passa o lead para o call center do IC
+// (crm_ia_config.callcenter_whatsapp), que fala com ele por outro numero.
+type PreAgendamento = { ativo: boolean; numero: string | null; numeroLegivel: string; contato: string };
+function preAgendamentoDoCard(cfg: Record<string, string>, clienteId: string): PreAgendamento {
+  const ativo = modoPreAgendamento(cfg);
+  const numero = ativo ? numeroCallCenterDoLead(numerosAviso(cfg.callcenter_whatsapp), clienteId) : null;
+  const numeroLegivel = numero ? telefoneLegivel(numero) : "";
+  return { ativo, numero, numeroLegivel, contato: contatoDaEquipe(numeroLegivel) };
 }
 
 type Body = { cliente_crm_id: string; conversa_id: string | null; vendedor_id: string | null; funil_id: string | null };
@@ -481,6 +512,8 @@ async function chamarClaude(args: {
   system: string;
   messages: Array<{ role: "user" | "assistant"; content: string }>;
   semFerramentas?: boolean;
+  // Modo pre-agendamento: troca a descricao de propor_agendamento (pre-reserva).
+  preAgendamento?: boolean;
 }): Promise<RespostaClaude> {
   const inicio = Date.now();
   const ctl = new AbortController();
@@ -501,7 +534,7 @@ async function chamarClaude(args: {
         max_tokens: args.maxTokens,
         system: args.system,
         messages: args.messages,
-        ...(args.semFerramentas ? {} : { tools: FERRAMENTAS, tool_choice: { type: "auto" } }),
+        ...(args.semFerramentas ? {} : { tools: ferramentasDaIA(!!args.preAgendamento), tool_choice: { type: "auto" } }),
         output_config: { effort: "low" },
       }),
       signal: ctl.signal,
@@ -895,6 +928,29 @@ async function rodarNaVez(
   // Reclamacao e pedido de humano: a IA conduz (prompt), so fica no log.
   await p.log("handoff_regras", hd ? hd.motivo + "_ia_conduz" : "nenhuma", hd ? { motivo: hd.termo } : {});
 
+  // 6b) pre-agendamento: lead ja passado para o call center (tem horario
+  // pre-reservado/confirmado no futuro). A Jully nao segue a conversa (quem
+  // conduz e a equipe, por outro numero; nunca dois atendendo juntos no mesmo
+  // numero): no maximo um lembrete por dia, depois silencio. A urgencia e a
+  // duvida clinica acima continuam com o texto fixo.
+  const pre = preAgendamentoDoCard(cfg, body.cliente_crm_id);
+  if (pre.ativo && (await agendamentoAtivo(sb, body.cliente_crm_id))) {
+    const { data: jaLembrou } = await sb
+      .from("crm_conversas")
+      .select("id")
+      .eq("cliente_crm_id", body.cliente_crm_id)
+      .eq("autor", "ia")
+      .gte("criada_em", new Date(Date.now() - 24 * 3600 * 1000).toISOString())
+      .contains("payload_raw", { apos_passagem: true })
+      .limit(1);
+    if (jaLembrou && jaLembrou.length) {
+      await p.log("pre_agendamento", "passado_call_center_silencio");
+      return { ok: true, decisao: "passado_call_center" };
+    }
+    await p.enviar(textoAposPassagem(pre.contato), "pre_agendamento", "lembrete_passagem_enviado", {}, { apos_passagem: true });
+    return { ok: true, decisao: "passado_call_center_lembrete" };
+  }
+
   // 7) exemplos
   let exemplos: ExemploConversa[] = [];
   try {
@@ -943,9 +999,10 @@ async function rodarNaVez(
       const desde = inicioDaPausa(ctx.mensagens);
       return desde ? dataHoraLocal(desde) : null;
     })(),
+    preAgendamento: pre.ativo ? { numeroLegivel: pre.numeroLegivel } : null,
   });
   const maxTokens = Math.max(256, Number(cfg.max_tokens || "1024") || 1024);
-  const r = await chamarClaude({ apiKey, modelo: p.modelo, maxTokens, system, messages });
+  const r = await chamarClaude({ apiKey, modelo: p.modelo, maxTokens, system, messages, preAgendamento: pre.ativo });
   const resumo = {
     mensagens: messages.length,
     chars_mensagens: messages.reduce((a, m) => a + m.content.length, 0),
@@ -1001,11 +1058,16 @@ async function rodarNaVez(
       if (repetido) {
         if (!textoResposta) textoResposta = await respostaSemFerramentas(p, apiKey, maxTokens, system, messages);
       } else if (resultado.ok) {
-        if (!textoResposta) textoResposta = sortear(t.input?.formato === "online" ? TEXTOS_AGENDAMENTO_ANOTADO_ONLINE : TEXTOS_AGENDAMENTO_ANOTADO);
+        if (!textoResposta) {
+          textoResposta = pre.ativo
+            ? textoPreAgendamentoAnotado(pre.contato, t.input?.formato === "online")
+            : sortear(t.input?.formato === "online" ? TEXTOS_AGENDAMENTO_ANOTADO_ONLINE : TEXTOS_AGENDAMENTO_ANOTADO);
+        }
         marcadores.agendamento_id = resultado.agendamento_id;
         // Agendou: fica o handoff agendamento_confirmado (historico no CRM; a IA segue).
-        await p.handoff("agendamento_confirmado", `IA agendou ${resultado.inicio ? dataHoraLocal(resultado.inicio) : ""} (agendamento ${resultado.agendamento_id})`);
+        await p.handoff("agendamento_confirmado", `IA ${pre.ativo ? "pré-agendou" : "agendou"} ${resultado.inicio ? dataHoraLocal(resultado.inicio) : ""} (agendamento ${resultado.agendamento_id})`);
         await avisarEquipeAgendamento(p, cfg, t.input || {}, resultado);
+        if (pre.ativo) await avisarCallCenter(p, pre, t.input || {}, resultado);
       } else if (resultado.erro === "horario_ocupado") {
         // A IA ja tinha escrito "reservado": troca pelo aviso com horarios livres.
         textoResposta = textoHorarioOcupado(resultado.sugestoes.map((iso) => dataHoraLocal(iso)));
@@ -1275,6 +1337,43 @@ async function avisarEquipeAgendamento(p: Pipeline, cfg: Record<string, string>,
   });
 }
 
+// Pre-agendamento: manda o resumo do lead para UM numero do call center
+// (rodizio estavel pelo card). Sem numero configurado, so registra no log: o
+// aviso de sempre (avisarEquipeAgendamento) ja saiu para os numeros do aviso.
+// Falha nunca derruba a conversa.
+async function avisarCallCenter(p: Pipeline, pre: PreAgendamento, input: any, r: ResultadoAgendamento): Promise<void> {
+  if (!pre.numero) {
+    await p.log("tools", "callcenter_sem_numero", { detalhe: { agendamento_id: r.agendamento_id } });
+    return;
+  }
+  const appUrl = (Deno.env.get("IC_APP_URL") || "").replace(/\/+$/, "");
+  const texto = textoAvisoCallCenter({
+    nome: String(input.nome_completo || "").trim() || String(p.card?.nome || "").trim(),
+    telefone: p.para,
+    servico: String(input.servico || "Avaliação"),
+    inicioIso: r.inicio || "",
+    formato: input.formato === "presencial" ? "Presencial" : input.formato === "online" ? "Online" : null,
+    pagamento: String(input.pagamento || "").trim() || null,
+    resumo: String(input.resumo_conversa || "").trim().slice(0, 400) || null,
+    observacao: String(input.observacao || "").trim() || null,
+    atualizado: r.atualizado,
+    inicioAnteriorIso: r.remarcado_de,
+    linkCrm: appUrl ? `${appUrl}/#card=${p.body.cliente_crm_id}` : null,
+  });
+  if (!p.envioLigado || !p.canal) {
+    await p.log("tools", "callcenter_simulado", { detalhe: { texto } });
+    return;
+  }
+  const canal = p.canal;
+  const numero = pre.numero;
+  await p.comVez(async () => {
+    const env = await enviarTextoCanal(canal, numero, texto, LOG);
+    await p.log("tools", env.ok ? "callcenter_enviado" : "callcenter_falhou", {
+      detalhe: { agendamento_id: r.agendamento_id, status: env.ok ? null : env.status },
+    });
+  });
+}
+
 // Retoma as conversas em que a IA falou por ultimo e o lead parou de responder
 // (_shared/ia-followup.ts). A propria IA escreve a retomada lendo a conversa;
 // se ela falhar ou a pos-validacao barrar, vai um texto fixo. Poucas por
@@ -1354,6 +1453,8 @@ async function lembrarConfirmacoes(sb: SupabaseClient): Promise<Record<string, u
   const cfg = await iaConfig(sb);
   const horas = horasConfirmacao(cfg);
   if (!horas) return { ok: true, decisao: "confirmacao_desligada" };
+  // Pre-agendamento: quem confirma o horario e o call center, pelo numero dele.
+  if (modoPreAgendamento(cfg)) return { ok: true, decisao: "confirmacao_pelo_call_center" };
   const horasCurta = horasConfirmacaoCurta(cfg);
   if (!(await icFlag(sb, "ia_pre_atendimento")) || String(cfg.ligada).toLowerCase() !== "true") return { ok: true, decisao: "desligada" };
   const agora = new Date();
@@ -1471,8 +1572,15 @@ async function textoComInstrucao(
     agoraLocal: `${nomesDia[agoraSp.diaSemana]}, ${String(agoraSp.dia).padStart(2, "0")}/${String(agoraSp.mes).padStart(2, "0")}/${agoraSp.ano} ${String(agoraSp.hora).padStart(2, "0")}:${String(agoraSp.minuto).padStart(2, "0")}`,
     calendario: calendarioDiasUteis(agoraSp.ano, agoraSp.mes, agoraSp.dia),
     persona: { nome: cfg.persona_nome, ficha: cfg.persona_ficha },
+    preAgendamento: (() => {
+      const pre = preAgendamentoDoCard(cfg, p.body.cliente_crm_id);
+      return pre.ativo ? { numeroLegivel: pre.numeroLegivel } : null;
+    })(),
   });
-  const r = await chamarClaude({ apiKey, modelo: p.modelo, maxTokens: Math.max(256, Number(cfg.max_tokens || "1024") || 1024), system, messages: historico });
+  const r = await chamarClaude({
+    apiKey, modelo: p.modelo, maxTokens: Math.max(256, Number(cfg.max_tokens || "1024") || 1024), system, messages: historico,
+    preAgendamento: modoPreAgendamento(cfg),
+  });
   await p.log(etapaLog, r.erro ? "erro_ia" : "ia_escreveu", {
     modelo: p.modelo, tokens_entrada: r.tokens_entrada, tokens_saida: r.tokens_saida, latencia_ms: r.latencia_ms, motivo: r.erro,
   });
@@ -1512,7 +1620,7 @@ async function retomarAposQueda(sb: SupabaseClient): Promise<Record<string, unkn
   }
   const todas = (linhas as any[]) || [];
   // Os numeros do proprio CRM e os da equipe nunca entram na fila.
-  const ignorar = [...todas.map((l) => String(l.numero_whatsapp || "")), ...numerosAviso(cfg.aviso_agendamento_whatsapp)];
+  const ignorar = [...todas.map((l) => String(l.numero_whatsapp || "")), ...numerosAviso(cfg.aviso_agendamento_whatsapp), ...numerosAviso(cfg.callcenter_whatsapp)];
   const agora = new Date();
   const conexao: Record<string, unknown>[] = [];
   for (const linha of todas) {
