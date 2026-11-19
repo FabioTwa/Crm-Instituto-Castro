@@ -101,6 +101,7 @@ import { canonicoTelefone, soDigitos, telefonePlausivel, variacoesTelefone } fro
 import { icFlag } from "../_shared/flags.ts";
 import { FOLGA_DESCONEXAO_MS } from "../_shared/retomada-queda.ts";
 import { baixarMidiaZapi, envelopeZapi, eventoConexaoZapi, tokenWebhookZapiValido } from "../_shared/zapi.ts";
+import { decidirGrupo, ehEventoGrupoZapi, extrairMensagemGrupo, type GrupoLido } from "../_shared/grupo-leitura.ts";
 
 type Provedor = "meta" | "zapi";
 
@@ -1716,9 +1717,10 @@ Deno.serve(async (req: Request) => {
 //
 // Mesmas garantias das outras portas. Autenticidade: segredo
 // ZAPI_WEBHOOK_TOKEN na URL (a Z-API nao assina o webhook). Aviso de conexao
-// (conectou/caiu) grava o estado (SQL 48). Outro evento que nao e
-// mensagem de conversa (grupo, status, conexao, eco do proprio envio pela API)
-// responde 200 sem gravar nada.
+// (conectou/caiu) grava o estado (SQL 48). Grupo da lista de leitura (SQL 50)
+// e guardado em ic_grupo_mensagens, so para leitura. Outro evento que nao e
+// mensagem de conversa (outros grupos, status, conexao, eco do proprio envio
+// pela API) responde 200 sem gravar nada.
 // -------------------------------------------------------------------
 async function entradaZapi(req: Request, url: URL): Promise<Response> {
   const LOGZ = "[ic-meta-webhook][zapi]";
@@ -1753,6 +1755,11 @@ async function entradaZapi(req: Request, url: URL): Promise<Response> {
   const conexao = eventoConexaoZapi(bruto);
   if (conexao) return await registrarConexaoZapi(URL_SB, SR, conexao.instancia, conexao.conectado, conexao.numero, LOGZ);
 
+  // Grupo (SQL 50): so os grupos de ic_grupos_leitura sao GUARDADOS, somente
+  // para leitura. Sai daqui: nunca vira card, nunca chama a IA, nunca envia
+  // nada, nunca dispara aviso. Os demais grupos continuam descartados.
+  if (ehEventoGrupoZapi(bruto)) return await registrarGrupoLeitura(URL_SB, SR, bruto, LOGZ);
+
   const { envelope, tipo } = envelopeZapi(bruto);
   if (envelope._ic_ignorado) {
     console.log(LOGZ, "ignorado:", tipo);
@@ -1786,6 +1793,117 @@ async function entradaZapi(req: Request, url: URL): Promise<Response> {
     espera.call((globalThis as any).EdgeRuntime, trabalho);
   }
   return json({ ok: true, ack: true, entrada: entradaId });
+}
+
+// -------------------------------------------------------------------
+// LEITURA DE GRUPO (SQL 50, 19/11/2026) - SOMENTE LEITURA
+//
+// Guarda em ic_grupo_mensagens a mensagem de um grupo listado em
+// ic_grupos_leitura ("Treinamento Jully"). Nao passa por crm_entrada_bruta,
+// processarPayload, card, IA nem envio. So aceita evento da instancia
+// cadastrada. Audio: transcrito pelo Groq se a flag ia_transcricao_audio
+// estiver ligada (mesmo fornecedor das conversas dos leads).
+// Responde 200 para descarte; 500 so se o banco falhar (a Z-API reenvia;
+// a trava unica grupo_id+message_id evita duplicar).
+// -------------------------------------------------------------------
+const GRUPOS_TTL_MS = 60 * 1000;
+let gruposCache: GrupoLido[] = [];
+let gruposCacheEm = 0;
+
+async function carregarGruposLeitura(sb: Supa, forcar = false): Promise<string | null> {
+  if (!forcar && Date.now() - gruposCacheEm < GRUPOS_TTL_MS) return null;
+  const { data, error } = await sb.from("ic_grupos_leitura").select("id, nome, grupo_id").eq("ativo", true);
+  if (error) return error.message || "erro desconhecido";
+  gruposCache = ((data as any[]) || []).map((r) => ({ id: Number(r.id), nome: String(r.nome || ""), grupo_id: r.grupo_id ? String(r.grupo_id) : null }));
+  gruposCacheEm = Date.now();
+  return null;
+}
+
+async function registrarGrupoLeitura(URL_SB: string, SR: string, bruto: any, LOGZ: string): Promise<Response> {
+  const m = extrairMensagemGrupo(bruto);
+  if (!m) return json({ ok: true, ignored: "grupo sem id" });
+  const sb = createClient(URL_SB, SR, { auth: { persistSession: false } });
+
+  // So o nosso numero: instancia (ou numero da casa) cadastrada com provedor zapi.
+  const { vendedor, erro: erroVendedor } = await acharVendedorZapi(sb, {
+    instancia: String(bruto.instanceId || ""),
+    numeroCasa: String(bruto.connectedPhone || ""),
+  });
+  if (erroVendedor) {
+    console.error(LOGZ, "grupo: falha ao conferir instancia:", erroVendedor);
+    return json({ ok: false, error: "banco indisponivel" }, 500);
+  }
+  if (!vendedor) return json({ ok: true, ignored: "grupo de instancia desconhecida" });
+
+  const erroGrupos = await carregarGruposLeitura(sb);
+  if (erroGrupos && gruposCache.length === 0) {
+    console.error(LOGZ, "grupo: falha ao ler ic_grupos_leitura:", erroGrupos);
+    return json({ ok: false, error: "banco indisponivel" }, 500);
+  }
+  let decisao = decidirGrupo(gruposCache, m.grupoId, m.grupoNome);
+  if (!decisao) {
+    console.log(LOGZ, "ignorado: grupo fora da lista de leitura");
+    return json({ ok: true, ignored: "grupo" });
+  }
+
+  if (decisao.acao === "vincular") {
+    // Grava o id do grupo uma vez so; dali em diante vale so o id.
+    const { data: vinc, error: errVinc } = await sb
+      .from("ic_grupos_leitura")
+      .update({ grupo_id: m.grupoId, vinculado_em: new Date().toISOString() })
+      .eq("id", decisao.grupo.id)
+      .is("grupo_id", null)
+      .select("id");
+    if (errVinc) {
+      console.error(LOGZ, "grupo: falha ao vincular:", errVinc.message);
+      return json({ ok: false, error: "banco indisponivel" }, 500);
+    }
+    await carregarGruposLeitura(sb, true);
+    if (!vinc || (vinc as any[]).length === 0) {
+      // Outra chamada vinculou antes: decide de novo, agora so por id.
+      decisao = decidirGrupo(gruposCache, m.grupoId, m.grupoNome);
+      if (!decisao || decisao.acao !== "id") return json({ ok: true, ignored: "grupo" });
+    } else {
+      console.log(LOGZ, "grupo de leitura vinculado:", decisao.grupo.nome);
+    }
+  }
+
+  const { data: ins, error: errIns } = await sb
+    .from("ic_grupo_mensagens")
+    .upsert({
+      grupo_id: m.grupoId,
+      grupo_nome: m.grupoNome || decisao.grupo.nome,
+      message_id: m.messageId,
+      autor_telefone: m.autorTelefone,
+      autor_nome: m.autorNome,
+      de_mim: m.deMim,
+      tipo: m.tipo,
+      texto: m.texto,
+      midia_url: m.midiaUrl,
+      enviada_em: m.enviadaEm,
+    }, { onConflict: "grupo_id,message_id", ignoreDuplicates: true })
+    .select("id");
+  if (errIns) {
+    console.error(LOGZ, "grupo: mensagem NAO gravada:", errIns.message);
+    return json({ ok: false, error: "mensagem nao gravada" }, 500);
+  }
+  const id = ins && (ins as any[])[0] ? Number((ins as any[])[0].id) : null;
+  console.log(LOGZ, "grupo: mensagem guardada (leitura):", m.tipo, id ? "nova" : "repetida");
+
+  if (id && m.tipo === "audio" && m.midiaUrl) {
+    const trabalho = (async () => {
+      if (!(await icFlag(sb, "ia_transcricao_audio"))) return;
+      const midia = await baixarMidiaZapi({ url: m.midiaUrl!, mimeType: m.midiaMime || "", prefixoLog: LOGZ });
+      if (!midia) return;
+      const txt = await transcreverAudioGroq(midia.bytes, midia.mimeType);
+      if (!txt) return;
+      const { error } = await sb.from("ic_grupo_mensagens").update({ transcricao: txt }).eq("id", id);
+      if (error) console.error(LOGZ, "grupo: transcricao nao gravada:", error.message);
+    })().catch((e) => console.error(LOGZ, "grupo: erro na transcricao:", e));
+    const espera = (globalThis as any).EdgeRuntime?.waitUntil;
+    if (typeof espera === "function") espera.call((globalThis as any).EdgeRuntime, trabalho);
+  }
+  return json({ ok: true, grupo: "guardada" });
 }
 
 // Aviso de conexao da Z-API. So aceita instancia cadastrada (ativa, provedor
