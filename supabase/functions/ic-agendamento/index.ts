@@ -54,6 +54,12 @@ import { icFlag } from "../_shared/flags.ts";
 import { assinarToken, cifrar, decifrar, verificarToken } from "../_shared/crypto.ts";
 import { proximoSlot, proximosSlotsLivres, slotOcupado, TZ_PADRAO } from "../_shared/horario.ts";
 import { canonicoTelefone } from "../_shared/telefone.ts";
+import { dataHoraLocal } from "../_shared/aviso-agendamento.ts";
+import { agendamentoOnline } from "../_shared/confirmacao-agendamento.ts";
+
+// Remarcacao: o agendamento que comecou ate 2 h atras ainda e trocado (atraso
+// avisado em cima da hora), em vez de criar outro.
+const JANELA_REMARCACAO_MS = 2 * 3600 * 1000;
 
 const LOG = "[ic-agendamento]";
 const GOOGLE_SCOPE = "https://www.googleapis.com/auth/calendar.events";
@@ -460,18 +466,25 @@ async function acaoPropor(sb: SupabaseClient, body: any): Promise<Response> {
     String(body.observacao || "").trim().slice(0, 300),
   ].filter(Boolean).join(". ");
 
-  // Ja existe proposta pendente da IA para este card? Nao duplica: troca o
-  // horario dela (o lead mudou de ideia antes da equipe confirmar).
-  const { data: jaTem } = await sb
+  // Ja existe agendamento da IA para este card (pendente ou confirmado, inclusive
+  // o que comecou ha pouco: o lead avisa do atraso e remarca)? Nao duplica: troca
+  // o horario dele e mantem o status (19/11/2026: remarcacao criava um segundo
+  // agendamento e deixava o primeiro ativo).
+  const { data: jaTem, error: errJaTem } = await sb
     .from("agendamentos")
-    .select("id")
+    .select("id, inicio, status")
     .eq("cliente_crm_id", clienteId)
     .eq("origem", "ia")
-    .eq("status", "pendente")
-    .gte("inicio", new Date().toISOString())
+    .in("status", ["pendente", "confirmado"])
+    .gte("inicio", new Date(Date.now() - JANELA_REMARCACAO_MS).toISOString())
     .order("inicio", { ascending: true })
     .limit(1);
-  const idProprio = jaTem && jaTem.length ? String((jaTem[0] as any).id) : null;
+  if (errJaTem) {
+    console.error(LOG, "leitura (propor, existente) falhou:", errJaTem.message);
+    return json({ ok: false, erro: "agenda_indisponivel" }, 500);
+  }
+  const existente = jaTem && jaTem.length ? (jaTem[0] as any) : null;
+  const idProprio = existente ? String(existente.id) : null;
 
   // Horario ja tomado na agenda da clinica (pendente ou confirmado, de qualquer
   // card)? Nao reserva: devolve os proximos livres para a IA oferecer.
@@ -485,22 +498,35 @@ async function acaoPropor(sb: SupabaseClient, body: any): Promise<Response> {
 
   if (idProprio) {
     const idExistente = idProprio;
-    const { error: errUpd } = await sb
+    const anterior = String(existente.inicio || "");
+    const mudouHorario = Date.parse(anterior) !== slot.inicio.getTime();
+    const statusAtual = String(existente.status || "pendente");
+    const notaRemarcacao = mudouHorario && anterior ? ` Remarcado pela IA de ${dataHoraLocal(anterior)} para ${dataHoraLocal(slot.inicio.toISOString())}.` : "";
+    const confirmadoNota = statusAtual === "confirmado" ? " Confirmado pelo lead na conversa com a IA." : "";
+    const { data: upd, error: errUpd } = await sb
       .from("agendamentos")
       .update({
         inicio: slot.inicio.toISOString(),
         fim: slot.fim.toISOString(),
         titulo: /^visita/i.test(servico) ? servico : "Avaliação — " + servico,
-        observacoes: obs ? "Agendado pela IA. " + obs : "Agendado pela IA.",
+        observacoes: (obs ? "Agendado pela IA. " + obs : "Agendado pela IA.") + notaRemarcacao + confirmadoNota,
         atualizado_em: new Date().toISOString(),
       })
       .eq("id", idExistente)
-      .eq("status", "pendente");
-    if (errUpd) {
-      console.error(LOG, "update agendamentos (propor) falhou:", errUpd.message);
+      .eq("status", statusAtual)
+      .select("id");
+    if (errUpd || !upd || !upd.length) {
+      console.error(LOG, "update agendamentos (propor) falhou:", errUpd ? errUpd.message : "status mudou no meio");
       return json({ ok: false, erro: "atualizar_falhou" }, 500);
     }
-    return json({ ok: true, confirmado: false, agendamento_id: idExistente, atualizado: true, inicio: slot.inicio.toISOString(), fim: slot.fim.toISOString() });
+    if (statusAtual === "confirmado" && mudouHorario) {
+      const ag = await carregarAgendamento(sb, idExistente);
+      if (ag) await sincronizarGoogle(sb, ag);
+    }
+    return json({
+      ok: true, confirmado: statusAtual === "confirmado", agendamento_id: idExistente, atualizado: true,
+      remarcado_de: mudouHorario ? anterior : null, inicio: slot.inicio.toISOString(), fim: slot.fim.toISOString(),
+    });
   }
   const telefone = canonicoTelefone(String((card as any).numero_whatsapp || (card as any).telefone || ""));
 
@@ -593,7 +619,7 @@ async function acaoConfirmar(sb: SupabaseClient, body: any): Promise<Response> {
   }
   const alvo = lista && lista.length ? (lista[0] as any) : null;
   if (!alvo) return json({ ok: false, erro: "sem_agendamento" }, 404);
-  if (String(alvo.status) === "confirmado") return json({ ok: true, agendamento_id: alvo.id, inicio: alvo.inicio, ja_confirmado: true });
+  if (String(alvo.status) === "confirmado") return json({ ok: true, agendamento_id: alvo.id, inicio: alvo.inicio, ja_confirmado: true, online: agendamentoOnline(alvo.observacoes) });
 
   const { error: errSt } = await sb.rpc("ic_agendamento_status", { p_id: alvo.id, p_status: "confirmado" });
   if (errSt) {
@@ -609,7 +635,7 @@ async function acaoConfirmar(sb: SupabaseClient, body: any): Promise<Response> {
 
   const ag = await carregarAgendamento(sb, String(alvo.id));
   if (ag) await sincronizarGoogle(sb, ag);
-  return json({ ok: true, agendamento_id: alvo.id, inicio: alvo.inicio, ja_confirmado: false });
+  return json({ ok: true, agendamento_id: alvo.id, inicio: alvo.inicio, ja_confirmado: false, online: agendamentoOnline(alvo.observacoes) });
 }
 
 // ---------------------------------------------------------------------------

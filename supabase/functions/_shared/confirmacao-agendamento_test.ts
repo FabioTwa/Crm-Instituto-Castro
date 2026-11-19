@@ -1,5 +1,14 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
-import { horasConfirmacao, horasConfirmacaoCurta, inicioDaJanela, MAX_TENTATIVAS, precisaLembrete, textoConfirmacao } from "./confirmacao-agendamento.ts";
+import {
+  agendamentoOnline,
+  horasConfirmacao,
+  horasConfirmacaoCurta,
+  inicioDaJanela,
+  lembreteJaResolvido,
+  MAX_TENTATIVAS,
+  precisaLembrete,
+  textoConfirmacao,
+} from "./confirmacao-agendamento.ts";
 import { respostaProibida } from "./pos-validacao.ts";
 
 // Horarios em UTC; Sao Paulo = UTC-3.
@@ -87,4 +96,24 @@ Deno.test("textoConfirmacao: amanha/hoje/data, endereco, pergunta e pos-validaca
     assert(t.trim().endsWith("?"));
     assertEquals(/robô|automátic|assistente virtual/i.test(t), false);
   }
+});
+
+Deno.test("agendamentoOnline: le o formato gravado nas observacoes", () => {
+  assert(agendamentoOnline("Agendado pela IA. Nome: Maria. Formato: Online. Pagamento: Convênio"));
+  assert(!agendamentoOnline("Agendado pela IA. Formato: Presencial."));
+  assert(!agendamentoOnline(null));
+});
+
+Deno.test("lembrete online nao cita endereco nem 'te esperamos'", () => {
+  for (let v = 0; v < 3; v++) {
+    const t = textoConfirmacao({ primeiroNome: "Maria", inicioIso: QUA_15H, agora: new Date("2026-10-28T12:00:00Z"), variante: v, online: true });
+    assertStringIncludes(t, "online");
+    assert(!/Paes de Barros|esperamos/i.test(t));
+  }
+});
+
+Deno.test("remarcado e ja confirmado depois de um lembrete: nao pede confirmacao de novo", () => {
+  assert(lembreteJaResolvido("confirmado", 1));
+  assert(!lembreteJaResolvido("confirmado", 0));
+  assert(!lembreteJaResolvido("pendente", 2));
 });

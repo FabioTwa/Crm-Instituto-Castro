@@ -44,16 +44,20 @@ export function textoAvisoAgendamento(a: {
   pagamento?: string | null;
   observacao?: string | null;
   atualizado?: boolean;
+  // Remarcacao: horario anterior (o agendamento antigo NAO fica ativo).
+  inicioAnteriorIso?: string | null;
   linkCrm?: string | null;
 }): string {
+  const remarcado = !!a.inicioAnteriorIso && Date.parse(a.inicioAnteriorIso) !== Date.parse(a.inicioIso);
   const linhas = [
-    a.atualizado ? "🔁 *Agendamento alterado pela IA*" : "📅 *Novo agendamento pela IA*",
+    remarcado ? "🔁 *Agendamento remarcado pela IA*" : a.atualizado ? "🔁 *Agendamento alterado pela IA*" : "📅 *Novo agendamento pela IA*",
     "",
     `*Nome:* ${a.nome || "-"}`,
     `*WhatsApp:* ${telefoneLegivel(a.telefone)}`,
     `*Serviço:* ${a.servico || "-"}`,
-    `*Data:* ${dataHoraLocal(a.inicioIso)}`,
   ];
+  if (remarcado) linhas.push(`*Antes:* ${dataHoraLocal(String(a.inicioAnteriorIso))}`, `*Agora:* ${dataHoraLocal(a.inicioIso)}`);
+  else linhas.push(`*Data:* ${dataHoraLocal(a.inicioIso)}`);
   if (a.formato) linhas.push(`*Formato:* ${a.formato}`);
   if (a.pagamento) linhas.push(`*Pagamento:* ${a.pagamento}`);
   if (a.observacao) linhas.push(`*Obs.:* ${a.observacao}`);
