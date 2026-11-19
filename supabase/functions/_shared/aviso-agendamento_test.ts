@@ -68,3 +68,41 @@ Deno.test("aviso de remarcacao mostra o horario anterior e o novo", () => {
   assertStringIncludes(t, "*Antes:* 19/11 (quinta-feira) às 09:00");
   assertStringIncludes(t, "*Agora:* 19/11 (quinta-feira) às 10:00");
 });
+
+Deno.test("pre-agendamento: modo so liga com 'true'", async () => {
+  const { modoPreAgendamento } = await import("./aviso-agendamento.ts");
+  assertEquals(modoPreAgendamento({}), false);
+  assertEquals(modoPreAgendamento({ modo_pre_agendamento: "false" }), false);
+  assertEquals(modoPreAgendamento({ modo_pre_agendamento: " TRUE " }), true);
+  assertEquals(modoPreAgendamento(null), false);
+});
+
+Deno.test("pre-agendamento: rodizio do call center e estavel por card e espalha", async () => {
+  const { numeroCallCenterDoLead } = await import("./aviso-agendamento.ts");
+  assertEquals(numeroCallCenterDoLead([], "abc"), null);
+  assertEquals(numeroCallCenterDoLead(["5511911112222"], "qualquer"), "5511911112222");
+  const nums = ["5511911112222", "5511933334444", "5511955556666"];
+  const a = numeroCallCenterDoLead(nums, "card-1");
+  assertEquals(numeroCallCenterDoLead(nums, "card-1"), a);
+  const usados = new Set<string>();
+  for (let i = 0; i < 60; i++) usados.add(String(numeroCallCenterDoLead(nums, crypto.randomUUID())));
+  assertEquals(usados.size, 3);
+});
+
+Deno.test("pre-agendamento: texto do call center traz resumo, convenio e link do card", async () => {
+  const { textoAvisoCallCenter } = await import("./aviso-agendamento.ts");
+  const t = textoAvisoCallCenter({
+    nome: "Maria Souza", telefone: "5511988887777", servico: "Gastroenterologia", inicioIso: "2026-11-24T13:00:00Z",
+    formato: "Presencial", pagamento: "Convênio Bradesco Top", resumo: "Quer consulta de gastro, perguntou se o plano cobre.",
+    linkCrm: "https://crm.exemplo/#card=1",
+  });
+  assertStringIncludes(t, "Novo lead pré-agendado");
+  assertStringIncludes(t, "(11) 98888-7777");
+  assertStringIncludes(t, "*Pré-reservado:* 24/11 (terça-feira) às 10:00");
+  assertStringIncludes(t, "*Resumo da conversa:* Quer consulta de gastro");
+  assertStringIncludes(t, "elegibilidade do convênio");
+  assertStringIncludes(t, "https://crm.exemplo/#card=1");
+  const particular = textoAvisoCallCenter({ nome: "", telefone: "5511988887777", servico: "", inicioIso: "2026-11-24T13:00:00Z" });
+  assertStringIncludes(particular, "*Pagamento:* não informado");
+  assertEquals(particular.includes("elegibilidade"), false);
+});

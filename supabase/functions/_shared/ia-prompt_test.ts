@@ -207,3 +207,38 @@ Deno.test("prompt: retomada natural e coerencia com o que ja disse", () => {
   const com = montarSystemPrompt({ ...base, retomadaDesde: "30/10 (quinta-feira) às 09:08" });
   assertStringIncludes(com, "a mensagem anterior da conversa foi em 30/10 (quinta-feira) às 09:08");
 });
+
+Deno.test("pre-agendamento: prompt fala em pre-reserva, dois horarios e o numero do call center", async () => {
+  const m = await import("./ia-prompt.ts");
+  const base = { primeiroNome: null, funil: null, etapa: null, exemplos: [], agoraLocal: "x" };
+  const pre = m.montarSystemPrompt({ ...base, preAgendamento: { numeroLegivel: "(11) 91111-2222" } });
+  assertStringIncludes(pre, "PRÉ-RESERVA");
+  assertStringIncludes(pre, "pelo WhatsApp (11) 91111-2222");
+  assertStringIncludes(pre, "DOIS horários");
+  assertEquals(pre.includes("A reserva feita por você já vale"), false);
+  assertEquals(pre.includes("${"), false);
+  const semNumero = m.montarSystemPrompt({ ...base, preAgendamento: { numeroLegivel: "" } });
+  assertStringIncludes(semNumero, "entrar em contato pelo WhatsApp para confirmar");
+  const antes = m.montarSystemPrompt(base);
+  assertStringIncludes(antes, "A reserva feita por você já vale");
+  assertEquals(antes.includes("PRÉ-RESERVA"), false);
+  assertEquals(antes.includes("${"), false);
+});
+
+Deno.test("pre-agendamento: ferramentas trocam so a descricao de propor_agendamento", async () => {
+  const m = await import("./ia-prompt.ts");
+  assertEquals(m.ferramentasDaIA(false), m.FERRAMENTAS);
+  const pre = m.ferramentasDaIA(true);
+  assertEquals(pre.map((f) => f.name), m.FERRAMENTAS.map((f) => f.name));
+  const propor = pre.find((f) => f.name === m.TOOL_PROPOR_AGENDAMENTO)!;
+  assertStringIncludes(propor.description, "PRÉ-RESERVA");
+  assertEquals(propor.input_schema, m.FERRAMENTAS.find((f) => f.name === m.TOOL_PROPOR_AGENDAMENTO)!.input_schema);
+  assert((propor.input_schema.required as readonly string[]).includes("resumo_conversa"));
+});
+
+Deno.test("pre-agendamento: textos fixos passam na pos-validacao", async () => {
+  const m = await import("./ia-prompt.ts");
+  for (const t of [m.textoPreAgendamentoAnotado("pelo WhatsApp (11) 91111-2222", false), m.textoPreAgendamentoAnotado("pelo WhatsApp", true), m.textoAposPassagem("pelo WhatsApp (11) 91111-2222")]) {
+    assertEquals(respostaProibida(t), null, t);
+  }
+});
