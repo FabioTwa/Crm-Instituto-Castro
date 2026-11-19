@@ -208,37 +208,49 @@ Deno.test("prompt: retomada natural e coerencia com o que ja disse", () => {
   assertStringIncludes(com, "a mensagem anterior da conversa foi em 30/10 (quinta-feira) às 09:08");
 });
 
-Deno.test("pre-agendamento: prompt fala em pre-reserva, dois horarios e o numero do call center", async () => {
+Deno.test("time de agendamento: prompt nao marca horario e passa para o time", async () => {
   const m = await import("./ia-prompt.ts");
   const base = { primeiroNome: null, funil: null, etapa: null, exemplos: [], agoraLocal: "x" };
   const pre = m.montarSystemPrompt({ ...base, preAgendamento: { numeroLegivel: "(11) 91111-2222" } });
-  assertStringIncludes(pre, "PRÉ-RESERVA");
+  assertStringIncludes(pre, "AGENDAMENTO PELO TIME");
+  assertStringIncludes(pre, "NÃO proponha nem pergunte dia e horário");
   assertStringIncludes(pre, "pelo WhatsApp (11) 91111-2222");
-  assertStringIncludes(pre, "DOIS horários");
+  assertStringIncludes(pre, m.TOOL_SOLICITAR_AGENDAMENTO);
+  assertEquals(pre.includes(m.TOOL_PROPOR_AGENDAMENTO), false);
+  assertEquals(pre.includes(m.TOOL_CANCELAR_AGENDAMENTO), false);
   assertEquals(pre.includes("A reserva feita por você já vale"), false);
   assertEquals(pre.includes("${"), false);
-  const semNumero = m.montarSystemPrompt({ ...base, preAgendamento: { numeroLegivel: "" } });
-  assertStringIncludes(semNumero, "entrar em contato pelo WhatsApp para confirmar");
   const antes = m.montarSystemPrompt(base);
   assertStringIncludes(antes, "A reserva feita por você já vale");
-  assertEquals(antes.includes("PRÉ-RESERVA"), false);
+  assertStringIncludes(antes, "# Cancelamento ou desistência");
+  assertEquals(antes.includes(m.TOOL_SOLICITAR_AGENDAMENTO), false);
   assertEquals(antes.includes("${"), false);
 });
 
-Deno.test("pre-agendamento: ferramentas trocam so a descricao de propor_agendamento", async () => {
+Deno.test("time de agendamento: so solicitar_agendamento e encaminhar_central", async () => {
   const m = await import("./ia-prompt.ts");
   assertEquals(m.ferramentasDaIA(false), m.FERRAMENTAS);
   const pre = m.ferramentasDaIA(true);
-  assertEquals(pre.map((f) => f.name), m.FERRAMENTAS.map((f) => f.name));
-  const propor = pre.find((f) => f.name === m.TOOL_PROPOR_AGENDAMENTO)!;
-  assertStringIncludes(propor.description, "PRÉ-RESERVA");
-  assertEquals(propor.input_schema, m.FERRAMENTAS.find((f) => f.name === m.TOOL_PROPOR_AGENDAMENTO)!.input_schema);
-  assert((propor.input_schema.required as readonly string[]).includes("resumo_conversa"));
+  assertEquals(pre.map((f) => f.name), [m.TOOL_SOLICITAR_AGENDAMENTO, m.TOOL_ENCAMINHAR_CENTRAL]);
+  const sol = pre[0];
+  assert((sol.input_schema.required as readonly string[]).includes("resumo_conversa"));
+  assert((sol.input_schema.required as readonly string[]).includes("preferencia"));
+  assertEquals(Object.keys(sol.input_schema.properties).sort(), [...sol.input_schema.required].sort());
 });
 
-Deno.test("pre-agendamento: textos fixos passam na pos-validacao", async () => {
+Deno.test("time de agendamento: textos fixos passam na pos-validacao e nao falam de convenio", async () => {
   const m = await import("./ia-prompt.ts");
-  for (const t of [m.textoPreAgendamentoAnotado("pelo WhatsApp (11) 91111-2222", false), m.textoPreAgendamentoAnotado("pelo WhatsApp", true), m.textoAposPassagem("pelo WhatsApp (11) 91111-2222")]) {
+  const textos = [
+    m.textoAgendamentoEncaminhado("pelo WhatsApp (11) 91111-2222"),
+    m.textoAgendamentoEncaminhado("pelo WhatsApp"),
+    m.textoAposPassagem("(11) 91111-2222"),
+    m.textoAposPassagem(""),
+  ];
+  for (const t of textos) {
     assertEquals(respostaProibida(t), null, t);
+    assertEquals(/conv[eê]nio/i.test(t), false, t);
   }
+  assertStringIncludes(textos[0], "Muito obrigada");
+  assertStringIncludes(textos[0], "Fico à disposição");
+  assertEquals(textos[3].includes("chamar direto"), false);
 });

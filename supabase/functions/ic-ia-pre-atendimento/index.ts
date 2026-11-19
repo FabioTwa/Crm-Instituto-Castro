@@ -18,13 +18,14 @@
 // handoff agendamento_confirmado (so historico), e a IA segue respondendo.
 // ATENDIMENTO 100% AUTONOMO (22/10/2026): nao existe atendente. A IA nunca diz
 // que vai passar para a equipe; so a recusa do consentimento (LGPD) a cala.
-// PRE-AGENDAMENTO (SQL 51, reuniao com o IC em 19/11/2026), so com
-// crm_ia_config.modo_pre_agendamento='true': a Jully oferece um dia com dois
-// horarios, PRE-reserva, diz que a equipe de agendamento fala com o lead pelo
-// WhatsApp do call center (callcenter_whatsapp, rodizio por card) e manda o
-// resumo para la (avisarCallCenter). Depois nao segue a conversa daquele lead
-// enquanto houver horario futuro: um lembrete por dia (etapa 6b), sem lembrete
-// de confirmacao 24 h antes. Desligado = fluxo de antes, sem diferenca.
+// TIME DE AGENDAMENTO (SQL 51; decisao do Fabio em 19/11/2026), so com
+// crm_ia_config.modo_pre_agendamento='true': a Jully NAO marca horario. Quando
+// a pessoa quer agendar e ela ja tem os dados, usa solicitar_agendamento: manda
+// o pedido (dados + resumo + "Aguardando agendamento") para os numeros do aviso
+// e para o call center (callcenter_whatsapp, rodizio por card), e responde com
+// texto fixo (o time entra em contato para marcar; agradece). Depois nao segue a
+// conversa daquele lead por 30 dias: um lembrete por dia (etapa 6b), sem
+// lembrete de confirmacao. Desligado = fluxo de antes, sem diferenca.
 // Publicar: supabase functions deploy ic-ia-pre-atendimento --no-verify-jwt
 //
 // PIPELINE (cada etapa grava uma linha em ia_decisoes_log com etapa_pipeline e decisao):
@@ -110,7 +111,8 @@ import {
   numerosAviso,
   telefoneLegivel,
   textoAvisoAgendamento,
-  textoAvisoCallCenter,
+  destinosPedidoAgendamento,
+  textoPedidoAgendamento,
   textoAvisoCancelamento,
   textoAvisoCentral,
 } from "../_shared/aviso-agendamento.ts";
@@ -170,11 +172,12 @@ import {
   textoHorarioOcupado,
   textoAposPassagem,
   textoPedidoConsentimento,
-  textoPreAgendamentoAnotado,
+  textoAgendamentoEncaminhado,
   TOOL_CANCELAR_AGENDAMENTO,
   TOOL_CONFIRMAR_AGENDAMENTO,
   TOOL_ENCAMINHAR_CENTRAL,
   TOOL_PROPOR_AGENDAMENTO,
+  TOOL_SOLICITAR_AGENDAMENTO,
   type ExemploConversa,
 } from "../_shared/ia-prompt.ts";
 
@@ -191,9 +194,9 @@ function limiteContexto(cfg: Record<string, string>): number {
   return Number.isFinite(n) ? Math.min(60, Math.max(5, n)) : 30;
 }
 
-// Pre-agendamento (reuniao com o IC, 19/11/2026; crm_ia_config.modo_pre_agendamento):
-// a Jully PRE-reserva o horario e passa o lead para o call center do IC
-// (crm_ia_config.callcenter_whatsapp), que fala com ele por outro numero.
+// Time de agendamento (19/11/2026; crm_ia_config.modo_pre_agendamento): a Jully
+// passa o lead para o time de agendamento do IC, que marca o horario e fala com
+// ele por outro numero (crm_ia_config.callcenter_whatsapp, quando houver).
 type PreAgendamento = { ativo: boolean; numero: string | null; numeroLegivel: string; contato: string };
 function preAgendamentoDoCard(cfg: Record<string, string>, clienteId: string): PreAgendamento {
   const ativo = modoPreAgendamento(cfg);
@@ -928,13 +931,13 @@ async function rodarNaVez(
   // Reclamacao e pedido de humano: a IA conduz (prompt), so fica no log.
   await p.log("handoff_regras", hd ? hd.motivo + "_ia_conduz" : "nenhuma", hd ? { motivo: hd.termo } : {});
 
-  // 6b) pre-agendamento: lead ja passado para o call center (tem horario
-  // pre-reservado/confirmado no futuro). A Jully nao segue a conversa (quem
-  // conduz e a equipe, por outro numero; nunca dois atendendo juntos no mesmo
+  // 6b) time de agendamento: lead ja passado para o time (pedido de agendamento
+  // nos ultimos 30 dias, ou horario futuro). A Jully nao segue a conversa (quem
+  // conduz e o time, por outro numero; nunca dois atendendo juntos no mesmo
   // numero): no maximo um lembrete por dia, depois silencio. A urgencia e a
   // duvida clinica acima continuam com o texto fixo.
   const pre = preAgendamentoDoCard(cfg, body.cliente_crm_id);
-  if (pre.ativo && (await agendamentoAtivo(sb, body.cliente_crm_id))) {
+  if (pre.ativo && ((await pedidoAgendamentoRecente(sb, body.cliente_crm_id)) || (await agendamentoAtivo(sb, body.cliente_crm_id)))) {
     const { data: jaLembrou } = await sb
       .from("crm_conversas")
       .select("id")
@@ -947,7 +950,7 @@ async function rodarNaVez(
       await p.log("pre_agendamento", "passado_call_center_silencio");
       return { ok: true, decisao: "passado_call_center" };
     }
-    await p.enviar(textoAposPassagem(pre.contato), "pre_agendamento", "lembrete_passagem_enviado", {}, { apos_passagem: true });
+    await p.enviar(textoAposPassagem(pre.numeroLegivel), "pre_agendamento", "lembrete_passagem_enviado", {}, { apos_passagem: true });
     return { ok: true, decisao: "passado_call_center_lembrete" };
   }
 
@@ -1058,16 +1061,11 @@ async function rodarNaVez(
       if (repetido) {
         if (!textoResposta) textoResposta = await respostaSemFerramentas(p, apiKey, maxTokens, system, messages);
       } else if (resultado.ok) {
-        if (!textoResposta) {
-          textoResposta = pre.ativo
-            ? textoPreAgendamentoAnotado(pre.contato, t.input?.formato === "online")
-            : sortear(t.input?.formato === "online" ? TEXTOS_AGENDAMENTO_ANOTADO_ONLINE : TEXTOS_AGENDAMENTO_ANOTADO);
-        }
+        if (!textoResposta) textoResposta = sortear(t.input?.formato === "online" ? TEXTOS_AGENDAMENTO_ANOTADO_ONLINE : TEXTOS_AGENDAMENTO_ANOTADO);
         marcadores.agendamento_id = resultado.agendamento_id;
         // Agendou: fica o handoff agendamento_confirmado (historico no CRM; a IA segue).
-        await p.handoff("agendamento_confirmado", `IA ${pre.ativo ? "pré-agendou" : "agendou"} ${resultado.inicio ? dataHoraLocal(resultado.inicio) : ""} (agendamento ${resultado.agendamento_id})`);
+        await p.handoff("agendamento_confirmado", `IA agendou ${resultado.inicio ? dataHoraLocal(resultado.inicio) : ""} (agendamento ${resultado.agendamento_id})`);
         await avisarEquipeAgendamento(p, cfg, t.input || {}, resultado);
-        if (pre.ativo) await avisarCallCenter(p, pre, t.input || {}, resultado);
       } else if (resultado.erro === "horario_ocupado") {
         // A IA ja tinha escrito "reservado": troca pelo aviso com horarios livres.
         textoResposta = textoHorarioOcupado(resultado.sugestoes.map((iso) => dataHoraLocal(iso)));
@@ -1075,6 +1073,15 @@ async function rodarNaVez(
         // A IA ja tinha escrito "reservado": troca por um pedido de outro horario.
         textoResposta = sortear(TEXTOS_AGENDAMENTO_FALHOU);
       }
+    } else if (t.name === TOOL_SOLICITAR_AGENDAMENTO) {
+      // Modo time de agendamento: a Jully nao marca horario, passa o pedido
+      // para o time. A resposta ao lead e fixa (sem prometer horario nem falar
+      // de convenio). Fica no CRM (handoff) mesmo se o WhatsApp falhar.
+      const avisados = await avisarPedidoAgendamento(p, cfg, pre, t.input || {});
+      await p.log("tools", "solicitar_agendamento", { detalhe: { avisados } });
+      await p.handoff("agendamento_confirmado", "Jully passou para o time de agendamento: aguardando agendamento");
+      marcadores.agendamento_solicitado = true;
+      textoResposta = textoAgendamentoEncaminhado(pre.contato);
     } else if (t.name === TOOL_CANCELAR_AGENDAMENTO) {
       // O lead manteve a decisao depois de a IA acolher e tentar manter ou remarcar.
       const motivoCancel = String(t.input?.motivo || "").trim().slice(0, 200);
@@ -1128,6 +1135,7 @@ async function rodarNaVez(
   const termoNegociacao = funilAuto ? detectarNegociacao(textoLead) : null;
   if (termoNegociacao) await avancarEtapa(sb, p, body.cliente_crm_id, "negociacao", `lead perguntou sobre "${termoNegociacao}"`);
   if (funilAuto && marcadores.agendamento_id) await avancarEtapa(sb, p, body.cliente_crm_id, "proposta", "a IA propôs um horário");
+  else if (funilAuto && marcadores.agendamento_solicitado) await avancarEtapa(sb, p, body.cliente_crm_id, "proposta", "a Jully passou para o time de agendamento");
   else if (funilAuto && env.enviado) {
     // A conversa entrou em agendamento (pedido de marcar, dia/horario): o card
     // ja vai para agendamento pendente, sem esperar a reserva do horario.
@@ -1337,41 +1345,59 @@ async function avisarEquipeAgendamento(p: Pipeline, cfg: Record<string, string>,
   });
 }
 
-// Pre-agendamento: manda o resumo do lead para UM numero do call center
-// (rodizio estavel pelo card). Sem numero configurado, so registra no log: o
-// aviso de sempre (avisarEquipeAgendamento) ja saiu para os numeros do aviso.
-// Falha nunca derruba a conversa.
-async function avisarCallCenter(p: Pipeline, pre: PreAgendamento, input: any, r: ResultadoAgendamento): Promise<void> {
-  if (!pre.numero) {
-    await p.log("tools", "callcenter_sem_numero", { detalhe: { agendamento_id: r.agendamento_id } });
-    return;
-  }
+// Modo time de agendamento: manda o pedido (dados + resumo + "Aguardando
+// agendamento") para os numeros do aviso e para o call center do lead. Devolve
+// quantos numeros receberam. Falha nunca derruba a conversa.
+async function avisarPedidoAgendamento(p: Pipeline, cfg: Record<string, string>, pre: PreAgendamento, input: any): Promise<number> {
+  const destinos = destinosPedidoAgendamento(numerosAviso(cfg.aviso_agendamento_whatsapp), pre.numero);
   const appUrl = (Deno.env.get("IC_APP_URL") || "").replace(/\/+$/, "");
-  const texto = textoAvisoCallCenter({
+  const texto = textoPedidoAgendamento({
     nome: String(input.nome_completo || "").trim() || String(p.card?.nome || "").trim(),
     telefone: p.para,
     servico: String(input.servico || "Avaliação"),
-    inicioIso: r.inicio || "",
     formato: input.formato === "presencial" ? "Presencial" : input.formato === "online" ? "Online" : null,
     pagamento: String(input.pagamento || "").trim() || null,
+    preferencia: String(input.preferencia || "").trim().slice(0, 200) || null,
     resumo: String(input.resumo_conversa || "").trim().slice(0, 400) || null,
-    observacao: String(input.observacao || "").trim() || null,
-    atualizado: r.atualizado,
-    inicioAnteriorIso: r.remarcado_de,
+    observacao: String(input.observacao || "").trim().slice(0, 200) || null,
     linkCrm: appUrl ? `${appUrl}/#card=${p.body.cliente_crm_id}` : null,
   });
+  if (!destinos.length) {
+    await p.log("tools", "pedido_agendamento_sem_numero");
+    return 0;
+  }
   if (!p.envioLigado || !p.canal) {
-    await p.log("tools", "callcenter_simulado", { detalhe: { texto } });
-    return;
+    await p.log("tools", "pedido_agendamento_simulado", { detalhe: { texto, destinos: destinos.length } });
+    return 0;
   }
   const canal = p.canal;
-  const numero = pre.numero;
+  let ok = 0;
   await p.comVez(async () => {
-    const env = await enviarTextoCanal(canal, numero, texto, LOG);
-    await p.log("tools", env.ok ? "callcenter_enviado" : "callcenter_falhou", {
-      detalhe: { agendamento_id: r.agendamento_id, status: env.ok ? null : env.status },
-    });
+    for (const numero of destinos) {
+      const env = await enviarTextoCanal(canal, numero, texto, LOG);
+      if (env.ok) ok++;
+      else await p.log("tools", "pedido_agendamento_falhou", { detalhe: { status: env.status } });
+    }
   });
+  return ok;
+}
+
+// Pedido de agendamento passado ao time nos ultimos 30 dias (marcador na
+// resposta da Jully). Enquanto houver, a Jully nao conduz a conversa (6b).
+async function pedidoAgendamentoRecente(sb: SupabaseClient, clienteId: string): Promise<boolean> {
+  const { data, error } = await sb
+    .from("crm_conversas")
+    .select("id")
+    .eq("cliente_crm_id", clienteId)
+    .eq("autor", "ia")
+    .gte("criada_em", new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString())
+    .contains("payload_raw", { agendamento_solicitado: true })
+    .limit(1);
+  if (error) {
+    console.warn(LOG, "pedido de agendamento recente falhou:", error.message);
+    return false;
+  }
+  return !!(data && data.length);
 }
 
 // Retoma as conversas em que a IA falou por ultimo e o lead parou de responder
