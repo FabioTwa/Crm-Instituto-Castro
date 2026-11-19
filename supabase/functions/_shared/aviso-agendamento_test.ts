@@ -58,3 +58,13 @@ Deno.test("pedido para a central de agendamento", () => {
   assertStringIncludes(t, "*Cirurgia:* vesícula");
   assertStringIncludes(t, "(11) 99999-8888");
 });
+
+Deno.test("aviso de remarcacao mostra o horario anterior e o novo", () => {
+  const t = textoAvisoAgendamento({
+    nome: "Thamires", telefone: "5511999999727", servico: "Consulta de avaliação",
+    inicioIso: "2026-11-19T13:00:00Z", inicioAnteriorIso: "2026-11-19T12:00:00Z", atualizado: true,
+  });
+  assertStringIncludes(t, "remarcado");
+  assertStringIncludes(t, "*Antes:* 19/11 (quinta-feira) às 09:00");
+  assertStringIncludes(t, "*Agora:* 19/11 (quinta-feira) às 10:00");
+});

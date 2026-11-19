@@ -58,6 +58,17 @@ export function inicioDaJanela(inicioMs: number, horas: number, tz: string = TZ_
 // vespera) recebe "horasCurta" antes ou, se marcou mais em cima da hora, 30 min
 // depois de marcar. Nunca a menos de 15 min do horario. Um lembrete so por
 // agendamento e horario (controle no chamador).
+// "Formato: Online" gravado nas observacoes do agendamento (ic-agendamento propor).
+export function agendamentoOnline(observacoes: string | null | undefined): boolean {
+  return /\bformato:\s*online\b/i.test(String(observacoes || ""));
+}
+
+// O lead ja confirmou este agendamento e recebeu o lembrete de um horario
+// anterior: depois de uma remarcacao combinada na conversa, nao pede de novo.
+export function lembreteJaResolvido(status: string | null, lembretesDesteAgendamento: number): boolean {
+  return String(status || "").toLowerCase() === "confirmado" && lembretesDesteAgendamento > 0;
+}
+
 export function precisaLembrete(a: {
   inicio: string;
   criadoEm: string | null;
@@ -97,12 +108,17 @@ function quando(inicioIso: string, agora: Date, tz: string): string {
   return `no dia ${data}, às ${hh}`;
 }
 
-export function textoConfirmacao(a: { primeiroNome: string | null; inicioIso: string; agora: Date; variante: number; tz?: string }): string {
+export function textoConfirmacao(a: { primeiroNome: string | null; inicioIso: string; agora: Date; variante: number; tz?: string; online?: boolean }): string {
   const tz = a.tz || TZ_PADRAO;
   const nome = String(a.primeiroNome || "").trim().split(/\s+/)[0] || "";
   const oi = nome ? `Oi, ${nome}! Tudo bem?` : "Oi! Tudo bem?";
   const q = quando(a.inicioIso, a.agora, tz);
-  const textos = [
+  // Consulta online: sem endereco nem "te esperamos aqui".
+  const textos = a.online ? [
+    `${oi}\n\nPassando para lembrar da sua consulta online com o Instituto Castro ${q}.\n\nPosso confirmar a sua presença?`,
+    `${oi}\n\nSó lembrando que a sua consulta online com a gente é ${q}.\n\nEstá tudo certo para você? Posso confirmar?`,
+    `${oi}\n\nEstou passando para confirmar a sua consulta online com o Instituto Castro: ${q}.\n\nPodemos contar com você?`,
+  ] : [
     `${oi}\n\nPassando para lembrar do seu horário aqui no Instituto Castro ${q}. Te esperamos na Av. Paes de Barros, 1378, na Mooca.\n\nPosso confirmar a sua presença?`,
     `${oi}\n\nSó lembrando que o seu horário com a gente é ${q}, aqui na Av. Paes de Barros, 1378, na Mooca.\n\nEstá tudo certo para você vir? Posso confirmar?`,
     `${oi}\n\nEstou passando para confirmar o seu horário aqui no Instituto Castro: ${q}, na Av. Paes de Barros, 1378, na Mooca.\n\nPodemos contar com você?`,

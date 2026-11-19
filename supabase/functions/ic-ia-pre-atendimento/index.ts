@@ -97,7 +97,17 @@ import { faseTeste } from "../_shared/ia-teste.ts";
 import { decidirRajada, rajadaDoConfig } from "../_shared/rajada.ts";
 import { decidirFollowup, followupsDoConfig, instrucaoFollowup, podeMandarFollowup, textoFollowupFixo } from "../_shared/ia-followup.ts";
 import { dataHoraLocal, numerosAviso, textoAvisoAgendamento, textoAvisoCancelamento, textoAvisoCentral } from "../_shared/aviso-agendamento.ts";
-import { ETAPA_CONFIRMACAO, horasConfirmacao, horasConfirmacaoCurta, MINIMO_ANTES_MS, precisaLembrete, STATUS_COM_LEMBRETE, textoConfirmacao } from "../_shared/confirmacao-agendamento.ts";
+import {
+  agendamentoOnline,
+  ETAPA_CONFIRMACAO,
+  horasConfirmacao,
+  horasConfirmacaoCurta,
+  lembreteJaResolvido,
+  MINIMO_ANTES_MS,
+  precisaLembrete,
+  STATUS_COM_LEMBRETE,
+  textoConfirmacao,
+} from "../_shared/confirmacao-agendamento.ts";
 import { decidirEncerramento, ETAPA_ENCERRAMENTO, jaEncerrada, mensagensDaConversaAtual, minutosEncerramento } from "../_shared/ia-encerramento.ts";
 import { detectarAgendamento, detectarNegociacao, type EventoFunil } from "../_shared/funil-ia.ts";
 import {
@@ -125,11 +135,13 @@ import {
   partesDaResposta,
   sortear,
   TEXTOS_AGENDAMENTO_ANOTADO,
+  TEXTOS_AGENDAMENTO_ANOTADO_ONLINE,
   TEXTOS_AGENDAMENTO_FALHOU,
   TEXTOS_CANCELAMENTO_FALHOU,
   TEXTOS_CENTRAL_ENCAMINHADO,
   TEXTOS_CENTRAL_FALHOU,
   TEXTOS_CONFIRMACAO_ANOTADA,
+  TEXTOS_CONFIRMACAO_ANOTADA_ONLINE,
   TEXTOS_CONSENTIMENTO_NEGADO,
   TEXTOS_ENCERRAMENTO,
   TEXTOS_ERRO_TEMPORARIO,
@@ -989,7 +1001,7 @@ async function rodarNaVez(
       if (repetido) {
         if (!textoResposta) textoResposta = await respostaSemFerramentas(p, apiKey, maxTokens, system, messages);
       } else if (resultado.ok) {
-        if (!textoResposta) textoResposta = sortear(TEXTOS_AGENDAMENTO_ANOTADO);
+        if (!textoResposta) textoResposta = sortear(t.input?.formato === "online" ? TEXTOS_AGENDAMENTO_ANOTADO_ONLINE : TEXTOS_AGENDAMENTO_ANOTADO);
         marcadores.agendamento_id = resultado.agendamento_id;
         // Agendou: fica o handoff agendamento_confirmado (historico no CRM; a IA segue).
         await p.handoff("agendamento_confirmado", `IA agendou ${resultado.inicio ? dataHoraLocal(resultado.inicio) : ""} (agendamento ${resultado.agendamento_id})`);
@@ -1023,7 +1035,7 @@ async function rodarNaVez(
       });
       if (conf.ok) {
         marcadores.confirmado_id = conf.agendamento_id;
-        if (!textoResposta) textoResposta = sortear(TEXTOS_CONFIRMACAO_ANOTADA);
+        if (!textoResposta) textoResposta = sortear(conf.online ? TEXTOS_CONFIRMACAO_ANOTADA_ONLINE : TEXTOS_CONFIRMACAO_ANOTADA);
       }
     } else if (t.name === TOOL_ENCAMINHAR_CENTRAL) {
       // Pedido para a central de agendamento analisar (cirurgia por convenio
@@ -1172,10 +1184,12 @@ type ResultadoAgendamento = {
   agendamento_id: string | null;
   inicio: string | null;
   atualizado: boolean;
+  // Remarcacao: horario anterior do mesmo agendamento.
+  remarcado_de: string | null;
   erro: string | null;
   sugestoes: string[];
 };
-const FALHA_AGENDAMENTO: ResultadoAgendamento = { ok: false, agendamento_id: null, inicio: null, atualizado: false, erro: null, sugestoes: [] };
+const FALHA_AGENDAMENTO: ResultadoAgendamento = { ok: false, agendamento_id: null, inicio: null, atualizado: false, remarcado_de: null, erro: null, sugestoes: [] };
 
 // O lead mandou mensagem depois da que disparou esta invocacao?
 async function chegouMensagemNova(sb: SupabaseClient, clienteId: string, gatilhoId: string): Promise<boolean> {
@@ -1243,6 +1257,7 @@ async function avisarEquipeAgendamento(p: Pipeline, cfg: Record<string, string>,
     pagamento: String(input.pagamento || "").trim() || null,
     observacao: String(input.observacao || "").trim() || null,
     atualizado: r.atualizado,
+    inicioAnteriorIso: r.remarcado_de,
     linkCrm: appUrl || null,
   });
   if (!p.envioLigado || !p.canal) {
@@ -1347,7 +1362,7 @@ async function lembrarConfirmacoes(sb: SupabaseClient): Promise<Record<string, u
   // +24 h no teto: a janela de segunda adianta para sabado.
   const { data: ags, error } = await sb
     .from("agendamentos")
-    .select("id, cliente_crm_id, inicio, status, criado_em, telefone_lead")
+    .select("id, cliente_crm_id, inicio, status, criado_em, telefone_lead, observacoes")
     .in("status", STATUS_COM_LEMBRETE)
     .not("cliente_crm_id", "is", null)
     .gt("inicio", new Date(agora.getTime() + MINIMO_ANTES_MS).toISOString())
@@ -1363,15 +1378,21 @@ async function lembrarConfirmacoes(sb: SupabaseClient): Promise<Record<string, u
   for (const ag of (ags as any[]) || []) {
     if (enviadas >= CONFIRMACOES_POR_RODADA) break;
     const marca = { agendamento_id: String(ag.id), inicio: String(ag.inicio) };
+    // Logs deste agendamento (todos os horarios): a remarcacao troca o horario
+    // e mantem o id.
     const { data: logs } = await sb
       .from("ia_decisoes_log")
-      .select("decisao, criado_em")
+      .select("decisao, criado_em, detalhe")
       .eq("cliente_crm_id", ag.cliente_crm_id)
       .eq("etapa_pipeline", ETAPA_CONFIRMACAO)
-      .contains("detalhe", marca)
-      .limit(20);
-    const lista = (logs as any[]) || [];
-    const jaFoi = lista.some((l) => l.decisao === "lembrete_enviado" || l.decisao === "simulada_envio_desligado");
+      .contains("detalhe", { agendamento_id: marca.agendamento_id })
+      .limit(50);
+    const todos = (logs as any[]) || [];
+    const enviou = (l: any) => l.decisao === "lembrete_enviado" || l.decisao === "simulada_envio_desligado";
+    // Ja confirmado depois de um lembrete (remarcado na conversa): nao pede de novo.
+    if (lembreteJaResolvido(ag.status, todos.filter(enviou).length)) continue;
+    const lista = todos.filter((l) => Date.parse(String(l.detalhe?.inicio || "")) === Date.parse(marca.inicio));
+    const jaFoi = lista.some(enviou);
     // Rodada anterior ainda enviando (o envio leva o tempo do "digitando..."): nao duplica.
     const emAndamento = lista.some((l) => l.decisao === "tentativa" && agora.getTime() - Date.parse(String(l.criado_em)) < 5 * 60000);
     const tentativas = lista.filter((l) => l.decisao === "tentativa").length;
@@ -1408,7 +1429,9 @@ async function lembrarConfirmacoes(sb: SupabaseClient): Promise<Record<string, u
       const res = await canalDoVendedor(sb, String(card.vendedor_id));
       if (res.ok) p.canal = res.canal;
     }
-    const texto = textoConfirmacao({ primeiroNome: card.nome, inicioIso: String(ag.inicio), agora, variante: Math.floor(Math.random() * 3) });
+    const texto = textoConfirmacao({
+      primeiroNome: card.nome, inicioIso: String(ag.inicio), agora, variante: Math.floor(Math.random() * 3), online: agendamentoOnline(ag.observacoes),
+    });
     enviadas++;
     await p.log(ETAPA_CONFIRMACAO, "tentativa", { detalhe: marca });
     await p.enviar(texto, ETAPA_CONFIRMACAO, "lembrete_enviado", marca, { confirmacao_agendamento: true, agendamento_id: marca.agendamento_id });
@@ -1855,6 +1878,7 @@ async function proporAgendamento(
       agendamento_id: data.agendamento_id ? String(data.agendamento_id) : null,
       inicio: data.inicio ? String(data.inicio) : null,
       atualizado: data.atualizado === true,
+      remarcado_de: data.remarcado_de ? String(data.remarcado_de) : null,
       erro: null,
       sugestoes: [],
     };
@@ -1944,9 +1968,9 @@ async function cancelarAgendamentoDoLead(clienteId: string, motivo: string): Pro
 
 // Confirmacao de presenca pelo lead: ic-agendamento {acao:'confirmar'} (porta interna).
 // Falha aqui nao muda a resposta: o agradecimento continua valendo, so o status fica pendente.
-type ResultadoConfirmacao = { ok: boolean; agendamento_id: string | null; inicio: string | null; ja_confirmado: boolean; erro: string | null };
+type ResultadoConfirmacao = { ok: boolean; agendamento_id: string | null; inicio: string | null; ja_confirmado: boolean; online: boolean; erro: string | null };
 async function confirmarAgendamentoDoLead(clienteId: string): Promise<ResultadoConfirmacao> {
-  const falha = (erro: string): ResultadoConfirmacao => ({ ok: false, agendamento_id: null, inicio: null, ja_confirmado: false, erro });
+  const falha = (erro: string): ResultadoConfirmacao => ({ ok: false, agendamento_id: null, inicio: null, ja_confirmado: false, online: false, erro });
   try {
     const URL_SB = Deno.env.get("SUPABASE_URL") || "";
     const ctl = new AbortController();
@@ -1968,6 +1992,7 @@ async function confirmarAgendamentoDoLead(clienteId: string): Promise<ResultadoC
       agendamento_id: data.agendamento_id ? String(data.agendamento_id) : null,
       inicio: data.inicio ? String(data.inicio) : null,
       ja_confirmado: data.ja_confirmado === true,
+      online: data.online === true,
       erro: null,
     };
   } catch (e) {

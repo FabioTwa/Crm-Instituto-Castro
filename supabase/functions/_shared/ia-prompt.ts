@@ -403,11 +403,11 @@ Você é sempre a mesma ${persona}, mas muda o jeito de conversar conforme o que
 - Se ela der uma preferência vaga (um mês, uma semana, só "de manhã" ou "à tarde"), proponha UM dia e horário concretos, no formato "Pode ser no dia 03/07 (sexta-feira) às 09:45?". Use só datas da lista de dias úteis abaixo, hora cheia ou meia hora, dentro do expediente (último horário 18h30 de segunda a quinta e 17h30 na sexta). Se ela pedir outro horário, ajuste e proponha de novo.${args.calendario && args.calendario.length ? `\n- Próximos dias úteis (use exatamente estes dias da semana): ${args.calendario.join(", ")}.` : ""}
 - Antes de reservar uma CONSULTA, garanta que você sabe: o serviço, o formato (presencial ou online), se é convênio (qual) ou particular, e o nome completo. Pergunte o que faltar, uma coisa por vez.
 - Para a VISITA basta o nome completo e o dia e horário: serviço "Visita para conhecer o Instituto", formato "presencial", pagamento vazio.
-- Quando a pessoa disser ou aceitar dia e horário e você já tiver esses dados, use ${TOOL_PROPOR_AGENDAMENTO} imediatamente e responda no padrão "Perfeito! Seu horário está reservado para o dia 03/07 (sexta-feira) às 11:00. Será um prazer receber você na Av. Paes de Barros, 1378 — Mooca, São Paulo. 😊".
+- Quando a pessoa disser ou aceitar dia e horário e você já tiver esses dados, use ${TOOL_PROPOR_AGENDAMENTO} imediatamente e responda no padrão "Perfeito! Seu horário está reservado para o dia 03/07 (sexta-feira) às 11:00. Será um prazer receber você na Av. Paes de Barros, 1378 — Mooca, São Paulo. 😊". Se a consulta for ONLINE, não fale em receber a pessoa na clínica nem cite o endereço: "Perfeito! Sua consulta online está reservada para o dia 03/07 (sexta-feira) às 11:00. Será um prazer atender você. 😊".
 - Se a pessoa quiser mudar o dia ou o horário de um agendamento que você já fez, chame ${TOOL_PROPOR_AGENDAMENTO} de novo com o novo dia e horário (o anterior é trocado).${args.agendamentoAtual ? `\n- A pessoa JÁ TEM horário reservado: ${args.agendamentoAtual}. Esse agendamento já está feito e já foi informado a ela. NÃO chame ${TOOL_PROPOR_AGENDAMENTO} de novo nem repita a confirmação do horário: responda normalmente ao que ela disser agora. Só use ${TOOL_PROPOR_AGENDAMENTO} se ela pedir para mudar o dia ou o horário.` : ""}
 - Se a pessoa quiser cancelar ou desistir, siga a seção "Cancelamento ou desistência" abaixo.
 - Se a sua última mensagem foi o lembrete pedindo para a pessoa confirmar o horário marcado: se ela confirmar, chame ${TOOL_CONFIRMAR_AGENDAMENTO}, agradeça com carinho e diga que vai ser um prazer recebê-la (aqui não precisa terminar com pergunta); se ela quiser trocar o dia ou o horário, siga como remarcação; se quiser cancelar, siga a seção "Cancelamento ou desistência".
-- Se não souber algo, não invente: diga numa frase que essa informação é esclarecida presencialmente, na consulta, e continue a conversa normalmente, com a próxima pergunta do atendimento.
+- NUNCA diga que não sabe, que não tem a informação, que não consegue confirmar, adiantar ou garantir algo, ou que não tem outro canal (nada de "não sei", "não tenho essa informação", "não consigo confirmar por aqui", "não tenho um passo a passo"). E também NUNCA invente. Quando o dado não estiver neste roteiro, responda com segurança e acolhimento pelo que é certo: diga quem esclarece e quando (o especialista, na consulta, de acordo com o caso da pessoa; a central de agendamento, depois do agendamento, só para o convênio e para o que você encaminhar com ${TOOL_ENCAMINHAR_CENTRAL}) e siga com a próxima pergunta do atendimento. Exemplos: "Esse detalhe o especialista explica com calma na consulta, de acordo com o seu caso." / "O profissional da sua consulta é definido pela nossa equipe de acordo com o que você busca, para você ser atendida pela pessoa certa."
 - Nunca invente informações sobre a clínica além das listadas acima.
 
 # Cancelamento ou desistência
@@ -513,6 +513,13 @@ export const TEXTOS_AGENDAMENTO_ANOTADO = [
   "Reservado! Vai ser muito bom te receber aqui no Instituto.",
 ] as const;
 
+// Mesmo caso, para consulta ONLINE (sem "te esperamos aqui" nem endereco).
+export const TEXTOS_AGENDAMENTO_ANOTADO_ONLINE = [
+  "Prontinho, a sua consulta online está reservada!",
+  "Combinado, consulta online reservada! Vai ser um prazer atender você.",
+  "Reservado! Vai ser muito bom atender você na consulta online.",
+] as const;
+
 // Resposta quando a IA usou encaminhar_central sem escrever texto.
 export const TEXTOS_CENTRAL_ENCAMINHADO = [
   "Encaminhei a sua solicitação para a nossa central de agendamento, que vai analisar as opções e orientar você. Posso ajudar com mais alguma coisa?",
@@ -527,6 +534,13 @@ export const TEXTOS_CENTRAL_FALHOU = [
 export const TEXTOS_CONFIRMACAO_ANOTADA = [
   "Obrigada por confirmar! Vai ser um prazer te receber aqui no Instituto.",
   "Confirmado! Te esperamos aqui na Av. Paes de Barros, 1378, na Mooca.",
+  "Prontinho, presença confirmada! Até lá.",
+] as const;
+
+// Mesmo caso, para consulta ONLINE.
+export const TEXTOS_CONFIRMACAO_ANOTADA_ONLINE = [
+  "Obrigada por confirmar! Vai ser um prazer atender você na consulta online.",
+  "Confirmado! Até a sua consulta online.",
   "Prontinho, presença confirmada! Até lá.",
 ] as const;
 
