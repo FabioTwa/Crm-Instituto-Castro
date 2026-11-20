@@ -21,3 +21,13 @@ Deno.test("assinatura: passaria do limite, segue sem assinatura", () => {
   assertEquals(assinarMensagem("Gabriel", "Oi", 12), "*Gabriel*\nOi");
   assertEquals(assinarMensagem("Gabriel", "Oi", 11), "Oi");
 });
+
+Deno.test("primeiroNomeDe: pula titulo, emoji e numeros", async () => {
+  const { primeiroNomeDe } = await import("./texto.ts");
+  assertEquals(primeiroNomeDe("Prof. Lilian 💫🙏🏻 2079"), "Lilian");
+  assertEquals(primeiroNomeDe("Dra. Ana Paula"), "Ana");
+  assertEquals(primeiroNomeDe("Valéria Souza"), "Valéria");
+  assertEquals(primeiroNomeDe("💫 2079"), null);
+  assertEquals(primeiroNomeDe(null), null);
+  assertEquals(primeiroNomeDe("Raquel"), "Raquel");
+});

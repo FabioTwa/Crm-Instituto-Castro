@@ -93,6 +93,7 @@ import { canalDaLinha, canalDoVendedor, type CanalEnvio, enviarTextoCanal, prove
 import { type CanalZapi, type ChatZapi, chatsZapi, lerMensagemZapi, mensagensChatZapi, msLeitura, segundosDigitando, statusZapi } from "../_shared/zapi.ts";
 import { detectarHandoff, handoffCalaIA, RESPOSTA_URGENCIA } from "../_shared/handoff-regras.ts";
 import { respostaProibida } from "../_shared/pos-validacao.ts";
+import { primeiroNomeDe } from "../_shared/texto.ts";
 import {
   consentimentoLibera,
   interpretarConsentimento,
@@ -992,7 +993,7 @@ async function rodarNaVez(
   const nomesDia = ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"];
   const agoraLocal = `${nomesDia[agoraSp.diaSemana]}, ${String(agoraSp.dia).padStart(2, "0")}/${String(agoraSp.mes).padStart(2, "0")}/${agoraSp.ano} ${String(agoraSp.hora).padStart(2, "0")}:${String(agoraSp.minuto).padStart(2, "0")}`;
   const system = montarSystemPrompt({
-    primeiroNome: ctx.primeiro_nome ? String(ctx.primeiro_nome).split(/\s+/)[0] : null,
+    primeiroNome: primeiroNomeDe(ctx.primeiro_nome),
     funil: ctx.funil,
     etapa: ctx.etapa_label,
     exemplos,
@@ -1706,7 +1707,7 @@ async function textoComInstrucao(
   const agoraSp = partesNoFuso(new Date(), TZ_PADRAO);
   const nomesDia = ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"];
   const system = montarSystemPrompt({
-    primeiroNome: ctx.primeiro_nome ? String(ctx.primeiro_nome).split(/\s+/)[0] : null,
+    primeiroNome: primeiroNomeDe(ctx.primeiro_nome),
     funil: ctx.funil,
     etapa: ctx.etapa_label,
     exemplos: [],
