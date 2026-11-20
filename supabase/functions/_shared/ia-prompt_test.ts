@@ -254,3 +254,15 @@ Deno.test("time de agendamento: textos fixos passam na pos-validacao e nao falam
   assertStringIncludes(textos[0], "Fico à disposição");
   assertEquals(textos[3].includes("chamar direto"), false);
 });
+
+Deno.test("pendentes da pausa: prompt pede desculpas pela demora so quando a clinica atrasou", async () => {
+  const m = await import("./ia-prompt.ts");
+  const base = { primeiroNome: "Ana", funil: null, etapa: null, exemplos: [], agoraLocal: "x" };
+  const com = m.montarSystemPrompt({ ...base, atrasoDaClinica: "19/11 (quarta-feira) às 14:55", retomadaDesde: "18/11 (terça-feira) às 10:00" });
+  assertStringIncludes(com, "quem demorou fomos NÓS");
+  assertStringIncludes(com, "19/11 (quarta-feira) às 14:55");
+  assertEquals(com.includes("AGORA a pessoa voltou"), false);
+  assertEquals(com.includes("${"), false);
+  const sem = m.montarSystemPrompt(base);
+  assertEquals(sem.includes("quem demorou fomos NÓS"), false);
+});
