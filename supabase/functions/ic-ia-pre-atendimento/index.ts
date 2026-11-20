@@ -1382,6 +1382,47 @@ async function avisarPedidoAgendamento(p: Pipeline, cfg: Record<string, string>,
   return ok;
 }
 
+// Teste do aviso ao time de agendamento, sem lead real: quem tem acesso ao banco
+// grava um ou mais numeros em crm_ia_config.teste_aviso_para e, na proxima
+// rodada do varredor (ate 1 min), sai um pedido com DADOS FICTICIOS, marcado
+// como teste, pelo numero da clinica. A chave e limpa ANTES do envio, para o
+// teste nunca se repetir. Funciona com a Jully pausada.
+async function enviarTesteAviso(sb: SupabaseClient): Promise<Record<string, unknown> | null> {
+  const { data: linha } = await sb.from("crm_ia_config").select("valor").eq("chave", "teste_aviso_para").maybeSingle();
+  const destinos = numerosAviso((linha as any)?.valor);
+  if (!destinos.length) return null;
+  await sb.from("crm_ia_config").update({ valor: "" }).eq("chave", "teste_aviso_para");
+  if (!(await icFlag(sb, "envio_whatsapp_cloud_api"))) return { ok: false, erro: "envio_desligado" };
+  const { data: vend } = await sb
+    .from("vendedores_whatsapp")
+    .select("vendedor_id")
+    .eq("ativo", true)
+    .order("created_at", { ascending: true })
+    .limit(1);
+  const vendedorId = vend && vend.length ? String((vend[0] as any).vendedor_id) : "";
+  if (!vendedorId) return { ok: false, erro: "sem_numero_da_clinica" };
+  const res = await canalDoVendedor(sb, vendedorId);
+  if (!res.ok) return { ok: false, erro: "sem_canal" };
+  const texto = "🧪 *MENSAGEM DE TESTE (dados fictícios)*\n\n" + textoPedidoAgendamento({
+    nome: "Maria Teste da Silva",
+    telefone: "5511900000000",
+    servico: "Cirurgia bariátrica",
+    formato: "Presencial",
+    pagamento: "Convênio Bradesco Saúde Top",
+    preferencia: "terças à tarde",
+    resumo: "Quer saber da bariátrica pelo convênio; já tentou dieta com acompanhamento e quer conversar com o cirurgião.",
+    linkCrm: null,
+  });
+  let enviados = 0;
+  for (const numero of destinos) {
+    const env = await enviarTextoCanal(res.canal, numero, texto, LOG);
+    if (env.ok) enviados++;
+    else console.warn(LOG, "teste de aviso: envio recusado", env.status);
+  }
+  console.log(LOG, "teste de aviso enviado:", enviados, "de", destinos.length);
+  return { ok: enviados === destinos.length, enviados, destinos: destinos.length };
+}
+
 // Pedido de agendamento passado ao time nos ultimos 30 dias (marcador na
 // resposta da Jully). Enquanto houver, a Jully nao conduz a conversa (6b).
 async function pedidoAgendamentoRecente(sb: SupabaseClient, clienteId: string): Promise<boolean> {
@@ -2269,6 +2310,11 @@ Deno.serve(async (req: Request) => {
     if (body.acao === "encerrar_conversa_equipe") return await encerrarPelaEquipe(req, sb, body);
     if (!chamadaInternaValida(req)) return json({ ok: false, erro: "nao_autorizado" }, 401);
     if (body.acao === "encerrar_inativas") {
+      // Teste de aviso (crm_ia_config.teste_aviso_para): roda mesmo com a Jully pausada.
+      const teste_aviso = await enviarTesteAviso(sb).catch((e) => {
+        console.error(LOG, "teste de aviso falhou:", e instanceof Error ? e.message : e);
+        return { ok: false, erro: "excecao" };
+      });
       const r = await encerrarInativas(sb);
       // Lembrete de confirmacao (temporario; desliga com confirmacao_antes_horas vazio).
       const confirmacoes = await lembrarConfirmacoes(sb).catch((e) => {
@@ -2280,7 +2326,7 @@ Deno.serve(async (req: Request) => {
         console.error(LOG, "retomada pos-queda falhou:", e instanceof Error ? e.message : e);
         return { ok: false, erro: "excecao" };
       });
-      return json({ ...r, confirmacoes, retomada_queda });
+      return json({ ...r, confirmacoes, retomada_queda, teste_aviso });
     }
 
     const clienteId = String(body.cliente_crm_id || "").trim();
