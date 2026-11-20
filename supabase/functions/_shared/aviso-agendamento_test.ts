@@ -118,3 +118,8 @@ Deno.test("time de agendamento: destinos = avisos + call center, sem repetir", a
   assertEquals(destinosPedidoAgendamento(["5511911111111"], "5511911111111"), ["5511911111111"]);
   assertEquals(destinosPedidoAgendamento([], null), []);
 });
+
+Deno.test("numero do call center fixo: (11) 2020-8098 fica com 12 digitos e legivel", () => {
+  assertEquals(numerosAviso("1120208098"), ["551120208098"]);
+  assertEquals(telefoneLegivel("551120208098"), "(11) 2020-8098");
+});
