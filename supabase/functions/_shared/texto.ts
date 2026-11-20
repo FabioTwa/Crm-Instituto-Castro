@@ -28,3 +28,21 @@ export function assinarMensagem(nome: string | null | undefined, texto: string, 
   const assinado = "*" + limpo + "*\n" + texto;
   return assinado.length > limite ? texto : assinado;
 }
+
+// Primeiro nome para a Jully usar no cumprimento. O nome do WhatsApp pode vir com
+// titulo ("Prof. Lilian"), emoji ou numeros ("Lilian 💫 2079"): pula titulos e
+// palavras sem letra, e devolve null quando nao sobra um nome aproveitavel.
+const TITULOS_NOME = new Set([
+  "prof", "profa", "professor", "professora", "dr", "dra", "doutor", "doutora",
+  "sr", "sra", "srta", "senhor", "senhora", "dona", "seu", "pr", "pra", "pastor", "pastora",
+]);
+export function primeiroNomeDe(nome: unknown): string | null {
+  const partes = String(nome ?? "").split(/\s+/);
+  for (const bruto of partes) {
+    const p = bruto.replace(/[^\p{L}'-]/gu, "");
+    if (p.length < 2) continue;
+    if (TITULOS_NOME.has(p.toLowerCase())) continue;
+    return p;
+  }
+  return null;
+}
