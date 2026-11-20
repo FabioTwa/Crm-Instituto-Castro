@@ -266,3 +266,16 @@ Deno.test("pendentes da pausa: prompt pede desculpas pela demora so quando a cli
   const sem = m.montarSystemPrompt(base);
   assertEquals(sem.includes("quem demorou fomos NÓS"), false);
 });
+
+Deno.test("pendentes da pausa: cumprimento pelo horario atual e um so cumprimento", async () => {
+  const m = await import("./ia-prompt.ts");
+  const p = m.montarSystemPrompt({
+    primeiroNome: "Ana", funil: null, etapa: null, exemplos: [],
+    agoraLocal: "sexta-feira, 20/11/2026 11:30", atrasoDaClinica: "19/11 (quinta-feira) às 15:10",
+  });
+  assertStringIncludes(p, "segue o horário de AGORA (sexta-feira, 20/11/2026 11:30)");
+  assertStringIncludes(p, "nunca o horário em que ela escreveu");
+  assertStringIncludes(p, "Cumprimente UMA vez só");
+  assertStringIncludes(p, "Aqui é a Jully, do Instituto Castro. Desculpe a demora");
+  assertStringIncludes(p, "NÃO mande a frase de abertura");
+});

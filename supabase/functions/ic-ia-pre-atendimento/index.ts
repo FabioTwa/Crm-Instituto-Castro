@@ -1394,7 +1394,16 @@ async function avisarPedidoAgendamento(p: Pipeline, cfg: Record<string, string>,
 // atendimento normal com a instrucao de pedir desculpas pela demora. Card que ja
 // foi respondido (ultima mensagem nao e do lead) e pulado na mesma rodada.
 async function responderPendentes(sb: SupabaseClient): Promise<Record<string, unknown> | null> {
-  const cfg = await iaConfig(sb);
+  const cfg = { ...(await iaConfig(sb)) };
+  // A fila e o horario da ultima resposta mudam a cada rodada: le direto do banco,
+  // sem o cache de 60 s do iaConfig (senao o intervalo e a fila ficam desatualizados).
+  const { data: frescos, error: errFila } = await sb
+    .from("crm_ia_config")
+    .select("chave, valor")
+    .in("chave", ["responder_pendentes", "responder_pendentes_ultimo", "pendentes_intervalo_min"]);
+  if (errFila) return { decisao: "erro_leitura_fila", erro: errFila.message };
+  for (const k of ["responder_pendentes", "responder_pendentes_ultimo", "pendentes_intervalo_min"]) delete (cfg as any)[k];
+  for (const r of (frescos as any[]) || []) (cfg as any)[r.chave] = r.valor;
   const ids = String(cfg.responder_pendentes || "").split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
   if (!ids.length) return null;
   if (!(await icFlag(sb, "ia_pre_atendimento")) || String(cfg.ligada).toLowerCase() !== "true") return { decisao: "desligada", faltam: ids.length };
