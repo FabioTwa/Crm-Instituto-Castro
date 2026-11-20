@@ -65,3 +65,13 @@ Deno.test("telefone plausivel: Brasil e fora do Brasil", () => {
   assert(!telefonePlausivel("0447700900123"));       // comeca com 0
   assert(!telefonePlausivel("55119780640"));         // 55 com tamanho errado
 });
+
+Deno.test("telefone fixo (WhatsApp Business) nao ganha o 9 do celular", () => {
+  assertEquals(canonicoTelefone("1120208098"), "551120208098");
+  assertEquals(canonicoTelefone("551120208098"), "551120208098");
+  assertEquals(canonicoTelefone("(11) 2020-8098"), "551120208098");
+  assertEquals(canonicoTelefone("+55 11 5555-1234"), "551155551234");
+  // celular antigo de 8 digitos continua ganhando o 9
+  assertEquals(canonicoTelefone("1178064033"), "5511978064033");
+  assertEquals(canonicoTelefone("1166554433"), "5511966554433");
+});

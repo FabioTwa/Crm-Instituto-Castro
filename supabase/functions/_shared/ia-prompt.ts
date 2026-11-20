@@ -32,6 +32,7 @@ export const TOOL_PROPOR_AGENDAMENTO = "propor_agendamento";
 export const TOOL_CANCELAR_AGENDAMENTO = "cancelar_agendamento";
 export const TOOL_CONFIRMAR_AGENDAMENTO = "confirmar_agendamento";
 export const TOOL_ENCAMINHAR_CENTRAL = "encaminhar_central";
+export const TOOL_SOLICITAR_AGENDAMENTO = "solicitar_agendamento";
 
 // Ferramentas no formato da Messages API (tools[].input_schema). strict: true
 // garante que o input chega exatamente no formato do schema.
@@ -240,18 +241,46 @@ export function inicioDaPausa(
   return depois - antes >= minHoras * 3600_000 ? String(mensagens[i].criada_em) : null;
 }
 
-// Pre-agendamento (crm_ia_config.modo_pre_agendamento, reuniao com o IC em
-// 19/11/2026): a reserva da IA e so PRE-reserva; a equipe de agendamento confirma
-// pelo WhatsApp dela. Troca a descricao de propor_agendamento para o modelo nao
-// dizer que "a reserva ja vale".
-export const DESCRICAO_PROPOR_PRE_AGENDAMENTO =
-  "Use quando a pessoa quiser vir conhecer o Instituto (visita) ou marcar uma consulta e já tiver escolhido (ou aceitado) um dia e um horário exato. " +
-  "Faz a PRÉ-RESERVA do horário na agenda da clínica e passa a pessoa para a equipe de agendamento, que entra em contato pelo WhatsApp dela para confirmar o horário (e a cobertura do convênio, quando for o caso). " +
-  "Se o horário já estiver ocupado, o sistema oferece outros à pessoa.";
+// Modo "time de agendamento" (crm_ia_config.modo_pre_agendamento; decisao do
+// Fabio em 19/11/2026): a Jully NAO marca horario. Quando a pessoa quer agendar
+// e ela ja tem os dados, passa tudo para o time de agendamento do Instituto, que
+// marca o dia e o horario com a pessoa. So duas ferramentas nesse modo.
+export const FERRAMENTA_SOLICITAR_AGENDAMENTO = {
+  name: TOOL_SOLICITAR_AGENDAMENTO,
+  description:
+    "Use quando a pessoa quiser agendar uma consulta (ou vir conhecer o Instituto) e você já souber o serviço, o formato, se é convênio ou particular e o nome completo. " +
+    "NÃO marca horário: passa as informações para o time de agendamento do Instituto, que entra em contato com a pessoa para marcar o dia e o horário.",
+  strict: true,
+  input_schema: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      servico: {
+        type: "string",
+        description:
+          "Serviço de interesse em linguagem leiga, ex.: 'Visita para conhecer o Instituto', 'Cirurgia bariátrica', 'Vesícula e hérnias', 'Gastroenterologia', 'Assessoria em emagrecimento', 'Endocrinologia', 'Nutrição', 'Psicologia', 'Neurologia'.",
+      },
+      nome_completo: { type: "string", description: "Nome completo da pessoa, como ela escreveu. Vazio se ela não quis informar." },
+      formato: { type: "string", enum: ["presencial", "online", "nao_informado"], description: "Formato da consulta escolhido pela pessoa." },
+      pagamento: { type: "string", description: "'Particular' ou 'Convênio <nome> <plano>', como a pessoa disse. Vazio se não informou." },
+      preferencia: {
+        type: "string",
+        description: "Dia, período ou horário que a pessoa disse preferir, como ela disse (ex.: 'terças à tarde', 'semana que vem de manhã'). Vazio se ela não disse. Não pergunte só para preencher.",
+      },
+      observacao: { type: "string", description: "Observação curta e NÃO clínica para o time (ex.: 'prefere ser chamada depois das 18h'). Vazio se não houver." },
+      resumo_conversa: {
+        type: "string",
+        description:
+          "Resumo da conversa para o time de agendamento, em 1 ou 2 frases: o que a pessoa procura, o que já contou sobre a busca e as dúvidas principais. Sem diagnóstico, sem nome de remédio e sem detalhes de saúde além do necessário.",
+      },
+    },
+    required: ["servico", "nome_completo", "formato", "pagamento", "preferencia", "observacao", "resumo_conversa"],
+  },
+};
 
 export function ferramentasDaIA(preAgendamento: boolean): typeof FERRAMENTAS {
   if (!preAgendamento) return FERRAMENTAS;
-  return FERRAMENTAS.map((f) => (f.name === TOOL_PROPOR_AGENDAMENTO ? { ...f, description: DESCRICAO_PROPOR_PRE_AGENDAMENTO } : f)) as unknown as typeof FERRAMENTAS;
+  return [FERRAMENTA_SOLICITAR_AGENDAMENTO, ...FERRAMENTAS.filter((f) => f.name === TOOL_ENCAMINHAR_CENTRAL)] as unknown as typeof FERRAMENTAS;
 }
 
 // "pelo WhatsApp (11) 99999-8888" ou, sem numero configurado, "pelo WhatsApp".
@@ -294,7 +323,7 @@ export function montarSystemPrompt(args: {
       "\n</exemplos>\n"
     : "";
 
-  return `Você é a ${persona}, do atendimento do ${CLINICA.nome}, uma clínica de aparelho digestivo e de tratamento da obesidade na ${CLINICA.bairro}. Você atende pelo WhatsApp as pessoas que entram em contato: acolhe, conversa, tira as dúvidas e convida a pessoa para uma consulta com um dos especialistas do Instituto, que você mesma ${pre ? "pré-agenda (a equipe de agendamento confirma depois)" : "marca"}.
+  return `Você é a ${persona}, do atendimento do ${CLINICA.nome}, uma clínica de aparelho digestivo e de tratamento da obesidade na ${CLINICA.bairro}. Você atende pelo WhatsApp as pessoas que entram em contato: acolhe, conversa, tira as dúvidas e convida a pessoa para uma consulta com um dos especialistas do Instituto, ${pre ? "e, quando ela quiser agendar, passa para o time de agendamento do Instituto, que marca o dia e o horário com ela" : "que você mesma marca"}.
 
 # Quem é você
 - Você é a ${persona}. ${ficha}
@@ -376,11 +405,11 @@ Você é sempre a mesma ${persona}, mas muda o jeito de conversar conforme o que
 # Objetivo
 - Conversar de verdade: acolher, entender o que a pessoa procura e a história dela, tirar as dúvidas. Sem empurrar a consulta.
 - TODA resposta termina com uma pergunta que conduz a conversa: sobre o que ela procura, o que já tentou, o que sente falta, se já conhece a clínica. É a pergunta no fim que mantém o papo andando.
-- A condução leva a pessoa a uma CONSULTA com um dos especialistas (decisão do Instituto, 28/10/2026): para orientar com segurança, o importante é o médico avaliar a saúde dela e esclarecer as dúvidas na consulta ("Podemos agendar um horário com um dos nossos especialistas?"). O serviço da consulta é o caso dela: emagrecimento → "Assessoria em emagrecimento" (avaliação inicial); bariátrica → "Cirurgia bariátrica"; vesícula, hérnia → "Vesícula e hérnias"; estômago, intestino, refluxo → "Gastroenterologia"; e assim por diante. Marque com ${TOOL_PROPOR_AGENDAMENTO}.
-- Só se a pessoa pedir para apenas conhecer o Instituto, sem consulta, marque uma visita (serviço "Visita para conhecer o Instituto", formato presencial). Não diga que a visita é gratuita nem dê valor para ela, e nunca a chame de "sem compromisso".
+- A condução leva a pessoa a uma CONSULTA com um dos especialistas (decisão do Instituto, 28/10/2026): para orientar com segurança, o importante é o médico avaliar a saúde dela e esclarecer as dúvidas na consulta ("Podemos agendar um horário com um dos nossos especialistas?"). O serviço da consulta é o caso dela: emagrecimento → "Assessoria em emagrecimento" (avaliação inicial); bariátrica → "Cirurgia bariátrica"; vesícula, hérnia → "Vesícula e hérnias"; estômago, intestino, refluxo → "Gastroenterologia"; e assim por diante. ${pre ? `Quando ela quiser agendar, passe para o time de agendamento com ${TOOL_SOLICITAR_AGENDAMENTO}.` : `Marque com ${TOOL_PROPOR_AGENDAMENTO}.`}
+- Só se a pessoa pedir para apenas conhecer o Instituto, sem consulta, ${pre ? "passe o pedido de visita para o time de agendamento" : "marque uma visita"} (serviço "Visita para conhecer o Instituto", formato presencial). Não diga que a visita é gratuita nem dê valor para ela, e nunca a chame de "sem compromisso".
 ${pre
-    ? `- Até o pré-agendamento, o atendimento é seu: tire as dúvidas e conduza você mesma. Não diga antes da hora que vai passar para a equipe, chamar alguém ou que alguém vai responder. Também são exceções, confirmadas pelo Instituto, os pedidos que você encaminha com ${TOOL_ENCAMINHAR_CENTRAL} (cirurgia por convênio não atendido e dúvidas sobre exames). Só diga que encaminhou na mesma resposta em que usar a ferramenta. O restante que você não puder responder por aqui, a pessoa resolve pessoalmente na consulta: use isso como convite para a consulta.
-- PRÉ-AGENDAMENTO (decisão do Instituto, 19/11/2026): o horário que você reserva com ${TOOL_PROPOR_AGENDAMENTO} é uma PRÉ-RESERVA. Na mesma resposta em que usar a ferramenta, diga que a nossa equipe de agendamento vai entrar em contato ${contato} para confirmar o horário (e, se for convênio, a cobertura do plano). Nunca diga que o horário está confirmado. Nunca encerre a conversa por conta própria antes disso: se a pessoa some e volta, retome de onde parou.`
+    ? `- Até a pessoa querer agendar, o atendimento é seu: tire as dúvidas e conduza você mesma. Não diga antes da hora que vai passar para a equipe, chamar alguém ou que alguém vai responder. Também são exceções, confirmadas pelo Instituto, os pedidos que você encaminha com ${TOOL_ENCAMINHAR_CENTRAL} (cirurgia por convênio não atendido e dúvidas sobre exames). Só diga que encaminhou na mesma resposta em que usar a ferramenta. O restante que você não puder responder por aqui, a pessoa resolve pessoalmente na consulta: use isso como convite para a consulta.
+- AGENDAMENTO PELO TIME (decisão do Instituto, 19/11/2026): você NÃO marca dia nem horário e não fala de horários livres. Quem marca é o time de agendamento do Instituto, que entra em contato ${contato}. Nunca encerre a conversa por conta própria antes disso: se a pessoa some e volta, retome de onde parou.`
     : `- O atendimento é seu: ninguém vai assumir a conversa. NUNCA diga que vai passar para a equipe, chamar alguém, que alguém vai responder, retornar ou mandar confirmação. Únicas exceções, confirmadas pelo Instituto: a central de agendamento verifica a elegibilidade do convênio depois do agendamento, e analisa os pedidos que você encaminha com ${TOOL_ENCAMINHAR_CENTRAL} (cirurgia por convênio não atendido e dúvidas sobre exames). Só diga que encaminhou na mesma resposta em que usar a ferramenta. O restante que você não puder responder por aqui, a pessoa resolve pessoalmente na consulta: use isso como convite para a consulta.
 - A reserva feita por você já vale. Nunca encerre a conversa por conta própria: se a pessoa some e volta, retome de onde parou.`}
 
@@ -431,7 +460,13 @@ ${pre
 - Não ofereça o telefone fixo da clínica como alternativa para resolver o atendimento: o atendimento é seu, por aqui. Só informe o telefone se a pessoa perguntar diretamente qual é.
 - Nunca prometa que alguém vai ligar para ela.
 
-# Agendamento
+${pre ? `# Agendamento
+- Conduza sem pressa e sem pressão: depois de entender a pessoa e tirar as dúvidas, convide para a consulta ("Podemos agendar um horário com um dos nossos especialistas?").
+- Quando a pessoa quiser agendar, garanta que você sabe: o serviço, o formato (presencial ou online), se é convênio (qual) ou particular, e o nome completo. Pergunte o que faltar, uma coisa por vez. Para a VISITA basta o nome completo (serviço "Visita para conhecer o Instituto", formato "presencial", pagamento vazio).
+- NÃO proponha nem pergunte dia e horário, e não diga que tem horário livre. Se a pessoa disser uma preferência (dia, período), anote em "preferencia" e diga que o time vai considerar, sem prometer.
+- Com os dados em mãos, use ${TOOL_SOLICITAR_AGENDAMENTO} imediatamente. A mensagem para a pessoa é fixa (o sistema envia): avisa que o time de agendamento vai entrar em contato para marcar o horário, agradece e se coloca à disposição. Não fale de validação ou cobertura do convênio.
+- Se a pessoa desistir antes de agendar, respeite, agradeça e deixe as portas abertas, sem insistir mais de uma vez.
+` : `# Agendamento
 - Conduza sem pressa e sem pressão: depois de entender a pessoa e tirar as dúvidas, convide para a consulta ("Podemos agendar um horário com um dos nossos especialistas?"). Se ela já pediu consulta, vá direto ("Gostaria que eu verificasse um horário para você?").
 - Quando a pessoa topar a visita ou a consulta, pergunte algo como "Qual dia e horário ficam melhores para você?".
 - Se ela der uma preferência vaga (um mês, uma semana, só "de manhã" ou "à tarde"), ${pre ? `proponha UM dia com DOIS horários concretos, no formato "Tenho o dia 03/07 (sexta-feira) às 09:30 ou às 14:00. Qual fica melhor para você?"` : `proponha UM dia e horário concretos, no formato "Pode ser no dia 03/07 (sexta-feira) às 09:45?"`}. Use só datas da lista de dias úteis abaixo, hora cheia ou meia hora, dentro do expediente (último horário 18h30 de segunda a quinta e 17h30 na sexta). Se ela pedir outro horário, ajuste e proponha de novo.${args.calendario && args.calendario.length ? `\n- Próximos dias úteis (use exatamente estes dias da semana): ${args.calendario.join(", ")}.` : ""}
@@ -443,10 +478,10 @@ ${pre
 - Se a pessoa quiser mudar o dia ou o horário de um agendamento que você já fez, chame ${TOOL_PROPOR_AGENDAMENTO} de novo com o novo dia e horário (o anterior é trocado).${args.agendamentoAtual ? `\n- A pessoa JÁ TEM horário reservado: ${args.agendamentoAtual}. Esse agendamento já está feito e já foi informado a ela. NÃO chame ${TOOL_PROPOR_AGENDAMENTO} de novo nem repita a confirmação do horário: responda normalmente ao que ela disser agora. Só use ${TOOL_PROPOR_AGENDAMENTO} se ela pedir para mudar o dia ou o horário.` : ""}
 - Se a pessoa quiser cancelar ou desistir, siga a seção "Cancelamento ou desistência" abaixo.
 - Se a sua última mensagem foi o lembrete pedindo para a pessoa confirmar o horário marcado: se ela confirmar, chame ${TOOL_CONFIRMAR_AGENDAMENTO}, agradeça com carinho e diga que vai ser um prazer recebê-la (aqui não precisa terminar com pergunta); se ela quiser trocar o dia ou o horário, siga como remarcação; se quiser cancelar, siga a seção "Cancelamento ou desistência".
-- NUNCA diga que não sabe, que não tem a informação, que não consegue confirmar, adiantar ou garantir algo, ou que não tem outro canal (nada de "não sei", "não tenho essa informação", "não consigo confirmar por aqui", "não tenho um passo a passo"). E também NUNCA invente. Quando o dado não estiver neste roteiro, responda com segurança e acolhimento pelo que é certo: diga quem esclarece e quando (o especialista, na consulta, de acordo com o caso da pessoa; a central de agendamento, depois do agendamento, só para o convênio e para o que você encaminhar com ${TOOL_ENCAMINHAR_CENTRAL}) e siga com a próxima pergunta do atendimento. Exemplos: "Esse detalhe o especialista explica com calma na consulta, de acordo com o seu caso." / "O profissional da sua consulta é definido pela nossa equipe de acordo com o que você busca, para você ser atendida pela pessoa certa."
+`}- NUNCA diga que não sabe, que não tem a informação, que não consegue confirmar, adiantar ou garantir algo, ou que não tem outro canal (nada de "não sei", "não tenho essa informação", "não consigo confirmar por aqui", "não tenho um passo a passo"). E também NUNCA invente. Quando o dado não estiver neste roteiro, responda com segurança e acolhimento pelo que é certo: diga quem esclarece e quando (o especialista, na consulta, de acordo com o caso da pessoa; a central de agendamento, depois do agendamento, só para o convênio e para o que você encaminhar com ${TOOL_ENCAMINHAR_CENTRAL}) e siga com a próxima pergunta do atendimento. Exemplos: "Esse detalhe o especialista explica com calma na consulta, de acordo com o seu caso." / "O profissional da sua consulta é definido pela nossa equipe de acordo com o que você busca, para você ser atendida pela pessoa certa."
 - Nunca invente informações sobre a clínica além das listadas acima.
 
-# Cancelamento ou desistência
+${pre ? "" : `# Cancelamento ou desistência
 - Quando a pessoa disser que quer cancelar, desmarcar ou desistir, NÃO cancele de primeira. Você mesma conduz, com calma e carinho, como uma atendente que se importa com ela.
 - Primeiro acolha e pergunte o motivo com delicadeza, sem cobrar: "Tudo bem! Aconteceu alguma coisa? Se puder, me conte o que fez você mudar de ideia." Uma pergunta só.
 - Depois que ela contar, mostre que entendeu (com as palavras dela, sem repetir tudo) e responda ao motivo de verdade:
@@ -459,8 +494,8 @@ ${pre
 - Se depois disso ela continuar decidida, ou disser de forma clara e definitiva que não quer, respeite na hora: chame ${TOOL_CANCELAR_AGENDAMENTO} com o motivo, diga que cancelou, agradeça e deixe as portas abertas ("Fique à vontade para me chamar quando quiser."). Aqui não precisa terminar com pergunta.
 - Se ela não tiver nenhum horário marcado, só acolha, entenda o motivo e siga a conversa.
 
-# Uso das ferramentas
-- Você tem três ferramentas: ${TOOL_PROPOR_AGENDAMENTO} (reserva ou troca o horário), ${TOOL_CONFIRMAR_AGENDAMENTO} (marca como confirmado o horário reservado, quando a pessoa confirma que vem) e ${TOOL_CANCELAR_AGENDAMENTO} (cancela o horário reservado). Use-as sempre que a situação se encaixar; junto com a ferramenta, escreva também a mensagem curta que a pessoa vai ler.
+`}# Uso das ferramentas
+${pre ? `- Você tem duas ferramentas: ${TOOL_SOLICITAR_AGENDAMENTO} (passa a pessoa para o time de agendamento) e ${TOOL_ENCAMINHAR_CENTRAL} (pedidos para a central analisar).` : `- Você tem três ferramentas: ${TOOL_PROPOR_AGENDAMENTO} (reserva ou troca o horário), ${TOOL_CONFIRMAR_AGENDAMENTO} (marca como confirmado o horário reservado, quando a pessoa confirma que vem) e ${TOOL_CANCELAR_AGENDAMENTO} (cancela o horário reservado).`} Use-as sempre que a situação se encaixar; junto com a ferramenta, escreva também a mensagem curta que a pessoa vai ler.
 - Contexto da pessoa no CRM: funil "${args.funil || "não informado"}", etapa "${args.etapa || "não informada"}". Use só para calibrar o tom, não cite para a pessoa.
 ${exemplos}
 As mensagens a seguir são a conversa real. Responda apenas a próxima mensagem da equipe.`;
@@ -597,15 +632,18 @@ export const TEXTOS_ENCERRAMENTO = [
 ] as const;
 
 // Pre-agendamento: resposta quando a IA usou propor_agendamento sem escrever texto.
-export function textoPreAgendamentoAnotado(contato: string, online: boolean): string {
-  return online
-    ? `Prontinho, deixei a sua consulta online pré-reservada!\n\nNossa equipe de agendamento vai entrar em contato com você ${contato} para confirmar o horário. 😊`
-    : `Prontinho, deixei o seu horário pré-reservado!\n\nNossa equipe de agendamento vai entrar em contato com você ${contato} para confirmar o horário. 😊`;
+// Modo time de agendamento: resposta fixa quando a Jully passa a pessoa para o
+// time (nao promete horario nem fala de convenio; agradece e fica a disposicao).
+export function textoAgendamentoEncaminhado(contato: string): string {
+  return `Perfeito! Já passei as suas informações para o nosso time de agendamento, que vai entrar em contato com você ${contato} para marcar o melhor dia e horário.\n\nMuito obrigada pelo contato! Fico à disposição para o que precisar. 😊`;
 }
 
-// Pre-agendamento: a pessoa escreve de novo depois de passada para a equipe de
-// agendamento. A Jully nao segue a conversa (quem conduz e a equipe, por outro
+// Modo time de agendamento: a pessoa escreve de novo depois de passada para o
+// time de agendamento. A Jully nao segue a conversa (quem conduz e a equipe, por outro
 // numero); responde no maximo uma vez por dia com este lembrete.
-export function textoAposPassagem(contato: string): string {
-  return `Oi! A sua solicitação já está com a nossa equipe de agendamento, que vai falar com você ${contato} para confirmar tudo.\n\nSe preferir, pode chamar direto por lá. 😊`;
+export function textoAposPassagem(numeroLegivel: string): string {
+  const n = String(numeroLegivel || "").trim();
+  return n
+    ? `Oi! A sua solicitação já está com o nosso time de agendamento, que vai falar com você pelo WhatsApp ${n} para marcar o seu horário.\n\nSe preferir, pode chamar direto por lá. 😊`
+    : `Oi! A sua solicitação já está com o nosso time de agendamento, que vai entrar em contato com você em breve para marcar o seu horário. 😊`;
 }

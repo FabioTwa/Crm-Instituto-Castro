@@ -1,4 +1,4 @@
-import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
+import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import { dataHoraLocal, numerosAviso, telefoneLegivel, textoAvisoAgendamento, textoAvisoCancelamento, textoAvisoCentral } from "./aviso-agendamento.ts";
 
 Deno.test("numerosAviso: aceita lista, normaliza e tira repetidos e invalidos", () => {
@@ -89,20 +89,37 @@ Deno.test("pre-agendamento: rodizio do call center e estavel por card e espalha"
   assertEquals(usados.size, 3);
 });
 
-Deno.test("pre-agendamento: texto do call center traz resumo, convenio e link do card", async () => {
-  const { textoAvisoCallCenter } = await import("./aviso-agendamento.ts");
-  const t = textoAvisoCallCenter({
-    nome: "Maria Souza", telefone: "5511988887777", servico: "Gastroenterologia", inicioIso: "2026-11-24T13:00:00Z",
-    formato: "Presencial", pagamento: "Convênio Bradesco Top", resumo: "Quer consulta de gastro, perguntou se o plano cobre.",
-    linkCrm: "https://crm.exemplo/#card=1",
+Deno.test("time de agendamento: pedido traz dados, resumo, link e termina em Aguardando agendamento", async () => {
+  const { textoPedidoAgendamento } = await import("./aviso-agendamento.ts");
+  const t = textoPedidoAgendamento({
+    nome: "Maria Souza", telefone: "5511988887777", servico: "Gastroenterologia",
+    formato: "Presencial", pagamento: "Convênio Bradesco Top", preferencia: "terças à tarde",
+    resumo: "Quer consulta de gastro.", linkCrm: "https://crm.exemplo/#card=1",
   });
-  assertStringIncludes(t, "Novo lead pré-agendado");
+  assertStringIncludes(t, "Novo pedido de agendamento pela Jully");
+  assertStringIncludes(t, "*Nome:* Maria Souza");
   assertStringIncludes(t, "(11) 98888-7777");
-  assertStringIncludes(t, "*Pré-reservado:* 24/11 (terça-feira) às 10:00");
-  assertStringIncludes(t, "*Resumo da conversa:* Quer consulta de gastro");
-  assertStringIncludes(t, "elegibilidade do convênio");
+  assertStringIncludes(t, "*Pagamento:* Convênio Bradesco Top");
+  assertStringIncludes(t, "*Preferência:* terças à tarde");
+  assertStringIncludes(t, "*Resumo da conversa:* Quer consulta de gastro.");
   assertStringIncludes(t, "https://crm.exemplo/#card=1");
-  const particular = textoAvisoCallCenter({ nome: "", telefone: "5511988887777", servico: "", inicioIso: "2026-11-24T13:00:00Z" });
-  assertStringIncludes(particular, "*Pagamento:* não informado");
-  assertEquals(particular.includes("elegibilidade"), false);
+  assert(t.trimEnd().endsWith("⏳ *Aguardando agendamento*"));
+  assertEquals(t.includes("elegibilidade"), false);
+  assertEquals(t.includes("*Data:*"), false);
+  const vazio = textoPedidoAgendamento({ nome: "", telefone: "5511988887777", servico: "" });
+  assertStringIncludes(vazio, "*Pagamento:* não informado");
+  assertEquals(vazio.includes("Preferência"), false);
+});
+
+Deno.test("time de agendamento: destinos = avisos + call center, sem repetir", async () => {
+  const { destinosPedidoAgendamento } = await import("./aviso-agendamento.ts");
+  assertEquals(destinosPedidoAgendamento(["5511911111111", "5511922222222"], null), ["5511911111111", "5511922222222"]);
+  assertEquals(destinosPedidoAgendamento(["5511911111111"], "5511933333333"), ["5511911111111", "5511933333333"]);
+  assertEquals(destinosPedidoAgendamento(["5511911111111"], "5511911111111"), ["5511911111111"]);
+  assertEquals(destinosPedidoAgendamento([], null), []);
+});
+
+Deno.test("numero do call center fixo: (11) 2020-8098 fica com 12 digitos e legivel", () => {
+  assertEquals(numerosAviso("1120208098"), ["551120208098"]);
+  assertEquals(telefoneLegivel("551120208098"), "(11) 2020-8098");
 });

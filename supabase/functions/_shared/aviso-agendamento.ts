@@ -120,22 +120,22 @@ export function textoAvisoCentral(a: {
 }
 
 // ---------------------------------------------------------------------------
-// PRE-AGENDAMENTO + CALL CENTER (reuniao com o IC em 19/11/2026)
-// Com crm_ia_config.modo_pre_agendamento = 'true', a Jully deixa o horario
-// PRE-reservado e passa o lead para o call center do IC, que confirma o
-// horario e a cobertura do convenio e fala com o lead por OUTRO numero
+// TIME DE AGENDAMENTO (decisao do Fabio, 19/11/2026)
+// Com crm_ia_config.modo_pre_agendamento = 'true', a Jully NAO marca horario:
+// quando a pessoa quer agendar, ela passa os dados para o time de agendamento
+// do Instituto, que marca o dia e o horario com a pessoa por OUTRO numero
 // (nunca dois atendendo juntos no numero da Jully: risco de queda).
-// crm_ia_config.callcenter_whatsapp: um ou mais numeros, separados por virgula.
-// Com mais de um, cada lead vai para um deles (rodizio estavel pelo id do card).
-// Vazio: o resumo vai so para os numeros do aviso de agendamento.
+// O pedido vai para os numeros do aviso de agendamento (aviso_agendamento_whatsapp)
+// e para um numero do call center (callcenter_whatsapp, rodizio estavel pelo
+// card), quando houver.
 // ---------------------------------------------------------------------------
 
 export function modoPreAgendamento(cfg: Record<string, string> | null | undefined): boolean {
   return String(cfg?.modo_pre_agendamento ?? "false").trim().toLowerCase() === "true";
 }
 
-// Escolhe um numero do call center para o lead. Mesmo card = mesmo numero
-// (remarcacao vai para a mesma pessoa); cards diferentes se espalham.
+// Escolhe um numero do call center para o lead. Mesmo card = mesmo numero;
+// cards diferentes se espalham.
 export function numeroCallCenterDoLead(numeros: readonly string[], chave: string): string | null {
   if (!numeros.length) return null;
   let h = 0;
@@ -143,40 +143,42 @@ export function numeroCallCenterDoLead(numeros: readonly string[], chave: string
   return numeros[h % numeros.length];
 }
 
-// Resumo que chega no WhatsApp do call center. Sem detalhes clinicos alem do
-// servico procurado (LGPD: o minimo para o agendamento).
-export function textoAvisoCallCenter(a: {
+// Para quem vai o pedido de agendamento: numeros do aviso + o numero do call
+// center do lead (sem repetir).
+export function destinosPedidoAgendamento(avisos: readonly string[], callCenter: string | null): string[] {
+  const out = [...avisos];
+  if (callCenter && !out.includes(callCenter)) out.push(callCenter);
+  return out;
+}
+
+// Pedido que chega no WhatsApp do time. Mesma estrutura do aviso de agendamento,
+// sem data (quem marca e o time), com o resumo da conversa e o status no fim.
+// Sem detalhes clinicos alem do servico procurado (LGPD: o minimo para agendar).
+export function textoPedidoAgendamento(a: {
   nome: string;
   telefone: string;
   servico: string;
-  inicioIso: string;
   formato?: string | null;
   pagamento?: string | null;
+  preferencia?: string | null;
   resumo?: string | null;
   observacao?: string | null;
-  atualizado?: boolean;
-  inicioAnteriorIso?: string | null;
   linkCrm?: string | null;
 }): string {
-  const remarcado = !!a.inicioAnteriorIso && Date.parse(a.inicioAnteriorIso) !== Date.parse(a.inicioIso);
   const linhas = [
-    remarcado ? "🔁 *Pré-agendamento alterado pela Jully*" : a.atualizado ? "🔁 *Pré-agendamento alterado pela Jully*" : "📲 *Novo lead pré-agendado pela Jully*",
+    "📅 *Novo pedido de agendamento pela Jully*",
     "",
     `*Nome:* ${a.nome || "-"}`,
     `*WhatsApp:* ${telefoneLegivel(a.telefone)}`,
-    `*Procura:* ${a.servico || "-"}`,
+    `*Serviço:* ${a.servico || "-"}`,
   ];
-  if (remarcado) linhas.push(`*Antes:* ${dataHoraLocal(String(a.inicioAnteriorIso))}`, `*Agora (pré-reservado):* ${dataHoraLocal(a.inicioIso)}`);
-  else linhas.push(`*Pré-reservado:* ${dataHoraLocal(a.inicioIso)}`);
   if (a.formato) linhas.push(`*Formato:* ${a.formato}`);
   linhas.push(`*Pagamento:* ${a.pagamento || "não informado"}`);
+  if (a.preferencia) linhas.push(`*Preferência:* ${a.preferencia}`);
   if (a.resumo) linhas.push(`*Resumo da conversa:* ${a.resumo}`);
   if (a.observacao) linhas.push(`*Obs.:* ${a.observacao}`);
-  linhas.push("");
-  if (/conv[eê]nio/i.test(String(a.pagamento || ""))) linhas.push("Verificar a elegibilidade do convênio no portal antes de confirmar.");
-  linhas.push(
-    "A Jully avisou o lead que a equipe de agendamento vai entrar em contato por este número. Chame o lead daqui, confirme o horário na agenda e finalize.",
-  );
-  if (a.linkCrm) linhas.push("", `Conversa completa no CRM: ${a.linkCrm}`);
+  linhas.push("", "A Jully avisou que o time de agendamento vai entrar em contato para marcar o horário.");
+  if (a.linkCrm) linhas.push(`Conversa completa no CRM: ${a.linkCrm}`);
+  linhas.push("", "⏳ *Aguardando agendamento*");
   return linhas.join("\n");
 }

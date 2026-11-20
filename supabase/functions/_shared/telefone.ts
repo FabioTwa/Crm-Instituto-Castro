@@ -50,7 +50,8 @@ function ehFormatoBR(dig: string): boolean {
 }
 
 // Forma canonica:
-//   - Brasil: "55" + DDD + 9 + numero (13 digitos para celular). Sem mudanca.
+//   - Brasil: "55" + DDD + 9 + numero (13 digitos para celular); fixo fica com
+//     "55" + DDD + 8 digitos (12 digitos), desde 20/11/2026.
 //   - Fora do Brasil (desde 18/11/2026, pedido do Fabio): os digitos como vieram, ja com
 //     o codigo do pais. Antes, o "55" era colado na frente e o numero ficava invalido.
 // E o que vai em clientes_crm.numero_whatsapp e no campo "phone" do envio.
@@ -60,7 +61,10 @@ export function canonicoTelefone(raw: string): string {
   if (!ehFormatoBR(dig)) return dig;
   let sem = dig;
   if ((dig.length === 12 || dig.length === 13) && dig.startsWith("55")) sem = dig.slice(2);
-  if (sem.length === 10) sem = sem.slice(0, 2) + "9" + sem.slice(2);
+  // 8 digitos depois do DDD: celular antigo (comeca com 6 a 9) ganha o 9 da frente;
+  // telefone FIXO (comeca com 2 a 5, ex.: (11) 2020-8098 com WhatsApp Business)
+  // fica como esta. Colar o 9 num fixo mandaria a mensagem para outro numero.
+  if (sem.length === 10 && /[6-9]/.test(sem[2])) sem = sem.slice(0, 2) + "9" + sem.slice(2);
   return "55" + sem;
 }
 
