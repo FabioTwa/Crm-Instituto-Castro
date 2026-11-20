@@ -205,7 +205,9 @@ function preAgendamentoDoCard(cfg: Record<string, string>, clienteId: string): P
   return { ativo, numero, numeroLegivel, contato: contatoDaEquipe(numeroLegivel) };
 }
 
-type Body = { cliente_crm_id: string; conversa_id: string | null; vendedor_id: string | null; funil_id: string | null };
+// atrasoDesde: so na resposta aos pendentes (responderPendentes): desde quando a
+// pessoa espera resposta da clinica (ISO).
+type Body = { cliente_crm_id: string; conversa_id: string | null; vendedor_id: string | null; funil_id: string | null; atrasoDesde?: string | null };
 
 // Um envio por vez (SQL 37, atender_um_por_vez): as conversas andam em paralelo
 // (cada uma esperando os 30 s da rajada e a IA pensar), mas so UMA resposta e
@@ -1002,6 +1004,7 @@ async function rodarNaVez(
       const desde = inicioDaPausa(ctx.mensagens);
       return desde ? dataHoraLocal(desde) : null;
     })(),
+    atrasoDaClinica: body.atrasoDesde ? dataHoraLocal(body.atrasoDesde) : null,
     preAgendamento: pre.ativo ? { numeroLegivel: pre.numeroLegivel } : null,
   });
   const maxTokens = Math.max(256, Number(cfg.max_tokens || "1024") || 1024);
@@ -1380,6 +1383,68 @@ async function avisarPedidoAgendamento(p: Pipeline, cfg: Record<string, string>,
     }
   });
   return ok;
+}
+
+// Resposta aos atendimentos que ficaram sem resposta enquanto a Jully estava
+// pausada (pedido do Fabio, 20/11/2026). crm_ia_config.responder_pendentes =
+// ids de cards separados por virgula, na ordem de atendimento. A cada rodada do
+// varredor (1x por minuto), com a Jully ligada, dentro de retomada_queda_horario
+// e respeitando pendentes_intervalo_min (padrao 3) desde a ultima resposta, tira
+// o PRIMEIRO id da lista (antes de responder: nunca responde duas vezes) e roda o
+// atendimento normal com a instrucao de pedir desculpas pela demora. Card que ja
+// foi respondido (ultima mensagem nao e do lead) e pulado na mesma rodada.
+async function responderPendentes(sb: SupabaseClient): Promise<Record<string, unknown> | null> {
+  const cfg = await iaConfig(sb);
+  const ids = String(cfg.responder_pendentes || "").split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
+  if (!ids.length) return null;
+  if (!(await icFlag(sb, "ia_pre_atendimento")) || String(cfg.ligada).toLowerCase() !== "true") return { decisao: "desligada", faltam: ids.length };
+  const agora = new Date();
+  if (!podeMandarFollowup(agora, configRetomadaQueda(cfg).horario, TZ_PADRAO)) return { decisao: "fora_da_janela", faltam: ids.length };
+  const n = Math.floor(Number(cfg.pendentes_intervalo_min || "3"));
+  const intervaloMs = (Number.isFinite(n) ? Math.min(60, Math.max(1, n)) : 3) * 60000;
+  const ultimo = Date.parse(String(cfg.responder_pendentes_ultimo || ""));
+  if (Number.isFinite(ultimo) && agora.getTime() - ultimo < intervaloMs) return { decisao: "aguardando_intervalo", faltam: ids.length };
+
+  const resto = [...ids];
+  while (resto.length) {
+    const id = resto.shift() as string;
+    await sb.from("crm_ia_config").update({ valor: resto.join(",") }).eq("chave", "responder_pendentes");
+    const { data: card } = await sb
+      .from("clientes_crm")
+      .select("id, vendedor_id, funil_id, deleted_at")
+      .eq("id", id)
+      .maybeSingle();
+    if (!card || (card as any).deleted_at) continue;
+    const { data: msgs } = await sb
+      .from("crm_conversas")
+      .select("direcao, criada_em")
+      .eq("cliente_crm_id", id)
+      .order("criada_em", { ascending: false })
+      .limit(30);
+    const lista = (msgs as any[]) || [];
+    if (!lista.length || lista[0].direcao !== "recebida") continue; // ja respondido
+    let desde = String(lista[0].criada_em);
+    for (const m of lista) {
+      if (m.direcao !== "recebida") break;
+      desde = String(m.criada_em);
+    }
+    await upsertConfig(sb, "responder_pendentes_ultimo", agora.toISOString());
+    const r = await rodar(sb, {
+      cliente_crm_id: id,
+      conversa_id: null,
+      vendedor_id: (card as any).vendedor_id ? String((card as any).vendedor_id) : null,
+      funil_id: (card as any).funil_id ? String((card as any).funil_id) : null,
+      atrasoDesde: desde,
+    });
+    console.log(LOG, "pendente respondido:", id, (r as any)?.decisao || (r as any)?.erro);
+    return { decisao: "respondido", card: id, resultado: (r as any)?.decisao || (r as any)?.erro, faltam: resto.length };
+  }
+  return { decisao: "lista_vazia" };
+}
+
+async function upsertConfig(sb: SupabaseClient, chave: string, valor: string): Promise<void> {
+  const { error } = await sb.from("crm_ia_config").upsert({ chave, valor }, { onConflict: "chave" });
+  if (error) console.warn(LOG, "crm_ia_config", chave, "falhou:", error.message);
 }
 
 // Teste do aviso ao time de agendamento, sem lead real: quem tem acesso ao banco
@@ -2310,6 +2375,11 @@ Deno.serve(async (req: Request) => {
     if (body.acao === "encerrar_conversa_equipe") return await encerrarPelaEquipe(req, sb, body);
     if (!chamadaInternaValida(req)) return json({ ok: false, erro: "nao_autorizado" }, 401);
     if (body.acao === "encerrar_inativas") {
+      // Pendentes da pausa (crm_ia_config.responder_pendentes): um por rodada, com intervalo.
+      const pendentes = await responderPendentes(sb).catch((e) => {
+        console.error(LOG, "resposta aos pendentes falhou:", e instanceof Error ? e.message : e);
+        return { ok: false, erro: "excecao" };
+      });
       // Teste de aviso (crm_ia_config.teste_aviso_para): roda mesmo com a Jully pausada.
       const teste_aviso = await enviarTesteAviso(sb).catch((e) => {
         console.error(LOG, "teste de aviso falhou:", e instanceof Error ? e.message : e);
@@ -2326,7 +2396,7 @@ Deno.serve(async (req: Request) => {
         console.error(LOG, "retomada pos-queda falhou:", e instanceof Error ? e.message : e);
         return { ok: false, erro: "excecao" };
       });
-      return json({ ...r, confirmacoes, retomada_queda, teste_aviso });
+      return json({ ...r, confirmacoes, retomada_queda, teste_aviso, pendentes });
     }
 
     const clienteId = String(body.cliente_crm_id || "").trim();

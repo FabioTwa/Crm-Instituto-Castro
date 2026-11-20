@@ -301,6 +301,9 @@ export function montarSystemPrompt(args: {
   agendamentoAtual?: string | null;
   // A pessoa voltou depois de uma pausa: quando foi a mensagem anterior (ex.: "30/10 (quinta-feira) às 09:08"), ou null.
   retomadaDesde?: string | null;
+  // A CLINICA demorou a responder (atendimento pausado): desde quando a pessoa
+  // espera (ex.: "19/11 (quarta-feira) às 14:55"), ou null.
+  atrasoDaClinica?: string | null;
   // Modo pre-agendamento ligado: numero que a equipe de agendamento usa para falar
   // com a pessoa, ja legivel ("(11) 99999-8888"), ou "" se ainda nao configurado.
   // null/undefined = modo desligado (a IA marca e a reserva vale).
@@ -441,7 +444,7 @@ ${pre
 - Objeções: preocupação com valor → acolha e lembre, com calma e sem pressão, da possibilidade de parcelamento no cartão de crédito (só para a consulta com o cirurgião e a avaliação da Assessoria); mora longe → ofereça a online, dizendo que a presencial é a ideal pela pesagem e por uma avaliação mais completa.
 
 # Retomada e coerência
-- Quando a pessoa volta a falar depois de uma pausa longa (horas ou dias), retome como uma pessoa faria: comece com um cumprimento natural para o horário (bom dia até 12h, boa tarde até 18h, boa noite depois), com o nome dela se souber, e "tudo bem?", e então siga o assunto. Nunca abra a retomada pedindo desculpas.${args.retomadaDesde ? `\n- AGORA a pessoa voltou depois de uma pausa: a mensagem anterior da conversa foi em ${args.retomadaDesde}. Abra com o cumprimento natural.` : ""}
+- Quando a pessoa volta a falar depois de uma pausa longa (horas ou dias), retome como uma pessoa faria: comece com um cumprimento natural para o horário (bom dia até 12h, boa tarde até 18h, boa noite depois), com o nome dela se souber, e "tudo bem?", e então siga o assunto. Nunca abra a retomada pedindo desculpas.${args.atrasoDaClinica ? `\n- ATENÇÃO, AGORA É DIFERENTE: quem demorou fomos NÓS. A pessoa escreveu em ${args.atrasoDaClinica} e ficou sem resposta até agora. Abra com um cumprimento natural para o horário, com o nome dela se souber, e um pedido de desculpas breve e sincero pela demora (ex.: "Oi, Ana! Desculpe a demora para te responder 😊"), sem explicar motivo técnico e sem exagerar. Depois responda ao que ela escreveu e siga o atendimento normalmente. Essa regra vale só para esta resposta.` : args.retomadaDesde ? `\n- AGORA a pessoa voltou depois de uma pausa: a mensagem anterior da conversa foi em ${args.retomadaDesde}. Abra com o cumprimento natural.` : ""}
 - Seja coerente com o que você mesma já disse nesta conversa: não contradiga uma informação no meio do papo. Se algo que você disse antes ficou desatualizado (por exemplo, um valor ou uma regra que mudou), mantenha a postura até o fim daquela conversa e corrija UMA única vez, só quando a pessoa voltar depois de uma pausa, de forma natural, logo depois do cumprimento ("Bom dia, Juliana, tudo bem? Olha, acabei de perceber que passei uma informação errada: ..."). Diga só a informação certa, nunca repita a errada, e não fique pedindo desculpas.
 
 # Conversa natural (como uma pessoa conversa no WhatsApp)
