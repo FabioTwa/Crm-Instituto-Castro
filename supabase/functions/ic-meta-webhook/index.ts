@@ -107,7 +107,7 @@ import { canalDaLinha } from "../_shared/whatsapp-envio.ts";
 import { numerosAviso } from "../_shared/aviso-agendamento.ts";
 import {
   diaLocal, horaDoAvisoGrupo, interpretarRespostaGrupo, montarPendencias, numerosMarcados, type Pendencia,
-  textoAvulsoGrupo, textoPendenciasGrupo,
+  temPalavraDeFeito, TEXTO_NAO_ACHEI, textoAvulsoGrupo, textoPendenciasGrupo, vagaDoAvisoTime,
 } from "../_shared/grupo-pendencias.ts";
 import { decidirGrupo, ehEventoGrupoZapi, extrairMensagemGrupo, type GrupoLido } from "../_shared/grupo-leitura.ts";
 
@@ -1051,6 +1051,11 @@ async function processarMensagem(
   // conversando com vendedor ja criou card no pipeline; nao repete.
   if (canonico && numerosDaCasa.has(canonico)) {
     console.log("[ic-meta-webhook] numero da casa, nao vira card:", canonico);
+    // Time de agendamento respondendo as pendencias pela conversa direta (SQL 54).
+    if (!ehEco && provedor === "zapi" && messageId && mensagemFinal) {
+      await processarRespostaTimeDireto(supabase, canonico, messageId, mensagemFinal)
+        .catch((e) => console.error("[ic-meta-webhook] resposta do time falhou:", e));
+    }
     return { ignored: "numero de vendedor" };
   }
 
@@ -1956,6 +1961,7 @@ const LOGG = "[ic-meta-webhook][grupo-pendencias]";
 const CHAVES_GRUPO_PEND = [
   "grupo_pendencias_ligado", "grupo_pendencias_hora", "grupo_pendencias_ultimo",
   "grupo_pendencias_ignorar", "grupo_pendencias_marcar", "grupo_mensagem_avulsa",
+  "time_pendencias_ligado", "time_pendencias_horas", "time_pendencias_ultimo",
   "aviso_agendamento_whatsapp", "callcenter_whatsapp",
 ];
 
@@ -2112,30 +2118,82 @@ async function mensagemAvulsaGrupo(sb: Supa, cfg: Record<string, string>, agora:
   await logGrupo(sb, "avulsa_enviada", { message_id: r.wamid, marcados: marcar.length });
 }
 
+// Pendencias tambem na conversa direta com o time de agendamento (SQL 54,
+// 23/11/2026, pedido do Fabio): o numero do call center (2020-8098) recebe a
+// mesma lista nos horarios de time_pendencias_horas (padrao 9h e 15h, seg-sab),
+// so se houver pendencia. A trava (time_pendencias_ultimo = AAAA-MM-DD-H)
+// garante uma mensagem por horario.
+async function avisoTime(sb: Supa): Promise<void> {
+  const cfg = await configGrupoPendencias(sb);
+  if (!cfg || cfg.time_pendencias_ligado !== "true") return;
+  const agora = new Date();
+  const vaga = vagaDoAvisoTime(agora, cfg.time_pendencias_horas);
+  if (!vaga) return;
+  const anterior = cfg.time_pendencias_ultimo ?? "";
+  if (anterior === vaga) return;
+  const { data: trava, error: errTrava } = await sb.from("crm_ia_config")
+    .update({ valor: vaga }).eq("chave", "time_pendencias_ultimo").eq("valor", anterior).select("chave");
+  if (errTrava || !trava || !(trava as any[]).length) return; // outra rodada pegou
+  const devolver = async (motivo: string) => {
+    await sb.from("crm_ia_config").update({ valor: anterior }).eq("chave", "time_pendencias_ultimo").eq("valor", vaga);
+    console.error(LOGG, "aviso ao time adiado:", motivo);
+  };
+
+  const destinos = numerosAviso(cfg.callcenter_whatsapp);
+  if (!destinos.length) {
+    await logGrupo(sb, "time_sem_numero", { vaga });
+    return;
+  }
+  const lidas = await lerPendenciasGrupo(sb, cfg, agora, false);
+  if (!lidas.ok) return await devolver("pendencias ilegiveis: " + lidas.erro);
+  const texto = textoPendenciasGrupo(lidas.pendencias, agora, [], "time");
+  if (!texto) {
+    await logGrupo(sb, "time_sem_pendencias", { vaga });
+    return;
+  }
+  const canal = await canalZapiDoGrupo(sb);
+  if (!canal) return await devolver("sem canal");
+  let enviados = 0;
+  for (const d of destinos) {
+    const r = await enviarTextoZapi({ canal, para: d, texto, prefixoLog: LOGG, delayTyping: 4 });
+    if (r.ok) enviados++;
+  }
+  if (!enviados) return await devolver("Z-API recusou o envio ao time");
+  await logGrupo(sb, "aviso_time_enviado", {
+    vaga,
+    destinos: enviados,
+    pendencias: lidas.pendencias.map((p) => ({ tipo: p.tipo, cliente: p.clienteId, agendamento: p.agendamentoId })),
+  });
+  console.log(LOGG, "aviso ao time enviado:", lidas.pendencias.length, "pendencia(s)");
+}
+
+async function rodadaPendencias(sb: Supa): Promise<void> {
+  await avisoDiarioGrupo(sb).catch((e) => console.error(LOGG, "erro no aviso do dia:", e));
+  await avisoTime(sb).catch((e) => console.error(LOGG, "erro no aviso ao time:", e));
+}
+
 function dispararAvisoDiarioGrupo(sb: Supa): void {
-  const trabalho = avisoDiarioGrupo(sb).catch((e) => console.error(LOGG, "erro no aviso do dia:", e));
+  const trabalho = rodadaPendencias(sb);
   const espera = (globalThis as any).EdgeRuntime?.waitUntil;
   if (typeof espera === "function") espera.call((globalThis as any).EdgeRuntime, trabalho);
 }
 
-// Resposta do time no grupo (texto, ou audio ja transcrito).
-async function processarRespostaGrupo(
-  sb: Supa, msg: { grupoId: string; messageId: string; texto: string; autorNome: string | null },
-): Promise<void> {
-  const cfg = await configGrupoPendencias(sb);
-  if (!cfg || cfg.grupo_pendencias_ligado !== "true") return;
-  const grupo = await grupoDasPendencias(sb);
-  if (!grupo || grupo !== msg.grupoId) return;
+// Marca no CRM o que a resposta do time da como resolvido e reage com ✅.
+// Devolve quantas pendencias foram marcadas.
+async function aplicarRespostaDoTime(
+  sb: Supa, cfg: Record<string, string>,
+  msg: { origem: "grupo" | "time"; destino: string; messageId: string; texto: string; autor: string },
+): Promise<number> {
   const agora = new Date();
   const lidas = await lerPendenciasGrupo(sb, cfg, agora, true);
   if (!lidas.ok) {
     console.error(LOGG, "pendencias ilegiveis na resposta:", lidas.erro);
-    return;
+    return 0;
   }
   const escolhidas = interpretarRespostaGrupo(msg.texto, lidas.pendencias);
-  if (!escolhidas.length) return;
+  if (!escolhidas.length) return 0;
 
-  const autor = "Grupo do WhatsApp" + (msg.autorNome ? ": " + String(msg.autorNome).slice(0, 60) : "");
+  const motivo = msg.origem === "grupo" ? "time confirmou no grupo do WhatsApp" : "time confirmou pelo WhatsApp do agendamento";
   let marcou = 0;
   for (const p of escolhidas) {
     let ok = false;
@@ -2147,23 +2205,56 @@ async function processarRespostaGrupo(
       ok = !error && !!data && (data as any[]).length > 0;
     } else {
       const { error } = await sb.rpc("ic_avancar_etapa", {
-        p_cliente: p.clienteId, p_evento: "confirmado", p_autor: autor, p_motivo: "time confirmou no grupo do WhatsApp",
+        p_cliente: p.clienteId, p_evento: "confirmado", p_autor: msg.autor, p_motivo: motivo,
       });
       if (error) console.error(LOGG, "card nao movido:", error.message);
       ok = !error;
     }
     if (!ok) continue;
     const { error: errH } = await sb.from("ia_handoffs")
-      .update({ atendido_em: agora.toISOString(), atendido_por: autor })
+      .update({ atendido_em: agora.toISOString(), atendido_por: msg.autor })
       .eq("cliente_crm_id", p.clienteId).eq("motivo", "agendamento_confirmado").is("atendido_em", null);
     if (errH) console.error(LOGG, "pedido nao fechado:", errH.message);
-    await logGrupo(sb, "confirmado_pelo_grupo", { tipo: p.tipo, agendamento: p.agendamentoId, autor, message_id: msg.messageId }, p.clienteId);
+    await logGrupo(sb, msg.origem === "grupo" ? "confirmado_pelo_grupo" : "confirmado_pelo_time", {
+      tipo: p.tipo, agendamento: p.agendamentoId, autor: msg.autor, message_id: msg.messageId,
+    }, p.clienteId);
     marcou++;
   }
-  if (!marcou) return;
+  if (!marcou) return 0;
   const canal = await canalZapiDoGrupo(sb);
-  if (canal) await reagirMensagemZapi(canal, msg.grupoId, msg.messageId, "✅", LOGG);
-  console.log(LOGG, "resposta do time:", marcou, "pendencia(s) marcada(s)");
+  if (canal) await reagirMensagemZapi(canal, msg.destino, msg.messageId, "✅", LOGG);
+  console.log(LOGG, "resposta do time (" + msg.origem + "):", marcou, "pendencia(s) marcada(s)");
+  return marcou;
+}
+
+// Resposta do time no grupo (texto, ou audio ja transcrito).
+async function processarRespostaGrupo(
+  sb: Supa, msg: { grupoId: string; messageId: string; texto: string; autorNome: string | null },
+): Promise<void> {
+  const cfg = await configGrupoPendencias(sb);
+  if (!cfg || cfg.grupo_pendencias_ligado !== "true") return;
+  const grupo = await grupoDasPendencias(sb);
+  if (!grupo || grupo !== msg.grupoId) return;
+  const autor = "Grupo do WhatsApp" + (msg.autorNome ? ": " + String(msg.autorNome).slice(0, 60) : "");
+  await aplicarRespostaDoTime(sb, cfg, { origem: "grupo", destino: msg.grupoId, messageId: msg.messageId, texto: msg.texto, autor });
+}
+
+// Resposta do time na conversa direta (numero do call center ou dos avisos).
+// Se a pessoa diz que confirmou mas o nome nao bate com a lista, a Jully pede o
+// nome e o final do telefone (so na conversa direta; no grupo fica em silencio).
+async function processarRespostaTimeDireto(sb: Supa, numero: string, messageId: string, texto: string): Promise<void> {
+  const cfg = await configGrupoPendencias(sb);
+  if (!cfg || cfg.time_pendencias_ligado !== "true") return;
+  const time = [...numerosAviso(cfg.callcenter_whatsapp), ...numerosAviso(cfg.aviso_agendamento_whatsapp)];
+  if (!time.includes(numero)) return;
+  const marcou = await aplicarRespostaDoTime(sb, cfg, {
+    origem: "time", destino: numero, messageId, texto, autor: "WhatsApp do agendamento (" + numero.slice(-4) + ")",
+  });
+  if (marcou || !temPalavraDeFeito(texto)) return;
+  const canal = await canalZapiDoGrupo(sb);
+  if (!canal) return;
+  const r = await enviarTextoZapi({ canal, para: numero, texto: TEXTO_NAO_ACHEI, prefixoLog: LOGG, delayTyping: 3 });
+  await logGrupo(sb, "time_nome_nao_encontrado", { message_id: messageId, respondido: r.ok });
 }
 
 // Aviso de conexao da Z-API. So aceita instancia cadastrada (ativa, provedor
