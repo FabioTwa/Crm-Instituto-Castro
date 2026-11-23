@@ -279,3 +279,12 @@ Deno.test("pendentes da pausa: cumprimento pelo horario atual e um so cumpriment
   assertStringIncludes(p, "Aqui é a Jully, do Instituto Castro. Desculpe a demora");
   assertStringIncludes(p, "NÃO mande a frase de abertura");
 });
+
+Deno.test("convenios: lista da planilha de 19/11 com cobertura por operadora", async () => {
+  const m = await import("./ia-prompt.ts");
+  const p = m.montarSystemPrompt({ primeiroNome: null, funil: null, etapa: null, exemplos: [], agoraLocal: "x" });
+  assertEquals(/Omint|Prevent Senior/.test(p), false);
+  assertStringIncludes(p, "NotreDame Intermédica: apenas consultas");
+  assertStringIncludes(p, "Central Nacional Unimed (CNU): apenas cirurgia bariátrica");
+  assertStringIncludes(p, "Bradesco Saúde, SulAmérica, Allianz e Mediservice: consultas e cirurgias");
+});
