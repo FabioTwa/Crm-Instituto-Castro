@@ -100,7 +100,14 @@ type Supa = SupabaseClient<any, "public", any>;
 import { canonicoTelefone, soDigitos, telefonePlausivel, variacoesTelefone } from "../_shared/telefone.ts";
 import { icFlag } from "../_shared/flags.ts";
 import { FOLGA_DESCONEXAO_MS } from "../_shared/retomada-queda.ts";
-import { baixarMidiaZapi, envelopeZapi, eventoConexaoZapi, tokenWebhookZapiValido } from "../_shared/zapi.ts";
+import {
+  baixarMidiaZapi, type CanalZapi, enviarTextoZapi, envelopeZapi, eventoConexaoZapi, reagirMensagemZapi, tokenWebhookZapiValido,
+} from "../_shared/zapi.ts";
+import { canalDaLinha } from "../_shared/whatsapp-envio.ts";
+import { numerosAviso } from "../_shared/aviso-agendamento.ts";
+import {
+  diaLocal, horaDoAvisoGrupo, interpretarRespostaGrupo, montarPendencias, type Pendencia, textoPendenciasGrupo,
+} from "../_shared/grupo-pendencias.ts";
 import { decidirGrupo, ehEventoGrupoZapi, extrairMensagemGrupo, type GrupoLido } from "../_shared/grupo-leitura.ts";
 
 type Provedor = "meta" | "zapi";
@@ -1630,6 +1637,8 @@ Deno.serve(async (req: Request) => {
         if (!URL_SB || !SR) return json({ ok: false, error: "env missing" }, 500);
         // O cron roda a cada 30 s; o encerramento por inatividade basta 1x por minuto.
         if (new Date().getUTCSeconds() < 30) dispararEncerramentoInativas(createClient(URL_SB, SR, { auth: { persistSession: false } }));
+        // Pendencias do Instituto no grupo: uma mensagem por dia (SQL 52).
+        dispararAvisoDiarioGrupo(createClient(URL_SB, SR, { auth: { persistSession: false } }));
         return json(await varrerPendentes(URL_SB, SR));
       }
     }
@@ -1759,8 +1768,9 @@ async function entradaZapi(req: Request, url: URL): Promise<Response> {
   if (conexao) return await registrarConexaoZapi(URL_SB, SR, conexao.instancia, conexao.conectado, conexao.numero, LOGZ);
 
   // Grupo (SQL 50): so os grupos de ic_grupos_leitura sao GUARDADOS, somente
-  // para leitura. Sai daqui: nunca vira card, nunca chama a IA, nunca envia
-  // nada, nunca dispara aviso. Os demais grupos continuam descartados.
+  // para leitura. Sai daqui: nunca vira card, nunca chama a IA, nunca dispara
+  // aviso. Unico envio: as pendencias do Instituto (SQL 52, ver abaixo). Os
+  // demais grupos continuam descartados.
   if (ehEventoGrupoZapi(bruto)) return await registrarGrupoLeitura(URL_SB, SR, bruto, LOGZ);
 
   const { envelope, tipo } = envelopeZapi(bruto);
@@ -1893,6 +1903,14 @@ async function registrarGrupoLeitura(URL_SB: string, SR: string, bruto: any, LOG
   const id = ins && (ins as any[])[0] ? Number((ins as any[])[0].id) : null;
   console.log(LOGZ, "grupo: mensagem guardada (leitura):", m.tipo, id ? "nova" : "repetida");
 
+  // Resposta do time as pendencias do dia (SQL 52). Nunca a nossa propria mensagem.
+  if (id && !m.deMim && m.tipo === "texto" && m.texto) {
+    const trabalho = processarRespostaGrupo(sb, { grupoId: m.grupoId, messageId: m.messageId, texto: m.texto, autorNome: m.autorNome })
+      .catch((e) => console.error(LOGZ, "grupo: erro ao ler resposta do time:", e));
+    const espera = (globalThis as any).EdgeRuntime?.waitUntil;
+    if (typeof espera === "function") espera.call((globalThis as any).EdgeRuntime, trabalho);
+  }
+
   if (id && m.tipo === "audio" && m.midiaUrl) {
     const trabalho = (async () => {
       if (!(await icFlag(sb, "ia_transcricao_audio"))) return;
@@ -1902,11 +1920,212 @@ async function registrarGrupoLeitura(URL_SB: string, SR: string, bruto: any, LOG
       if (!txt) return;
       const { error } = await sb.from("ic_grupo_mensagens").update({ transcricao: txt }).eq("id", id);
       if (error) console.error(LOGZ, "grupo: transcricao nao gravada:", error.message);
+      if (!m.deMim) await processarRespostaGrupo(sb, { grupoId: m.grupoId, messageId: m.messageId, texto: txt, autorNome: m.autorNome });
     })().catch((e) => console.error(LOGZ, "grupo: erro na transcricao:", e));
     const espera = (globalThis as any).EdgeRuntime?.waitUntil;
     if (typeof espera === "function") espera.call((globalThis as any).EdgeRuntime, trabalho);
   }
   return json({ ok: true, grupo: "guardada" });
+}
+
+// -------------------------------------------------------------------
+// PENDENCIAS DO INSTITUTO NO GRUPO (SQL 52, 23/11/2026)
+//
+// Unica excecao ao "so leitura" do grupo, pedida pelo Fabio: uma mensagem por
+// dia (seg-sab, a partir de grupo_pendencias_hora, padrao 9h) com o que espera
+// o time do Instituto (agendamento a confirmar, pedido de agendamento sem
+// retorno). Nada tecnico vai para o grupo. Desligado por padrao
+// (grupo_pendencias_ligado='true' liga).
+//
+// O time responde no grupo ("Diana confirmada"): o CRM casa o nome com a lista
+// (_shared/grupo-pendencias.ts), confirma o agendamento ou leva o card para a
+// etapa de confirmado, fecha o pedido aberto e reage com ✅. Nao escreve
+// nada alem da mensagem do dia.
+// -------------------------------------------------------------------
+const LOGG = "[ic-meta-webhook][grupo-pendencias]";
+const CHAVES_GRUPO_PEND = [
+  "grupo_pendencias_ligado", "grupo_pendencias_hora", "grupo_pendencias_ultimo",
+  "grupo_pendencias_ignorar", "aviso_agendamento_whatsapp", "callcenter_whatsapp",
+];
+
+// Leitura sempre fresca (sem o cache de 60 s): a trava do dia depende dela.
+async function configGrupoPendencias(sb: Supa): Promise<Record<string, string> | null> {
+  const { data, error } = await sb.from("crm_ia_config").select("chave, valor").in("chave", CHAVES_GRUPO_PEND);
+  if (error) {
+    console.error(LOGG, "config ilegivel:", error.message);
+    return null;
+  }
+  const cfg: Record<string, string> = {};
+  for (const r of (data as any[]) || []) cfg[r.chave] = String(r.valor ?? "");
+  return cfg;
+}
+
+async function lerPendenciasGrupo(
+  sb: Supa, cfg: Record<string, string>, agora: Date, incluirPedidosDeHoje: boolean,
+): Promise<{ ok: true; pendencias: Pendencia[] } | { ok: false; erro: string }> {
+  const ate = new Date(agora.getTime() + 14 * 24 * 3600 * 1000).toISOString();
+  const [ag, hf] = await Promise.all([
+    sb.from("agendamentos").select("id, cliente_crm_id, inicio")
+      .eq("status", "pendente").gt("inicio", agora.toISOString()).lt("inicio", ate).limit(200),
+    sb.from("ia_handoffs").select("cliente_crm_id, criado_em")
+      .eq("motivo", "agendamento_confirmado").is("atendido_em", null).limit(200),
+  ]);
+  if (ag.error) return { ok: false, erro: ag.error.message };
+  if (hf.error) return { ok: false, erro: hf.error.message };
+  const agendamentos = ((ag.data as any[]) || []).filter((a) => a.cliente_crm_id)
+    .map((a) => ({ id: String(a.id), cliente_crm_id: String(a.cliente_crm_id), inicio: String(a.inicio) }));
+  const pedidos = ((hf.data as any[]) || []).filter((h) => h.cliente_crm_id)
+    .map((h) => ({ cliente_crm_id: String(h.cliente_crm_id), criado_em: String(h.criado_em) }));
+  const ids = [...new Set([...agendamentos.map((a) => a.cliente_crm_id), ...pedidos.map((p) => p.cliente_crm_id)])];
+  if (!ids.length) return { ok: true, pendencias: [] };
+  const { data: cards, error: errCards } = await sb.from("clientes_crm").select("id, nome, telefone, etapa")
+    .in("id", ids).is("deleted_at", null).is("mesclado_para", null);
+  if (errCards) return { ok: false, erro: errCards.message };
+  const ignorar = [
+    ...numerosAviso(cfg.aviso_agendamento_whatsapp),
+    ...numerosAviso(cfg.callcenter_whatsapp),
+    ...numerosAviso(cfg.grupo_pendencias_ignorar),
+  ];
+  return {
+    ok: true,
+    pendencias: montarPendencias({
+      agora,
+      cards: ((cards as any[]) || []).map((c) => ({ id: String(c.id), nome: c.nome ?? null, telefone: c.telefone ?? null, etapa: c.etapa ?? null })),
+      agendamentos,
+      pedidos,
+      ignorar,
+      incluirPedidosDeHoje,
+    }),
+  };
+}
+
+// Grupo de destino: o grupo de leitura ativo e ja vinculado ("Treinamento Jully").
+async function grupoDasPendencias(sb: Supa): Promise<string | null> {
+  const { data, error } = await sb.from("ic_grupos_leitura").select("grupo_id")
+    .eq("ativo", true).not("grupo_id", "is", null).order("id", { ascending: true }).limit(1);
+  if (error) {
+    console.error(LOGG, "grupo ilegivel:", error.message);
+    return null;
+  }
+  const g = (data as any[]) && (data as any[])[0];
+  return g && g.grupo_id ? String(g.grupo_id) : null;
+}
+
+async function canalZapiDoGrupo(sb: Supa): Promise<CanalZapi | null> {
+  const { data, error } = await sb.from("vendedores_whatsapp").select("*")
+    .eq("ativo", true).eq("provedor", "zapi").not("zapi_instancia", "is", null).order("created_at", { ascending: true }).limit(1);
+  if (error) {
+    console.error(LOGG, "numero ilegivel:", error.message);
+    return null;
+  }
+  const r = canalDaLinha((data as any[])?.[0] || null, (n) => Deno.env.get(n));
+  if (!r.ok || r.canal.provedor !== "zapi") {
+    console.error(LOGG, "sem canal Z-API para o grupo");
+    return null;
+  }
+  return { instancia: r.canal.instancia, token: r.canal.token, clientToken: r.canal.clientToken };
+}
+
+async function logGrupo(sb: Supa, decisao: string, detalhe: Record<string, unknown>, clienteId: string | null = null): Promise<void> {
+  const { error } = await sb.from("ia_decisoes_log").insert({
+    cliente_crm_id: clienteId, etapa_pipeline: "grupo_pendencias", decisao, detalhe,
+  });
+  if (error) console.error(LOGG, "log nao gravado:", error.message);
+}
+
+// Mensagem do dia. Chamado pelo varredor (a cada 30 s); a trava do dia
+// (grupo_pendencias_ultimo) garante uma so mensagem por dia, mesmo com chamadas
+// simultaneas. Se o envio falhar, a trava volta e a proxima rodada tenta de novo.
+async function avisoDiarioGrupo(sb: Supa): Promise<void> {
+  const cfg = await configGrupoPendencias(sb);
+  if (!cfg || cfg.grupo_pendencias_ligado !== "true") return;
+  const agora = new Date();
+  const hora = parseInt(cfg.grupo_pendencias_hora || "9", 10);
+  if (!horaDoAvisoGrupo(agora, Number.isFinite(hora) ? hora : 9)) return;
+  const hoje = diaLocal(agora);
+  const anterior = cfg.grupo_pendencias_ultimo ?? "";
+  if (anterior === hoje) return;
+
+  const { data: trava, error: errTrava } = await sb.from("crm_ia_config")
+    .update({ valor: hoje }).eq("chave", "grupo_pendencias_ultimo").eq("valor", anterior).select("chave");
+  if (errTrava || !trava || !(trava as any[]).length) return; // outra rodada pegou
+  const devolver = async (motivo: string) => {
+    await sb.from("crm_ia_config").update({ valor: anterior }).eq("chave", "grupo_pendencias_ultimo").eq("valor", hoje);
+    console.error(LOGG, "aviso do dia adiado:", motivo);
+  };
+
+  const lidas = await lerPendenciasGrupo(sb, cfg, agora, false);
+  if (!lidas.ok) return await devolver("pendencias ilegiveis: " + lidas.erro);
+  const texto = textoPendenciasGrupo(lidas.pendencias, agora);
+  if (!texto) {
+    await logGrupo(sb, "sem_pendencias", { dia: hoje });
+    return;
+  }
+  const grupo = await grupoDasPendencias(sb);
+  const canal = await canalZapiDoGrupo(sb);
+  if (!grupo || !canal) return await devolver("sem grupo vinculado ou sem canal");
+  const r = await enviarTextoZapi({ canal, para: grupo, texto, prefixoLog: LOGG, delayTyping: 4 });
+  if (!r.ok) return await devolver("Z-API recusou: " + r.mensagemMeta);
+  await logGrupo(sb, "aviso_enviado", {
+    dia: hoje,
+    message_id: r.wamid,
+    pendencias: lidas.pendencias.map((p) => ({ tipo: p.tipo, cliente: p.clienteId, agendamento: p.agendamentoId })),
+  });
+  console.log(LOGG, "aviso do dia enviado:", lidas.pendencias.length, "pendencia(s)");
+}
+
+function dispararAvisoDiarioGrupo(sb: Supa): void {
+  const trabalho = avisoDiarioGrupo(sb).catch((e) => console.error(LOGG, "erro no aviso do dia:", e));
+  const espera = (globalThis as any).EdgeRuntime?.waitUntil;
+  if (typeof espera === "function") espera.call((globalThis as any).EdgeRuntime, trabalho);
+}
+
+// Resposta do time no grupo (texto, ou audio ja transcrito).
+async function processarRespostaGrupo(
+  sb: Supa, msg: { grupoId: string; messageId: string; texto: string; autorNome: string | null },
+): Promise<void> {
+  const cfg = await configGrupoPendencias(sb);
+  if (!cfg || cfg.grupo_pendencias_ligado !== "true") return;
+  const grupo = await grupoDasPendencias(sb);
+  if (!grupo || grupo !== msg.grupoId) return;
+  const agora = new Date();
+  const lidas = await lerPendenciasGrupo(sb, cfg, agora, true);
+  if (!lidas.ok) {
+    console.error(LOGG, "pendencias ilegiveis na resposta:", lidas.erro);
+    return;
+  }
+  const escolhidas = interpretarRespostaGrupo(msg.texto, lidas.pendencias);
+  if (!escolhidas.length) return;
+
+  const autor = "Grupo do WhatsApp" + (msg.autorNome ? ": " + String(msg.autorNome).slice(0, 60) : "");
+  let marcou = 0;
+  for (const p of escolhidas) {
+    let ok = false;
+    if (p.tipo === "confirmar" && p.agendamentoId) {
+      // O gatilho trg_agendamento_confirmado leva o card para a etapa de confirmado.
+      const { data, error } = await sb.from("agendamentos")
+        .update({ status: "confirmado" }).eq("id", p.agendamentoId).eq("status", "pendente").select("id");
+      if (error) console.error(LOGG, "agendamento nao confirmado:", error.message);
+      ok = !error && !!data && (data as any[]).length > 0;
+    } else {
+      const { error } = await sb.rpc("ic_avancar_etapa", {
+        p_cliente: p.clienteId, p_evento: "confirmado", p_autor: autor, p_motivo: "time confirmou no grupo do WhatsApp",
+      });
+      if (error) console.error(LOGG, "card nao movido:", error.message);
+      ok = !error;
+    }
+    if (!ok) continue;
+    const { error: errH } = await sb.from("ia_handoffs")
+      .update({ atendido_em: agora.toISOString(), atendido_por: autor })
+      .eq("cliente_crm_id", p.clienteId).eq("motivo", "agendamento_confirmado").is("atendido_em", null);
+    if (errH) console.error(LOGG, "pedido nao fechado:", errH.message);
+    await logGrupo(sb, "confirmado_pelo_grupo", { tipo: p.tipo, agendamento: p.agendamentoId, autor, message_id: msg.messageId }, p.clienteId);
+    marcou++;
+  }
+  if (!marcou) return;
+  const canal = await canalZapiDoGrupo(sb);
+  if (canal) await reagirMensagemZapi(canal, msg.grupoId, msg.messageId, "✅", LOGG);
+  console.log(LOGG, "resposta do time:", marcou, "pendencia(s) marcada(s)");
 }
 
 // Aviso de conexao da Z-API. So aceita instancia cadastrada (ativa, provedor

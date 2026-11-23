@@ -242,12 +242,20 @@ export function urlEnvioTextoZapi(canal: CanalZapi): string {
   return `${ZAPI_API}/instances/${encodeURIComponent(canal.instancia)}/token/${encodeURIComponent(canal.token)}/send-text`;
 }
 
+// Destino do envio: telefone vira so digitos; id de grupo ("1203...-group")
+// segue como veio, porque a Z-API precisa do sufixo para achar o grupo.
+export function destinoZapi(para: string): string {
+  const t = String(para || "").trim();
+  if (/^\d+-group$/.test(t)) return t;
+  return soDigitos(t);
+}
+
 export function corpoTextoZapi(
   para: string,
   texto: string,
   delayTyping?: number,
 ): { phone: string; message: string; delayTyping?: number } {
-  const corpo: { phone: string; message: string; delayTyping?: number } = { phone: soDigitos(para), message: texto };
+  const corpo: { phone: string; message: string; delayTyping?: number } = { phone: destinoZapi(para), message: texto };
   if (delayTyping && delayTyping > 0) corpo.delayTyping = delayTyping;
   return corpo;
 }
@@ -593,6 +601,41 @@ export async function lerMensagemZapi(canal: CanalZapi, telefone: string, messag
     return r.ok;
   } catch (e) {
     console.warn(prefixoLog, "marcar como lida sem resposta:", e instanceof Error ? e.message : e);
+    return false;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// REACAO (POST /send-reaction): {phone, reaction, messageId}. Phone aceita id de
+// grupo. Usado para deixar ✅ na resposta do time no grupo (SQL 52). Falha so
+// vira log: a reacao e um sinal de cortesia, o CRM ja foi atualizado.
+// ---------------------------------------------------------------------------
+export function urlReacaoZapi(canal: CanalZapi): string {
+  return `${ZAPI_API}/instances/${encodeURIComponent(canal.instancia)}/token/${encodeURIComponent(canal.token)}/send-reaction`;
+}
+
+export async function reagirMensagemZapi(
+  canal: CanalZapi, destino: string, messageId: string, reacao: string, prefixoLog = "[zapi]",
+): Promise<boolean> {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 10000);
+  try {
+    const r = await fetch(urlReacaoZapi(canal), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Client-Token": canal.clientToken },
+      body: JSON.stringify({ phone: destinoZapi(destino), reaction: reacao, messageId }),
+      signal: ctl.signal,
+    });
+    const data: any = await r.json().catch(() => ({}));
+    if (!r.ok || (data && data.error)) {
+      console.warn(prefixoLog, "reacao nao enviada:", r.status, String((data && (data.error || data.message)) || "").slice(0, 120));
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.warn(prefixoLog, "reacao sem resposta:", e instanceof Error ? e.message : e);
     return false;
   } finally {
     clearTimeout(t);
