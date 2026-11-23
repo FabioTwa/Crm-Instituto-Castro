@@ -139,7 +139,23 @@ function linhas(itens: Pendencia[], fmt: (p: Pendencia) => string): string[] {
 }
 
 // Texto da mensagem do dia. null = nada pendente (nao manda nada).
-export function textoPendenciasGrupo(pendencias: Pendencia[], agora: Date): string | null {
+// Numeros marcados (grupo_pendencias_marcar): so digitos, sem repetir.
+export function numerosMarcados(valor: string | null | undefined): string[] {
+  const out: string[] = [];
+  for (const parte of String(valor || "").split(/[,;\s]+/)) {
+    let d = parte.replace(/\D/g, "");
+    if (d.length === 10 || d.length === 11) d = "55" + d; // DDD + numero, sem o 55
+    if (d.length >= 12 && d.length <= 13 && !out.includes(d)) out.push(d);
+  }
+  return out;
+}
+
+// "@5511... @5511..." para o texto; o WhatsApp mostra o nome do contato.
+export function textoMarcacoes(marcar: string[]): string {
+  return marcar.map((n) => "@" + n).join(" ");
+}
+
+export function textoPendenciasGrupo(pendencias: Pendencia[], agora: Date, marcar: string[] = []): string | null {
   if (!pendencias.length) return null;
   const hoje = diaLocal(agora);
   const amanha = diaLocal(new Date(agora.getTime() + 24 * 3600 * 1000));
@@ -149,7 +165,7 @@ export function textoPendenciasGrupo(pendencias: Pendencia[], agora: Date): stri
   const partes: string[] = [
     "Olá, pessoal, tudo bem? 😊",
     "Aqui é a Jully, a inteligência artificial de atendimento do Instituto Castro.",
-    "Passando para lembrar o que está aguardando o time:",
+    (marcar.length ? textoMarcacoes(marcar) + ", passando" : "Passando") + " para lembrar o que está aguardando o time:",
   ];
   if (confirmar.length) {
     partes.push("");

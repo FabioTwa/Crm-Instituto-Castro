@@ -106,7 +106,8 @@ import {
 import { canalDaLinha } from "../_shared/whatsapp-envio.ts";
 import { numerosAviso } from "../_shared/aviso-agendamento.ts";
 import {
-  diaLocal, horaDoAvisoGrupo, interpretarRespostaGrupo, montarPendencias, type Pendencia, textoPendenciasGrupo,
+  diaLocal, horaDoAvisoGrupo, interpretarRespostaGrupo, montarPendencias, numerosMarcados, type Pendencia,
+  textoMarcacoes, textoPendenciasGrupo,
 } from "../_shared/grupo-pendencias.ts";
 import { decidirGrupo, ehEventoGrupoZapi, extrairMensagemGrupo, type GrupoLido } from "../_shared/grupo-leitura.ts";
 
@@ -1945,7 +1946,8 @@ async function registrarGrupoLeitura(URL_SB: string, SR: string, bruto: any, LOG
 const LOGG = "[ic-meta-webhook][grupo-pendencias]";
 const CHAVES_GRUPO_PEND = [
   "grupo_pendencias_ligado", "grupo_pendencias_hora", "grupo_pendencias_ultimo",
-  "grupo_pendencias_ignorar", "aviso_agendamento_whatsapp", "callcenter_whatsapp",
+  "grupo_pendencias_ignorar", "grupo_pendencias_marcar", "grupo_mensagem_avulsa",
+  "aviso_agendamento_whatsapp", "callcenter_whatsapp",
 ];
 
 // Leitura sempre fresca (sem o cache de 60 s): a trava do dia depende dela.
@@ -2040,6 +2042,8 @@ async function avisoDiarioGrupo(sb: Supa): Promise<void> {
   const cfg = await configGrupoPendencias(sb);
   if (!cfg || cfg.grupo_pendencias_ligado !== "true") return;
   const agora = new Date();
+  const marcar = numerosMarcados(cfg.grupo_pendencias_marcar);
+  await mensagemAvulsaGrupo(sb, cfg, agora, marcar);
   const hora = parseInt(cfg.grupo_pendencias_hora || "9", 10);
   if (!horaDoAvisoGrupo(agora, Number.isFinite(hora) ? hora : 9)) return;
   const hoje = diaLocal(agora);
@@ -2056,7 +2060,7 @@ async function avisoDiarioGrupo(sb: Supa): Promise<void> {
 
   const lidas = await lerPendenciasGrupo(sb, cfg, agora, false);
   if (!lidas.ok) return await devolver("pendencias ilegiveis: " + lidas.erro);
-  const texto = textoPendenciasGrupo(lidas.pendencias, agora);
+  const texto = textoPendenciasGrupo(lidas.pendencias, agora, marcar);
   if (!texto) {
     await logGrupo(sb, "sem_pendencias", { dia: hoje });
     return;
@@ -2064,7 +2068,7 @@ async function avisoDiarioGrupo(sb: Supa): Promise<void> {
   const grupo = await grupoDasPendencias(sb);
   const canal = await canalZapiDoGrupo(sb);
   if (!grupo || !canal) return await devolver("sem grupo vinculado ou sem canal");
-  const r = await enviarTextoZapi({ canal, para: grupo, texto, prefixoLog: LOGG, delayTyping: 4 });
+  const r = await enviarTextoZapi({ canal, para: grupo, texto, prefixoLog: LOGG, delayTyping: 4, mencionados: marcar });
   if (!r.ok) return await devolver("Z-API recusou: " + r.mensagemMeta);
   await logGrupo(sb, "aviso_enviado", {
     dia: hoje,
@@ -2072,6 +2076,30 @@ async function avisoDiarioGrupo(sb: Supa): Promise<void> {
     pendencias: lidas.pendencias.map((p) => ({ tipo: p.tipo, cliente: p.clienteId, agendamento: p.agendamentoId })),
   });
   console.log(LOGG, "aviso do dia enviado:", lidas.pendencias.length, "pendencia(s)");
+}
+
+// Recado avulso no grupo (grupo_mensagem_avulsa): sai uma vez, com as mesmas
+// marcacoes, das 8h as 20h, e a chave volta a ficar vazia. So quem tem acesso
+// ao banco (service role / SQL Editor) escreve essa chave.
+async function mensagemAvulsaGrupo(sb: Supa, cfg: Record<string, string>, agora: Date, marcar: string[]): Promise<void> {
+  const avulsa = String(cfg.grupo_mensagem_avulsa || "").trim();
+  if (!avulsa || !horaDoAvisoGrupo(agora, 8)) return;
+  const { data: trava, error } = await sb.from("crm_ia_config")
+    .update({ valor: "" }).eq("chave", "grupo_mensagem_avulsa").eq("valor", cfg.grupo_mensagem_avulsa).select("chave");
+  if (error || !trava || !(trava as any[]).length) return; // outra rodada pegou
+  const grupo = await grupoDasPendencias(sb);
+  const canal = await canalZapiDoGrupo(sb);
+  const texto = (marcar.length ? textoMarcacoes(marcar) + " " : "") + avulsa;
+  const r = grupo && canal
+    ? await enviarTextoZapi({ canal, para: grupo, texto, prefixoLog: LOGG, delayTyping: 3, mencionados: marcar })
+    : null;
+  if (!r || !r.ok) {
+    // Devolve o recado para a proxima rodada tentar de novo.
+    await sb.from("crm_ia_config").update({ valor: cfg.grupo_mensagem_avulsa }).eq("chave", "grupo_mensagem_avulsa").eq("valor", "");
+    console.error(LOGG, "recado avulso adiado:", r ? r.mensagemMeta : "sem grupo ou sem canal");
+    return;
+  }
+  await logGrupo(sb, "avulsa_enviada", { message_id: r.wamid, marcados: marcar.length });
 }
 
 function dispararAvisoDiarioGrupo(sb: Supa): void {
