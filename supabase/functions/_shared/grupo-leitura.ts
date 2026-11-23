@@ -2,7 +2,9 @@
 //
 // Pedido do Fabio: guardar as mensagens do grupo "Treinamento Jully" para
 // leitura. Regras rigidas:
-//   - nunca enviar nada no grupo (nenhuma funcao daqui envia);
+//   - nunca enviar nada no grupo (nenhuma funcao daqui envia). Unica excecao,
+//     pedida pelo Fabio em 23/11: a mensagem diaria de pendencias do Instituto
+//     e o ✅ na resposta do time (_shared/grupo-pendencias.ts, SQL 52);
 //   - a Jully/IA nao processa nem responde grupo;
 //   - grupo nunca vira card de lead/paciente nem dispara aviso;
 //   - so grupos de ic_grupos_leitura sao guardados; os demais sao descartados.
