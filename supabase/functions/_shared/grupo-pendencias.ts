@@ -151,6 +151,17 @@ export function numerosMarcados(valor: string | null | undefined): string[] {
 }
 
 // "@5511... @5511..." para o texto; o WhatsApp mostra o nome do contato.
+// Recado avulso com este valor sai so com as marcacoes, sem texto.
+export const AVULSA_SO_MARCACOES = "so_marcacoes";
+
+// Texto do recado avulso: o recado e, no final, as marcacoes.
+export function textoAvulsoGrupo(avulsa: string, marcar: string[]): string | null {
+  const recado = String(avulsa || "").trim();
+  const partes = recado === AVULSA_SO_MARCACOES ? [] : [recado];
+  if (marcar.length) partes.push(textoMarcacoes(marcar));
+  const t = partes.filter(Boolean).join("\n\n");
+  return t || null;
+}
 export function textoMarcacoes(marcar: string[]): string {
   return marcar.map((n) => "@" + n).join(" ");
 }
@@ -165,7 +176,7 @@ export function textoPendenciasGrupo(pendencias: Pendencia[], agora: Date, marca
   const partes: string[] = [
     "Olá, pessoal, tudo bem? 😊",
     "Aqui é a Jully, a inteligência artificial de atendimento do Instituto Castro.",
-    (marcar.length ? textoMarcacoes(marcar) + ", passando" : "Passando") + " para lembrar o que está aguardando o time:",
+    "Passando para lembrar o que está aguardando o time:",
   ];
   if (confirmar.length) {
     partes.push("");
@@ -187,6 +198,8 @@ export function textoPendenciasGrupo(pendencias: Pendencia[], agora: Date, marca
       'com o nome e a palavra "confirmada" ou "agendada". Ex.: "Diana confirmada". ' +
       "Eu atualizo no CRM e deixo um ✅ na sua mensagem. Obrigada!",
   );
+  // Marcacoes sempre no final (pedido do Fabio, 23/11).
+  if (marcar.length) partes.push("", textoMarcacoes(marcar));
   return partes.join("\n");
 }
 
