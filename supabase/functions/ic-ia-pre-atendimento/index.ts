@@ -168,6 +168,8 @@ import {
   TEXTOS_ERRO_TEMPORARIO,
   TEXTOS_LEMBRETE_CONSENTIMENTO,
   TEXTOS_RESPOSTA_BLOQUEADA,
+  instrucaoRevisaoBloqueada,
+  MARCA_PERGUNTA_SAUDE,
   TEXTOS_VALOR_PESSOALMENTE,
   textoForaDoHorario,
   textoHorarioOcupado,
@@ -1032,7 +1034,27 @@ async function rodarNaVez(
 
   // 9) pos_validacao
   let textoResposta = paraWhatsApp(r.texto);
-  const proibido = textoResposta ? respostaProibida(textoResposta) : null;
+  let proibido = textoResposta ? respostaProibida(textoResposta) : null;
+  if (proibido && !proibido.startsWith("valor:")) {
+    // Antes da frase pronta, a Jully avalia: pergunta de saude -> nao responde;
+    // senao reescreve sem o termo barrado. A reescrita passa pela mesma validacao.
+    await p.log("pos_validacao", "bloqueada_revisando", { modelo: p.modelo, motivo: proibido, detalhe: { resposta: textoResposta } });
+    const rev = await chamarClaude({
+      apiKey, modelo: p.modelo, maxTokens, messages, semFerramentas: true,
+      system: system + instrucaoRevisaoBloqueada(proibido, textoResposta),
+    });
+    const novo = rev.erro ? "" : paraWhatsApp(rev.texto).trim();
+    const saude = !novo || novo.toUpperCase().includes(MARCA_PERGUNTA_SAUDE);
+    const proibidoNovo = saude ? null : respostaProibida(novo);
+    await p.log("pos_validacao", saude ? "revisao_pergunta_saude" : proibidoNovo ? "revisao_bloqueada" : "revisao_ok", {
+      modelo: p.modelo, motivo: proibidoNovo || rev.erro || null, tokens_entrada: rev.tokens_entrada, tokens_saida: rev.tokens_saida,
+      latencia_ms: rev.latencia_ms, detalhe: { resposta: novo },
+    });
+    if (!saude && !proibidoNovo) {
+      textoResposta = novo;
+      proibido = null;
+    }
+  }
   if (proibido) {
     await p.log("pos_validacao", "bloqueada_pos_validacao", { modelo: p.modelo, motivo: proibido, detalhe: { resposta: textoResposta } });
     await p.handoff("erro_ia", "resposta bloqueada");
