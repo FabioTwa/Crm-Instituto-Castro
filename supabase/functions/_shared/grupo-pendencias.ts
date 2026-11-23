@@ -166,7 +166,11 @@ export function textoMarcacoes(marcar: string[]): string {
   return marcar.map((n) => "@" + n).join(" ");
 }
 
-export function textoPendenciasGrupo(pendencias: Pendencia[], agora: Date, marcar: string[] = []): string | null {
+// para: "grupo" (mensagem no grupo) ou "time" (conversa direta com o numero do
+// time de agendamento, 2020-8098).
+export function textoPendenciasGrupo(
+  pendencias: Pendencia[], agora: Date, marcar: string[] = [], para: "grupo" | "time" = "grupo",
+): string | null {
   if (!pendencias.length) return null;
   const hoje = diaLocal(agora);
   const amanha = diaLocal(new Date(agora.getTime() + 24 * 3600 * 1000));
@@ -174,9 +178,11 @@ export function textoPendenciasGrupo(pendencias: Pendencia[], agora: Date, marca
   const agendar = pendencias.filter((p) => p.tipo === "agendar");
 
   const partes: string[] = [
-    "Olá, pessoal, tudo bem? 😊",
+    para === "time" ? "Olá, tudo bem? 😊" : "Olá, pessoal, tudo bem? 😊",
     "Aqui é a Jully, a inteligência artificial de atendimento do Instituto Castro.",
-    "Passando para lembrar o que está aguardando o time:",
+    para === "time"
+      ? "Passando para lembrar o que ainda está aguardando retorno no CRM:"
+      : "Passando para lembrar o que está aguardando o time:",
   ];
   if (confirmar.length) {
     partes.push("");
@@ -194,7 +200,8 @@ export function textoPendenciasGrupo(pendencias: Pendencia[], agora: Date, marca
   }
   partes.push("");
   partes.push(
-    "Quando o paciente estiver confirmado, é só responder aqui mesmo, por texto ou áudio, " +
+    "Quando o paciente estiver confirmado, é só " + (para === "time" ? "me responder" : "responder") +
+      " aqui mesmo, por texto ou áudio, " +
       'com o nome e a palavra "confirmada" ou "agendada". Ex.: "Diana confirmada". ' +
       "Eu atualizo no CRM e deixo um ✅ na sua mensagem. Obrigada!",
   );
@@ -282,4 +289,30 @@ export function horaDoAvisoGrupo(agora: Date, horaInicio: number): boolean {
   if (p.diaSemana === 0) return false;
   const h = Number.isFinite(horaInicio) ? horaInicio : 9;
   return p.hora >= h && p.hora < 20;
+}
+
+// A mensagem diz que algo foi feito (confirmada, agendada...)? Usado para avisar
+// o time quando o nome citado nao esta na lista.
+export function temPalavraDeFeito(texto: string | null | undefined): boolean {
+  return RE_FEITO.test(normalizarTexto(String(texto || "")));
+}
+
+export const TEXTO_NAO_ACHEI =
+  "Não encontrei esse nome entre as pendências 🤔 Pode me mandar o primeiro nome e o final do telefone? " +
+  'Ex.: "Diana 1343 confirmada".';
+
+// Horarios do aviso ao time (time_pendencias_horas, ex. "9,15"). Devolve a
+// "vaga" atual (AAAA-MM-DD-H da ultima hora ja passada hoje) ou null fora do
+// horario (domingo, antes da primeira hora, das 20h em diante).
+export function vagaDoAvisoTime(agora: Date, horasTexto: string | null | undefined): string | null {
+  const p = partesNoFuso(agora);
+  if (p.diaSemana === 0 || p.hora >= 20) return null;
+  const horas = String(horasTexto || "9")
+    .split(/[,;\s]+/)
+    .map((h) => parseInt(h, 10))
+    .filter((h) => Number.isFinite(h) && h >= 0 && h < 20)
+    .sort((a, b) => a - b);
+  const passadas = horas.filter((h) => h <= p.hora);
+  if (!passadas.length) return null;
+  return `${diaLocal(agora)}-${passadas[passadas.length - 1]}`;
 }

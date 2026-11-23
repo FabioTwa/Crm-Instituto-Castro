@@ -1,7 +1,7 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
   diaLocal, horaDoAvisoGrupo, interpretarRespostaGrupo, MAX_ITENS_POR_LISTA, montarPendencias, numerosMarcados,
-  type Pendencia, textoAvulsoGrupo, textoMarcacoes, textoPendenciasGrupo,
+  temPalavraDeFeito, type Pendencia, textoAvulsoGrupo, textoMarcacoes, textoPendenciasGrupo, vagaDoAvisoTime,
 } from "./grupo-pendencias.ts";
 import { corpoTextoZapi, destinoZapi } from "./zapi.ts";
 
@@ -164,4 +164,29 @@ Deno.test("recado avulso: so as marcacoes, ou recado com as marcacoes no final",
   assertEquals(textoAvulsoGrupo("so_marcacoes", m), "@5511954580790 @5511963201355");
   assertEquals(textoAvulsoGrupo("Bom dia!", m), "Bom dia!\n\n@5511954580790 @5511963201355");
   assertEquals(textoAvulsoGrupo("so_marcacoes", []), null);
+});
+
+Deno.test("texto ao time (conversa direta): sem 'pessoal', pede para responder a Jully", () => {
+  const t = textoPendenciasGrupo(lista(), AGORA, [], "time")!;
+  assert(t.startsWith("Olá, tudo bem? 😊\nAqui é a Jully, a inteligência artificial"));
+  assert(t.includes("Passando para lembrar o que ainda está aguardando retorno no CRM:"));
+  assert(t.includes("é só me responder aqui mesmo"));
+  assert(!t.includes("@"));
+});
+
+Deno.test("vaga do aviso ao time: ultima hora ja passada; fora do horario = null", () => {
+  assertEquals(vagaDoAvisoTime(new Date("2026-11-23T11:59:00Z"), "9,15"), null); // 08h59
+  assertEquals(vagaDoAvisoTime(new Date("2026-11-23T12:00:00Z"), "9,15"), "2026-11-23-9");
+  assertEquals(vagaDoAvisoTime(new Date("2026-11-23T17:59:00Z"), "9,15"), "2026-11-23-9"); // 14h59
+  assertEquals(vagaDoAvisoTime(new Date("2026-11-23T18:00:00Z"), "15, 9"), "2026-11-23-15");
+  assertEquals(vagaDoAvisoTime(new Date("2026-11-23T23:00:00Z"), "9,15"), null); // 20h
+  assertEquals(vagaDoAvisoTime(new Date("2026-11-22T14:00:00Z"), "9,15"), null); // domingo
+  assertEquals(vagaDoAvisoTime(new Date("2026-11-23T13:00:00Z"), ""), "2026-11-23-9"); // padrao 9h
+});
+
+Deno.test("palavra de feito: so quando diz que fez", () => {
+  assert(temPalavraDeFeito("Joana confirmada"));
+  assert(temPalavraDeFeito("já agendei"));
+  assert(!temPalavraDeFeito("ok, obrigado"));
+  assert(!temPalavraDeFeito("vou agendar"));
 });
