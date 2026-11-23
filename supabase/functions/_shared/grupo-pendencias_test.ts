@@ -1,9 +1,9 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
-  diaLocal, horaDoAvisoGrupo, interpretarRespostaGrupo, MAX_ITENS_POR_LISTA, montarPendencias, type Pendencia,
-  textoPendenciasGrupo,
+  diaLocal, horaDoAvisoGrupo, interpretarRespostaGrupo, MAX_ITENS_POR_LISTA, montarPendencias, numerosMarcados,
+  type Pendencia, textoMarcacoes, textoPendenciasGrupo,
 } from "./grupo-pendencias.ts";
-import { destinoZapi } from "./zapi.ts";
+import { corpoTextoZapi, destinoZapi } from "./zapi.ts";
 
 // Segunda, 23/11/2026 13h em Sao Paulo (16h UTC).
 const AGORA = new Date("2026-11-23T16:00:00Z");
@@ -136,4 +136,25 @@ Deno.test("dia local vira a meia-noite de Sao Paulo, nao a do UTC", () => {
 Deno.test("destino Z-API: id de grupo segue intacto; telefone vira digitos", () => {
   assertEquals(destinoZapi("120363430917528427-group"), "120363430917528427-group");
   assertEquals(destinoZapi("+55 (11) 91184-4992"), "5511911844992");
+});
+
+Deno.test("marcacoes: aceita DDD+numero, com ou sem 55, sem repetir", () => {
+  assertEquals(numerosMarcados("11954580790, 11963201355"), ["5511954580790", "5511963201355"]);
+  assertEquals(numerosMarcados("+55 (11) 95458-0790;5511954580790"), ["5511954580790"]);
+  assertEquals(numerosMarcados(""), []);
+  assertEquals(textoMarcacoes(["5511954580790", "5511963201355"]), "@5511954580790 @5511963201355");
+});
+
+Deno.test("texto do grupo: com marcacao, o @ entra no texto", () => {
+  const t = textoPendenciasGrupo(lista(), AGORA, ["5511954580790", "5511963201355"])!;
+  assert(t.includes("@5511954580790 @5511963201355, passando para lembrar o que está aguardando o time:"));
+  const sem = textoPendenciasGrupo(lista(), AGORA)!;
+  assert(sem.includes("\nPassando para lembrar"));
+});
+
+Deno.test("corpo Z-API: mencionados vai em mentioned; sem mencao nao manda o campo", () => {
+  assertEquals(corpoTextoZapi("120363430917528427-group", "@5511954580790 oi", undefined, ["5511954580790"]), {
+    phone: "120363430917528427-group", message: "@5511954580790 oi", mentioned: ["5511954580790"],
+  });
+  assertEquals(corpoTextoZapi("5511999990000", "Oi", 3, []), { phone: "5511999990000", message: "Oi", delayTyping: 3 });
 });

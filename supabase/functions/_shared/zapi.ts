@@ -254,9 +254,13 @@ export function corpoTextoZapi(
   para: string,
   texto: string,
   delayTyping?: number,
-): { phone: string; message: string; delayTyping?: number } {
-  const corpo: { phone: string; message: string; delayTyping?: number } = { phone: destinoZapi(para), message: texto };
+  mencionados?: string[],
+): { phone: string; message: string; delayTyping?: number; mentioned?: string[] } {
+  const corpo: { phone: string; message: string; delayTyping?: number; mentioned?: string[] } = { phone: destinoZapi(para), message: texto };
   if (delayTyping && delayTyping > 0) corpo.delayTyping = delayTyping;
+  // Mencao em grupo: o texto leva "@5511..." e a lista vai em "mentioned".
+  const m = (mencionados || []).map((n) => soDigitos(n)).filter(Boolean);
+  if (m.length) corpo.mentioned = m;
   return corpo;
 }
 
@@ -299,6 +303,7 @@ export async function enviarTextoZapi(args: {
   texto: string;
   prefixoLog?: string;
   delayTyping?: number; // segundos de "digitando..." (Z-API segura a entrega)
+  mencionados?: string[]; // so em grupo: numeros marcados (o texto leva "@numero")
 }): Promise<ResultadoEnvio> {
   const LOG = args.prefixoLog || "[zapi]";
   const ctl = new AbortController();
@@ -309,7 +314,7 @@ export async function enviarTextoZapi(args: {
     resp = await fetch(urlEnvioTextoZapi(args.canal), {
       method: "POST",
       headers: { "Content-Type": "application/json", "Client-Token": args.canal.clientToken },
-      body: JSON.stringify(corpoTextoZapi(args.para, args.texto, args.delayTyping)),
+      body: JSON.stringify(corpoTextoZapi(args.para, args.texto, args.delayTyping, args.mencionados)),
       signal: ctl.signal,
     });
     const txt = await resp.text().catch(() => "");
