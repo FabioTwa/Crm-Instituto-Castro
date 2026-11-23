@@ -1774,6 +1774,15 @@ async function entradaZapi(req: Request, url: URL): Promise<Response> {
   // demais grupos continuam descartados.
   if (ehEventoGrupoZapi(bruto)) return await registrarGrupoLeitura(URL_SB, SR, bruto, LOGZ);
 
+  // Status de mensagem (entregue/lida). TESTE (23/11/2026, pedido do Fabio):
+  // descobrir se a Z-API diz QUEM leu a mensagem da Jully no grupo. So o status
+  // de grupo vai para o log (sem gravar no banco); o resto e descartado sem log.
+  if (bruto && bruto.type === "MessageStatusCallback") {
+    const grupo = bruto.isGroup === true || String(bruto.phone || "").endsWith("-group");
+    if (grupo) console.log(LOGZ, "status grupo (teste):", JSON.stringify(bruto).slice(0, 1500));
+    return json({ ok: true, ignored: "status" });
+  }
+
   const { envelope, tipo } = envelopeZapi(bruto);
   if (envelope._ic_ignorado) {
     console.log(LOGZ, "ignorado:", tipo);
