@@ -101,12 +101,13 @@ import { canonicoTelefone, soDigitos, telefonePlausivel, variacoesTelefone } fro
 import { icFlag } from "../_shared/flags.ts";
 import { FOLGA_DESCONEXAO_MS } from "../_shared/retomada-queda.ts";
 import {
-  baixarMidiaZapi, type CanalZapi, enviarTextoZapi, envelopeZapi, eventoConexaoZapi, reagirMensagemZapi, tokenWebhookZapiValido,
+  baixarMidiaZapi, type CanalZapi, enviarTextoZapi, envelopeZapi, eventoConexaoZapi, lerMensagemZapi, reagirMensagemZapi,
+  segundosDigitando, tokenWebhookZapiValido,
 } from "../_shared/zapi.ts";
 import { canalDaLinha } from "../_shared/whatsapp-envio.ts";
 import { numerosAviso } from "../_shared/aviso-agendamento.ts";
 import {
-  diaLocal, horaDoAvisoGrupo, interpretarRespostaGrupo, montarPendencias, numerosMarcados, type Pendencia,
+  diaLocal, horaDoAvisoGrupo, interpretarRespostaGrupo, montarPendencias, numerosMarcados, type Pendencia, pausasHumanas,
   temPalavraDeFeito, TEXTO_NAO_ACHEI, textoAvulsoGrupo, textoPendenciasGrupo, vagaDoAvisoTime,
 } from "../_shared/grupo-pendencias.ts";
 import { decidirGrupo, ehEventoGrupoZapi, extrairMensagemGrupo, type GrupoLido } from "../_shared/grupo-leitura.ts";
@@ -2083,7 +2084,7 @@ async function avisoDiarioGrupo(sb: Supa): Promise<void> {
   const grupo = await grupoDasPendencias(sb);
   const canal = await canalZapiDoGrupo(sb);
   if (!grupo || !canal) return await devolver("sem grupo vinculado ou sem canal");
-  const r = await enviarTextoZapi({ canal, para: grupo, texto, prefixoLog: LOGG, delayTyping: 4, mencionados: marcar });
+  const r = await enviarTextoZapi({ canal, para: grupo, texto, prefixoLog: LOGG, delayTyping: segundosDigitando(texto), mencionados: marcar });
   if (!r.ok) return await devolver("Z-API recusou: " + r.mensagemMeta);
   await logGrupo(sb, "aviso_enviado", {
     dia: hoje,
@@ -2155,7 +2156,7 @@ async function avisoTime(sb: Supa): Promise<void> {
   if (!canal) return await devolver("sem canal");
   let enviados = 0;
   for (const d of destinos) {
-    const r = await enviarTextoZapi({ canal, para: d, texto, prefixoLog: LOGG, delayTyping: 4 });
+    const r = await enviarTextoZapi({ canal, para: d, texto, prefixoLog: LOGG, delayTyping: segundosDigitando(texto) });
     if (r.ok) enviados++;
   }
   if (!enviados) return await devolver("Z-API recusou o envio ao time");
@@ -2220,11 +2221,37 @@ async function aplicarRespostaDoTime(
     }, p.clienteId);
     marcou++;
   }
-  if (!marcou) return 0;
-  const canal = await canalZapiDoGrupo(sb);
-  if (canal) await reagirMensagemZapi(canal, msg.destino, msg.messageId, "✅", LOGG);
-  console.log(LOGG, "resposta do time (" + msg.origem + "):", marcou, "pendencia(s) marcada(s)");
+  if (marcou) console.log(LOGG, "resposta do time (" + msg.origem + "):", marcou, "pendencia(s) marcada(s)");
   return marcou;
+}
+
+const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Parte visivel, no ritmo de uma pessoa (pedido do Fabio: nada robotico nem
+// instantaneo): espera 15-45 s para "ver" a mensagem, marca como lida, espera
+// 3-8 s e so entao reage com ✅ ou responde. Roda solta (waitUntil), para nao
+// segurar o processamento da entrada.
+function reagirComoPessoa(
+  sb: Supa, destino: string, messageId: string, acao: { reagir: boolean; responder: string | null },
+): void {
+  const trabalho = (async () => {
+    const canal = await canalZapiDoGrupo(sb);
+    if (!canal) return;
+    const pausa = pausasHumanas();
+    await esperar(pausa.ver);
+    await lerMensagemZapi(canal, destino, messageId, LOGG);
+    if (!acao.reagir && !acao.responder) return;
+    await esperar(pausa.agir);
+    if (acao.reagir) await reagirMensagemZapi(canal, destino, messageId, "✅", LOGG);
+    if (acao.responder) {
+      const r = await enviarTextoZapi({
+        canal, para: destino, texto: acao.responder, prefixoLog: LOGG, delayTyping: segundosDigitando(acao.responder),
+      });
+      await logGrupo(sb, "time_nome_nao_encontrado", { message_id: messageId, respondido: r.ok });
+    }
+  })().catch((e) => console.error(LOGG, "reacao ao time falhou:", e));
+  const espera = (globalThis as any).EdgeRuntime?.waitUntil;
+  if (typeof espera === "function") espera.call((globalThis as any).EdgeRuntime, trabalho);
 }
 
 // Resposta do time no grupo (texto, ou audio ja transcrito).
@@ -2236,7 +2263,9 @@ async function processarRespostaGrupo(
   const grupo = await grupoDasPendencias(sb);
   if (!grupo || grupo !== msg.grupoId) return;
   const autor = "Grupo do WhatsApp" + (msg.autorNome ? ": " + String(msg.autorNome).slice(0, 60) : "");
-  await aplicarRespostaDoTime(sb, cfg, { origem: "grupo", destino: msg.grupoId, messageId: msg.messageId, texto: msg.texto, autor });
+  const marcou = await aplicarRespostaDoTime(sb, cfg, { origem: "grupo", destino: msg.grupoId, messageId: msg.messageId, texto: msg.texto, autor });
+  // No grupo so "le" e reage quando a mensagem era para a Jully (marcou algo).
+  if (marcou) reagirComoPessoa(sb, msg.grupoId, msg.messageId, { reagir: true, responder: null });
 }
 
 // Resposta do time na conversa direta (numero do call center ou dos avisos).
@@ -2250,11 +2279,12 @@ async function processarRespostaTimeDireto(sb: Supa, numero: string, messageId: 
   const marcou = await aplicarRespostaDoTime(sb, cfg, {
     origem: "time", destino: numero, messageId, texto, autor: "WhatsApp do agendamento (" + numero.slice(-4) + ")",
   });
-  if (marcou || !temPalavraDeFeito(texto)) return;
-  const canal = await canalZapiDoGrupo(sb);
-  if (!canal) return;
-  const r = await enviarTextoZapi({ canal, para: numero, texto: TEXTO_NAO_ACHEI, prefixoLog: LOGG, delayTyping: 3 });
-  await logGrupo(sb, "time_nome_nao_encontrado", { message_id: messageId, respondido: r.ok });
+  // Conversa direta: como uma pessoa, le toda mensagem do time; reage se marcou,
+  // pede o nome se disse que confirmou e nao achou ninguem.
+  reagirComoPessoa(sb, numero, messageId, {
+    reagir: marcou > 0,
+    responder: !marcou && temPalavraDeFeito(texto) ? TEXTO_NAO_ACHEI : null,
+  });
 }
 
 // Aviso de conexao da Z-API. So aceita instancia cadastrada (ativa, provedor

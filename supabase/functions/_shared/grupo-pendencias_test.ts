@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
-  diaLocal, horaDoAvisoGrupo, interpretarRespostaGrupo, MAX_ITENS_POR_LISTA, montarPendencias, numerosMarcados,
+  diaLocal, horaDoAvisoGrupo, interpretarRespostaGrupo, MAX_ITENS_POR_LISTA, minutoDoAviso, montarPendencias, numerosMarcados, pausasHumanas,
   temPalavraDeFeito, type Pendencia, textoAvulsoGrupo, textoMarcacoes, textoPendenciasGrupo, vagaDoAvisoTime,
 } from "./grupo-pendencias.ts";
 import { corpoTextoZapi, destinoZapi } from "./zapi.ts";
@@ -119,13 +119,28 @@ Deno.test("resposta: nome repetido na lista so vale com o final", () => {
   assertEquals(interpretarRespostaGrupo("Ana 2222 agendada", dup).map((p) => p.clienteId), ["a2"]);
 });
 
-Deno.test("hora do aviso: seg-sab a partir da hora, antes das 20h; domingo nunca", () => {
+Deno.test("hora do aviso: seg-sab a partir da hora (num minuto 'humano'), antes das 20h; domingo nunca", () => {
+  const min = minutoDoAviso("2026-11-23-grupo");
+  assert(min >= 3 && min <= 27);
   assert(!horaDoAvisoGrupo(new Date("2026-11-23T11:59:00Z"), 9)); // 08h59
-  assert(horaDoAvisoGrupo(new Date("2026-11-23T12:00:00Z"), 9)); // 09h00
+  assert(!horaDoAvisoGrupo(new Date("2026-11-23T12:00:00Z"), 9)); // 09h00 cravado: ainda nao
+  assert(horaDoAvisoGrupo(new Date(Date.UTC(2026, 10, 23, 12, min)), 9)); // 09h + minuto do dia
+  assert(horaDoAvisoGrupo(new Date("2026-11-23T13:00:00Z"), 9)); // 10h00
   assert(horaDoAvisoGrupo(new Date("2026-11-23T22:59:00Z"), 9)); // 19h59
   assert(!horaDoAvisoGrupo(new Date("2026-11-23T23:00:00Z"), 9)); // 20h
-  assert(!horaDoAvisoGrupo(new Date("2026-11-22T13:00:00Z"), 9)); // domingo
-  assert(horaDoAvisoGrupo(new Date("2026-11-28T13:00:00Z"), 9)); // sabado
+  assert(!horaDoAvisoGrupo(new Date("2026-11-22T13:30:00Z"), 9)); // domingo
+  assert(horaDoAvisoGrupo(new Date("2026-11-28T13:30:00Z"), 9)); // sabado
+});
+
+Deno.test("minuto humano: estavel no mesmo dia, varia entre dias", () => {
+  assertEquals(minutoDoAviso("2026-11-23-grupo"), minutoDoAviso("2026-11-23-grupo"));
+  const varios = new Set(["21", "22", "23", "24", "25", "26", "27", "28"].map((d) => minutoDoAviso(`2026-11-${d}-grupo`)));
+  assert(varios.size > 1);
+});
+
+Deno.test("pausas humanas: ver 15-45 s, agir 3-8 s", () => {
+  assertEquals(pausasHumanas(() => 0), { ver: 15000, agir: 3000 });
+  assertEquals(pausasHumanas(() => 1), { ver: 45000, agir: 8000 });
 });
 
 Deno.test("dia local vira a meia-noite de Sao Paulo, nao a do UTC", () => {
@@ -174,14 +189,17 @@ Deno.test("texto ao time (conversa direta): sem 'pessoal', pede para responder a
   assert(!t.includes("@"));
 });
 
-Deno.test("vaga do aviso ao time: ultima hora ja passada; fora do horario = null", () => {
+Deno.test("vaga do aviso ao time: ultima hora ja passada (com minuto humano); fora do horario = null", () => {
+  const m9 = minutoDoAviso("2026-11-23-time-9");
+  const m15 = minutoDoAviso("2026-11-23-time-15");
   assertEquals(vagaDoAvisoTime(new Date("2026-11-23T11:59:00Z"), "9,15"), null); // 08h59
-  assertEquals(vagaDoAvisoTime(new Date("2026-11-23T12:00:00Z"), "9,15"), "2026-11-23-9");
-  assertEquals(vagaDoAvisoTime(new Date("2026-11-23T17:59:00Z"), "9,15"), "2026-11-23-9"); // 14h59
-  assertEquals(vagaDoAvisoTime(new Date("2026-11-23T18:00:00Z"), "15, 9"), "2026-11-23-15");
+  assertEquals(vagaDoAvisoTime(new Date("2026-11-23T12:00:00Z"), "9,15"), null); // 09h00 cravado
+  assertEquals(vagaDoAvisoTime(new Date(Date.UTC(2026, 10, 23, 12, m9)), "9,15"), "2026-11-23-9");
+  assertEquals(vagaDoAvisoTime(new Date("2026-11-23T18:00:00Z"), "9,15"), "2026-11-23-9"); // 15h00: ainda a das 9
+  assertEquals(vagaDoAvisoTime(new Date(Date.UTC(2026, 10, 23, 18, m15)), "15, 9"), "2026-11-23-15");
   assertEquals(vagaDoAvisoTime(new Date("2026-11-23T23:00:00Z"), "9,15"), null); // 20h
   assertEquals(vagaDoAvisoTime(new Date("2026-11-22T14:00:00Z"), "9,15"), null); // domingo
-  assertEquals(vagaDoAvisoTime(new Date("2026-11-23T13:00:00Z"), ""), "2026-11-23-9"); // padrao 9h
+  assertEquals(vagaDoAvisoTime(new Date("2026-11-23T13:30:00Z"), ""), "2026-11-23-9"); // padrao 9h
 });
 
 Deno.test("palavra de feito: so quando diz que fez", () => {
