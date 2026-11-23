@@ -208,3 +208,15 @@ Deno.test("palavra de feito: so quando diz que fez", () => {
   assert(!temPalavraDeFeito("ok, obrigado"));
   assert(!temPalavraDeFeito("vou agendar"));
 });
+
+Deno.test("cobranca ao time: pedido de hoje entra depois do prazo", () => {
+  const corte = new Date(AGORA.getTime() - 3 * 3600 * 1000); // 10h de hoje
+  const com = montarPendencias({ agora: AGORA, cards, agendamentos, pedidos, pedidosAntesDe: corte });
+  // Ariana pediu hoje 12h35: ainda dentro do prazo, fica de fora.
+  assert(!com.some((x) => x.clienteId === "c-ariana"));
+  const depois = montarPendencias({
+    agora: new Date("2026-11-23T19:00:00Z"), cards, agendamentos, pedidos,
+    pedidosAntesDe: new Date("2026-11-23T16:00:00Z"),
+  });
+  assert(depois.some((x) => x.clienteId === "c-ariana"));
+});

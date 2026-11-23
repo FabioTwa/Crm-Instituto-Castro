@@ -8,7 +8,7 @@
 --    CRM como no grupo e ganha um ✅. Se disser que confirmou e o nome nao bater,
 --    a Jully pede o nome e o final do telefone. Respostas dos numeros de aviso
 --    tambem valem.
---  time_pendencias_horas = horas locais separadas por virgula (padrao 9 e 15).
+--  time_pendencias_horas = horas locais separadas por virgula (padrao 10, 14 e 18; ate 23/11 era 9 e 15).
 --  time_pendencias_ultimo = trava (AAAA-MM-DD-H do ultimo envio). Nao editar.
 --
 -- Idempotente: nao sobrescreve um valor ja configurado.
@@ -17,7 +17,7 @@ insert into public.crm_ia_config (chave, valor, descricao)
 values
   ('time_pendencias_ligado', 'false',
    'Pendencias na conversa direta com o time de agendamento (SQL 54). true = liga.'),
-  ('time_pendencias_horas', '9,15',
+  ('time_pendencias_horas', '10,14,18',
    'Horas locais do aviso de pendencias ao time de agendamento (SQL 54), separadas por virgula.'),
   ('time_pendencias_ultimo', '',
    'Trava do aviso ao time (SQL 54). Preenchida pelo sistema; nao editar.')

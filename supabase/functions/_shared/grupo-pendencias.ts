@@ -41,6 +41,9 @@ export type PedidoAberto = { cliente_crm_id: string; criado_em: string };
 
 const ETAPA_AGENDAMENTO_PENDENTE = "agendamento_pendente";
 export const MAX_ITENS_POR_LISTA = 15;
+// Na cobranca ao time, o pedido entra na lista depois deste prazo (horas): da
+// tempo de o time agir pelo aviso que ja recebeu na hora do pedido.
+export const HORAS_ATE_COBRAR_PEDIDO = 3;
 
 function finalTelefone(tel: string | null): string {
   const d = String(tel || "").replace(/\D/g, "");
@@ -67,6 +70,9 @@ export function montarPendencias(args: {
   ignorar?: string[];
   // Para ler a resposta do time: o pedido de hoje tambem pode ser respondido.
   incluirPedidosDeHoje?: boolean;
+  // Cobranca ao time (2020-8098): pedido feito ate este instante ja entra,
+  // mesmo que seja de hoje (padrao: so os de antes de hoje).
+  pedidosAntesDe?: Date;
 }): Pendencia[] {
   const hoje = diaLocal(args.agora);
   const ignorar = new Set((args.ignorar || []).map((t) => String(t).replace(/\D/g, "")).filter(Boolean));
@@ -101,7 +107,9 @@ export function montarPendencias(args: {
     const c = cardPorId.get(p.cliente_crm_id);
     if (!c || jaListado.has(c.id)) continue;
     if (c.etapa !== ETAPA_AGENDAMENTO_PENDENTE) continue;
-    if (!args.incluirPedidosDeHoje && diaLocal(new Date(p.criado_em)) >= hoje) continue;
+    if (args.pedidosAntesDe) {
+      if (new Date(p.criado_em).getTime() > args.pedidosAntesDe.getTime()) continue;
+    } else if (!args.incluirPedidosDeHoje && diaLocal(new Date(p.criado_em)) >= hoje) continue;
     jaListado.add(c.id);
     out.push({
       tipo: "agendar",
