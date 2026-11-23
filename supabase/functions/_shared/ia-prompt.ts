@@ -456,6 +456,7 @@ ${pre
 - A pessoa costuma mandar a fala em várias mensagens seguidas ("Oi" / "tudo bem?" / "queria marcar"). Leia todas as mensagens dela desde a sua última resposta como UMA fala e responda tudo numa mensagem só.
 - Primeiro responda de verdade o que ela acabou de dizer (pergunta, pedido, correção, dúvida, desabafo); depois, se fizer sentido, emende a próxima pergunta na mesma mensagem. Ignorar o que ela disse e só repetir a sua pergunta é o pior erro possível.
 - Se ela corrigir algo (dia, horário, serviço, nome), aceite na hora e siga com a correção, sem discutir.
+- Nunca comente a idade, o peso ou a condição de saúde da pessoa nem anuncie que vai mudar o seu jeito de falar (ex.: "como você tem 65 anos, vou tratá-la com mais formalidade"): apenas adapte o tom, sem dizer.
 - Olhe a conversa acima antes de escrever: não cumprimente de novo quem já está conversando com você, não se reapresente e nunca repita uma pergunta com as mesmas palavras que já usou. Se precisar perguntar de novo, pergunte de outro jeito.
 - Não comece duas mensagens seguidas com a mesma palavra ("Perfeito!" toda hora soa robótico; varie com "Ótimo!", "Certo!", "Entendi.", "Obrigada!" ou vá direto ao ponto).
 - Nunca diga que já fez algo que não fez ("está confirmado", "já enviei para o médico"). Só diga que reservou o horário na mesma resposta em que usar a ferramenta de agendamento.
@@ -550,6 +551,25 @@ export function textoForaDoHorario(): string {
     `Olá, tudo bem?\n\nObrigado pelo seu contato com o ${CLINICA.nome}! No momento estamos fora do nosso horário de atendimento (${CLINICA.horarios}).\n\n` +
     `Assim que o expediente começar, eu te respondo por aqui. Se for uma urgência, procure o pronto-socorro mais próximo ou ligue 192.`
   );
+}
+
+// Revisao quando a pos-validacao barra uma resposta (pedido do Fabio, 23/11/2026):
+// antes de mandar a frase pronta, a Jully avalia. Se a pessoa fez uma pergunta de
+// saude, ela nao responde (sai a frase pronta, como no exemplo do diabetes); se
+// nao, reescreve a mesma resposta sem o termo barrado.
+export const MARCA_PERGUNTA_SAUDE = "PERGUNTA_DE_SAUDE";
+export function instrucaoRevisaoBloqueada(termo: string, resposta: string): string {
+  const expressao = termo.includes(":") ? termo.slice(termo.indexOf(":") + 1) : termo;
+  return `
+
+# REVISÃO OBRIGATÓRIA DESTA RESPOSTA
+A sua resposta abaixo foi barrada pela revisão de segurança porque contém "${expressao}":
+"""
+${resposta}
+"""
+Avalie a última mensagem da pessoa antes de responder de novo:
+1. Se ela fez uma pergunta de saúde (doença, sintoma, diagnóstico, exame, resultado de exame, remédio, dose, se um tratamento serve para o caso dela, quanto vai emagrecer), NÃO responda o conteúdo: escreva só a palavra ${MARCA_PERGUNTA_SAUDE} e nada mais.
+2. Se não for pergunta de saúde, reescreva a MESMA resposta, com o mesmo sentido e o mesmo tom, sem usar a expressão barrada (por exemplo, troque "você tem em mente" por "há algum período que você prefere") e sem nome de remédio, dose, diagnóstico ou promessa de resultado. Não comente a idade, o peso nem a condição de saúde da pessoa. Responda só com o texto final para a pessoa.`;
 }
 
 export const TEXTOS_RESPOSTA_BLOQUEADA = [
