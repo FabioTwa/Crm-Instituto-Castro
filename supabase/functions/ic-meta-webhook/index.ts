@@ -107,7 +107,7 @@ import {
 import { canalDaLinha } from "../_shared/whatsapp-envio.ts";
 import { numerosAviso } from "../_shared/aviso-agendamento.ts";
 import {
-  diaLocal, horaDoAvisoGrupo, interpretarRespostaGrupo, montarPendencias, numerosMarcados, type Pendencia, pausasHumanas,
+  diaLocal, HORAS_ATE_COBRAR_PEDIDO, horaDoAvisoGrupo, interpretarRespostaGrupo, montarPendencias, numerosMarcados, type Pendencia, pausasHumanas,
   temPalavraDeFeito, TEXTO_NAO_ACHEI, textoAvulsoGrupo, textoPendenciasGrupo, vagaDoAvisoTime,
 } from "../_shared/grupo-pendencias.ts";
 import { decidirGrupo, ehEventoGrupoZapi, extrairMensagemGrupo, type GrupoLido } from "../_shared/grupo-leitura.ts";
@@ -1979,7 +1979,7 @@ async function configGrupoPendencias(sb: Supa): Promise<Record<string, string> |
 }
 
 async function lerPendenciasGrupo(
-  sb: Supa, cfg: Record<string, string>, agora: Date, incluirPedidosDeHoje: boolean,
+  sb: Supa, cfg: Record<string, string>, agora: Date, incluirPedidosDeHoje: boolean, pedidosAntesDe?: Date,
 ): Promise<{ ok: true; pendencias: Pendencia[] } | { ok: false; erro: string }> {
   const ate = new Date(agora.getTime() + 14 * 24 * 3600 * 1000).toISOString();
   const [ag, hf] = await Promise.all([
@@ -2013,6 +2013,7 @@ async function lerPendenciasGrupo(
       pedidos,
       ignorar,
       incluirPedidosDeHoje,
+      pedidosAntesDe,
     }),
   };
 }
@@ -2145,7 +2146,9 @@ async function avisoTime(sb: Supa): Promise<void> {
     await logGrupo(sb, "time_sem_numero", { vaga });
     return;
   }
-  const lidas = await lerPendenciasGrupo(sb, cfg, agora, false);
+  const lidas = await lerPendenciasGrupo(
+    sb, cfg, agora, false, new Date(agora.getTime() - HORAS_ATE_COBRAR_PEDIDO * 3600 * 1000),
+  );
   if (!lidas.ok) return await devolver("pendencias ilegiveis: " + lidas.erro);
   const texto = textoPendenciasGrupo(lidas.pendencias, agora, [], "time");
   if (!texto) {
