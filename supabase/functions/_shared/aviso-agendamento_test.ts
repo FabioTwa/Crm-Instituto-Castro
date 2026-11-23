@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
-import { dataHoraLocal, numerosAviso, telefoneLegivel, textoAvisoAgendamento, textoAvisoCancelamento, textoAvisoCentral } from "./aviso-agendamento.ts";
+import { dataHoraLocal, deveAvisarPedido, numerosAviso, telefoneLegivel, textoAvisoAgendamento, textoAvisoCancelamento, textoAvisoCentral } from "./aviso-agendamento.ts";
 
 Deno.test("numerosAviso: aceita lista, normaliza e tira repetidos e invalidos", () => {
   assertEquals(numerosAviso(""), []);
@@ -122,4 +122,14 @@ Deno.test("time de agendamento: destinos = avisos + call center, sem repetir", a
 Deno.test("numero do call center fixo: (11) 2020-8098 fica com 12 digitos e legivel", () => {
   assertEquals(numerosAviso("1120208098"), ["551120208098"]);
   assertEquals(telefoneLegivel("551120208098"), "(11) 2020-8098");
+});
+
+Deno.test("deveAvisarPedido: nao repete na mesma resposta nem dentro da janela", () => {
+  const agora = Date.parse("2026-11-23T18:41:13Z");
+  assertEquals(deveAvisarPedido({ jaAvisouNestaResposta: false, ultimoAvisoMs: null, agoraMs: agora }), true);
+  assertEquals(deveAvisarPedido({ jaAvisouNestaResposta: true, ultimoAvisoMs: null, agoraMs: agora }), false);
+  assertEquals(deveAvisarPedido({ jaAvisouNestaResposta: false, ultimoAvisoMs: agora - 1000, agoraMs: agora }), false);
+  assertEquals(deveAvisarPedido({ jaAvisouNestaResposta: false, ultimoAvisoMs: agora - 29 * 60000, agoraMs: agora }), false);
+  assertEquals(deveAvisarPedido({ jaAvisouNestaResposta: false, ultimoAvisoMs: agora - 30 * 60000, agoraMs: agora }), true);
+  assertEquals(deveAvisarPedido({ jaAvisouNestaResposta: false, ultimoAvisoMs: agora - 5 * 60000, agoraMs: agora, janelaMin: 0 }), true);
 });

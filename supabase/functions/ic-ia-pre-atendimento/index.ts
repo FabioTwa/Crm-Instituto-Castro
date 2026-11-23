@@ -114,6 +114,7 @@ import {
   textoAvisoAgendamento,
   destinosPedidoAgendamento,
   textoPedidoAgendamento,
+  deveAvisarPedido,
   textoAvisoCancelamento,
   textoAvisoCentral,
 } from "../_shared/aviso-agendamento.ts";
@@ -1103,9 +1104,20 @@ async function rodarNaVez(
       // Modo time de agendamento: a Jully nao marca horario, passa o pedido
       // para o time. A resposta ao lead e fixa (sem prometer horario nem falar
       // de convenio). Fica no CRM (handoff) mesmo se o WhatsApp falhar.
-      const avisados = await avisarPedidoAgendamento(p, cfg, pre, t.input || {});
-      await p.log("tools", "solicitar_agendamento", { detalhe: { avisados } });
-      await p.handoff("agendamento_confirmado", "Jully passou para o time de agendamento: aguardando agendamento");
+      // Um aviso por pedido: se a IA chamar a tool de novo na mesma resposta, ou
+      // se o time ja foi avisado deste card ha pouco, nao manda outra vez.
+      const avisar = deveAvisarPedido({
+        jaAvisouNestaResposta: marcadores.agendamento_solicitado === true,
+        ultimoAvisoMs: marcadores.agendamento_solicitado === true ? null : await ultimoPedidoAvisado(sb, body.cliente_crm_id),
+        agoraMs: Date.now(),
+      });
+      if (avisar) {
+        const avisados = await avisarPedidoAgendamento(p, cfg, pre, t.input || {});
+        await p.log("tools", "solicitar_agendamento", { detalhe: { avisados } });
+        await p.handoff("agendamento_confirmado", "Jully passou para o time de agendamento: aguardando agendamento");
+      } else {
+        await p.log("tools", "solicitar_agendamento_repetido");
+      }
       marcadores.agendamento_solicitado = true;
       textoResposta = textoAgendamentoEncaminhado(pre.contato);
     } else if (t.name === TOOL_CANCELAR_AGENDAMENTO) {
@@ -1374,6 +1386,24 @@ async function avisarEquipeAgendamento(p: Pipeline, cfg: Record<string, string>,
 // Modo time de agendamento: manda o pedido (dados + resumo + "Aguardando
 // agendamento") para os numeros do aviso e para o call center do lead. Devolve
 // quantos numeros receberam. Falha nunca derruba a conversa.
+// Quando o time foi avisado pela ultima vez do pedido de agendamento deste card
+// (log da tool com pelo menos um numero avisado). null = nunca ou erro de leitura.
+async function ultimoPedidoAvisado(sb: SupabaseClient, clienteId: string): Promise<number | null> {
+  const { data, error } = await sb
+    .from("ia_decisoes_log")
+    .select("criado_em, detalhe")
+    .eq("cliente_crm_id", clienteId)
+    .eq("etapa_pipeline", "tools")
+    .eq("decisao", "solicitar_agendamento")
+    .order("criado_em", { ascending: false })
+    .limit(5);
+  if (error || !data) return null;
+  for (const r of data as any[]) {
+    if (Number(r.detalhe?.avisados || 0) > 0) return Date.parse(r.criado_em);
+  }
+  return null;
+}
+
 async function avisarPedidoAgendamento(p: Pipeline, cfg: Record<string, string>, pre: PreAgendamento, input: any): Promise<number> {
   const destinos = destinosPedidoAgendamento(numerosAviso(cfg.aviso_agendamento_whatsapp), pre.numero);
   const appUrl = (Deno.env.get("IC_APP_URL") || "").replace(/\/+$/, "");

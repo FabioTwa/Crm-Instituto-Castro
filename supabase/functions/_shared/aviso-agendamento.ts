@@ -182,3 +182,22 @@ export function textoPedidoAgendamento(a: {
   linhas.push("", "⏳ *Aguardando agendamento*");
   return linhas.join("\n");
 }
+
+// Janela em que um novo pedido de agendamento do MESMO card nao vai de novo ao
+// time (23/11/2026: a IA chamou solicitar_agendamento duas vezes na mesma
+// resposta e os numeros de aviso receberam a mensagem em dobro).
+export const MINUTOS_SEM_REPETIR_PEDIDO = 30;
+
+// Decide se o pedido de agendamento vai ao time agora. Nao vai se ja foi nesta
+// mesma resposta, nem se o ultimo aviso do card foi ha menos de `janelaMin`.
+export function deveAvisarPedido(a: {
+  jaAvisouNestaResposta: boolean;
+  ultimoAvisoMs: number | null;
+  agoraMs: number;
+  janelaMin?: number;
+}): boolean {
+  if (a.jaAvisouNestaResposta) return false;
+  if (a.ultimoAvisoMs === null || !Number.isFinite(a.ultimoAvisoMs)) return true;
+  const janela = (a.janelaMin ?? MINUTOS_SEM_REPETIR_PEDIDO) * 60000;
+  return a.agoraMs - a.ultimoAvisoMs >= janela;
+}
