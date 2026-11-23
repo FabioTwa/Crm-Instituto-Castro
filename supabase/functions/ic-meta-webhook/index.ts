@@ -107,7 +107,7 @@ import { canalDaLinha } from "../_shared/whatsapp-envio.ts";
 import { numerosAviso } from "../_shared/aviso-agendamento.ts";
 import {
   diaLocal, horaDoAvisoGrupo, interpretarRespostaGrupo, montarPendencias, numerosMarcados, type Pendencia,
-  textoMarcacoes, textoPendenciasGrupo,
+  textoAvulsoGrupo, textoPendenciasGrupo,
 } from "../_shared/grupo-pendencias.ts";
 import { decidirGrupo, ehEventoGrupoZapi, extrairMensagemGrupo, type GrupoLido } from "../_shared/grupo-leitura.ts";
 
@@ -2079,7 +2079,8 @@ async function avisoDiarioGrupo(sb: Supa): Promise<void> {
 }
 
 // Recado avulso no grupo (grupo_mensagem_avulsa): sai uma vez, com as mesmas
-// marcacoes, das 8h as 20h, e a chave volta a ficar vazia. So quem tem acesso
+// marcacoes no final ("so_marcacoes" = so as marcacoes), das 8h as 20h, e a
+// chave volta a ficar vazia. So quem tem acesso
 // ao banco (service role / SQL Editor) escreve essa chave.
 async function mensagemAvulsaGrupo(sb: Supa, cfg: Record<string, string>, agora: Date, marcar: string[]): Promise<void> {
   const avulsa = String(cfg.grupo_mensagem_avulsa || "").trim();
@@ -2089,8 +2090,8 @@ async function mensagemAvulsaGrupo(sb: Supa, cfg: Record<string, string>, agora:
   if (error || !trava || !(trava as any[]).length) return; // outra rodada pegou
   const grupo = await grupoDasPendencias(sb);
   const canal = await canalZapiDoGrupo(sb);
-  const texto = (marcar.length ? textoMarcacoes(marcar) + " " : "") + avulsa;
-  const r = grupo && canal
+  const texto = textoAvulsoGrupo(avulsa, marcar);
+  const r = grupo && canal && texto
     ? await enviarTextoZapi({ canal, para: grupo, texto, prefixoLog: LOGG, delayTyping: 3, mencionados: marcar })
     : null;
   if (!r || !r.ok) {

@@ -1,7 +1,7 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
   diaLocal, horaDoAvisoGrupo, interpretarRespostaGrupo, MAX_ITENS_POR_LISTA, montarPendencias, numerosMarcados,
-  type Pendencia, textoMarcacoes, textoPendenciasGrupo,
+  type Pendencia, textoAvulsoGrupo, textoMarcacoes, textoPendenciasGrupo,
 } from "./grupo-pendencias.ts";
 import { corpoTextoZapi, destinoZapi } from "./zapi.ts";
 
@@ -147,9 +147,9 @@ Deno.test("marcacoes: aceita DDD+numero, com ou sem 55, sem repetir", () => {
 
 Deno.test("texto do grupo: com marcacao, o @ entra no texto", () => {
   const t = textoPendenciasGrupo(lista(), AGORA, ["5511954580790", "5511963201355"])!;
-  assert(t.includes("@5511954580790 @5511963201355, passando para lembrar o que está aguardando o time:"));
+  assert(t.endsWith("Obrigada!\n\n@5511954580790 @5511963201355"));
   const sem = textoPendenciasGrupo(lista(), AGORA)!;
-  assert(sem.includes("\nPassando para lembrar"));
+  assert(sem.endsWith("Obrigada!"));
 });
 
 Deno.test("corpo Z-API: mencionados vai em mentioned; sem mencao nao manda o campo", () => {
@@ -157,4 +157,11 @@ Deno.test("corpo Z-API: mencionados vai em mentioned; sem mencao nao manda o cam
     phone: "120363430917528427-group", message: "@5511954580790 oi", mentioned: ["5511954580790"],
   });
   assertEquals(corpoTextoZapi("5511999990000", "Oi", 3, []), { phone: "5511999990000", message: "Oi", delayTyping: 3 });
+});
+
+Deno.test("recado avulso: so as marcacoes, ou recado com as marcacoes no final", () => {
+  const m = ["5511954580790", "5511963201355"];
+  assertEquals(textoAvulsoGrupo("so_marcacoes", m), "@5511954580790 @5511963201355");
+  assertEquals(textoAvulsoGrupo("Bom dia!", m), "Bom dia!\n\n@5511954580790 @5511963201355");
+  assertEquals(textoAvulsoGrupo("so_marcacoes", []), null);
 });
