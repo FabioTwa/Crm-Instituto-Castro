@@ -288,7 +288,26 @@ export function horaDoAvisoGrupo(agora: Date, horaInicio: number): boolean {
   const p = partesNoFuso(agora);
   if (p.diaSemana === 0) return false;
   const h = Number.isFinite(horaInicio) ? horaInicio : 9;
-  return p.hora >= h && p.hora < 20;
+  if (p.hora >= 20 || p.hora < h) return false;
+  // Nao sai cravado no minuto 0, como robo: cada dia tem seu minuto (3 a 27).
+  return p.hora > h || p.minuto >= minutoDoAviso(`${diaLocal(agora)}-grupo`);
+}
+
+// Minuto "humano" do envio agendado: varia por dia/horario (3 a 27), estavel
+// dentro do mesmo dia para a trava funcionar.
+export function minutoDoAviso(chave: string): number {
+  let h = 0;
+  for (const c of chave) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return 3 + (h % 25);
+}
+
+// Pausas "humanas" (ms) antes de agir sobre a resposta do time: ver a mensagem
+// (15-45 s), depois reagir ou responder (3-8 s). aleatorio injetavel para teste.
+export function pausasHumanas(aleatorio: () => number = Math.random): { ver: number; agir: number } {
+  return {
+    ver: Math.round(15000 + aleatorio() * 30000),
+    agir: Math.round(3000 + aleatorio() * 5000),
+  };
 }
 
 // A mensagem diz que algo foi feito (confirmada, agendada...)? Usado para avisar
@@ -312,7 +331,9 @@ export function vagaDoAvisoTime(agora: Date, horasTexto: string | null | undefin
     .map((h) => parseInt(h, 10))
     .filter((h) => Number.isFinite(h) && h >= 0 && h < 20)
     .sort((a, b) => a - b);
-  const passadas = horas.filter((h) => h <= p.hora);
+  const dia = diaLocal(agora);
+  // Hora ja passada; a da hora atual so conta depois do minuto "humano" dela.
+  const passadas = horas.filter((h) => h < p.hora || (h === p.hora && p.minuto >= minutoDoAviso(`${dia}-time-${h}`)));
   if (!passadas.length) return null;
-  return `${diaLocal(agora)}-${passadas[passadas.length - 1]}`;
+  return `${dia}-${passadas[passadas.length - 1]}`;
 }

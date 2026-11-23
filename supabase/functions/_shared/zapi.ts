@@ -598,7 +598,7 @@ export async function lerMensagemZapi(canal: CanalZapi, telefone: string, messag
     const r = await fetch(urlLerMensagemZapi(canal), {
       method: "POST",
       headers: { "Content-Type": "application/json", "Client-Token": canal.clientToken },
-      body: JSON.stringify({ phone: soDigitos(telefone), messageId }),
+      body: JSON.stringify({ phone: destinoZapi(telefone), messageId }),
       signal: ctl.signal,
     });
     const data: any = await r.json().catch(() => ({}));
