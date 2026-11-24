@@ -92,6 +92,7 @@ import { canonicoTelefone, soDigitos, telefonePlausivel, variacoesTelefone } fro
 import { canalDaLinha, canalDoVendedor, type CanalEnvio, enviarTextoCanal, provedorDaLinha } from "../_shared/whatsapp-envio.ts";
 import { type CanalZapi, type ChatZapi, chatsZapi, lerMensagemZapi, mensagensChatZapi, msLeitura, segundosDigitando, statusZapi } from "../_shared/zapi.ts";
 import { detectarHandoff, handoffCalaIA, RESPOSTA_URGENCIA } from "../_shared/handoff-regras.ts";
+import { contextoReclamacao, detectarReclamacao, HORAS_ENTRE_ALERTAS } from "../_shared/reclamacao.ts";
 import { respostaProibida } from "../_shared/pos-validacao.ts";
 import { primeiroNomeDe } from "../_shared/texto.ts";
 import {
@@ -924,6 +925,12 @@ async function rodarNaVez(
     }
   }
 
+  // 5b) reclamacao do paciente -> alerta no grupo e ao time (SQL 55). Nao muda a
+  // resposta ao paciente; so registra para o varredor da ic-meta-webhook enviar.
+  await registrarReclamacao(sb, p, cfg, body.cliente_crm_id, textoLead).catch((e) =>
+    console.error(LOG, "alerta de reclamacao falhou:", e instanceof Error ? e.message : String(e))
+  );
+
   // 6) handoff_regras (codigo, antes da IA)
   const hd = detectarHandoff(textoLead);
   const fixo = hd ? textoFixoRegra(hd.motivo) : null;
@@ -1552,6 +1559,57 @@ async function enviarTesteAviso(sb: SupabaseClient): Promise<Record<string, unkn
 
 // Pedido de agendamento passado ao time nos ultimos 30 dias (marcador na
 // resposta da Jully). Enquanto houver, a Jully nao conduz a conversa (6b).
+// Reclamacao clara do paciente (falta de retorno ou insatisfacao): grava o
+// alerta com o que aconteceu, montado so com dados do CRM. Um por paciente a cada
+// HORAS_ENTRE_ALERTAS. Quem envia ao grupo e ao time e a ic-meta-webhook.
+async function registrarReclamacao(
+  sb: SupabaseClient, p: Pipeline, cfg: Record<string, string>, clienteId: string, texto: string,
+): Promise<void> {
+  if (String(cfg.alerta_reclamacao_ligado ?? "true").toLowerCase() === "false") return;
+  const rec = detectarReclamacao(texto);
+  if (!rec) return;
+  const desde = new Date(Date.now() - HORAS_ENTRE_ALERTAS * 3600 * 1000).toISOString();
+  const { data: recente, error: errRecente } = await sb
+    .from("ic_alertas_reclamacao").select("id").eq("cliente_crm_id", clienteId).gte("criado_em", desde).limit(1);
+  if (errRecente) {
+    await p.log("reclamacao", "alerta_nao_gravado", { motivo: errRecente.message });
+    return;
+  }
+  if (recente && recente.length) {
+    await p.log("reclamacao", "alerta_repetido", { motivo: rec.termo });
+    return;
+  }
+  const { data: pedido } = await sb
+    .from("ia_handoffs").select("criado_em").eq("cliente_crm_id", clienteId).eq("motivo", "agendamento_confirmado")
+    .order("criado_em", { ascending: false }).limit(1);
+  const { data: agend } = await sb
+    .from("agendamentos").select("inicio, status").eq("cliente_crm_id", clienteId)
+    .not("status", "eq", "cancelado").gte("inicio", new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString())
+    .order("inicio", { ascending: true }).limit(1);
+  const pedidoEm = pedido && pedido.length ? String((pedido[0] as any).criado_em) : null;
+  const a = agend && agend.length ? (agend[0] as any) : null;
+  const callcenter = numerosAviso(cfg.callcenter_whatsapp)[0] ?? null;
+  const contexto = contextoReclamacao({
+    pedidoEm,
+    agendamento: a ? { inicio: String(a.inicio), status: String(a.status) } : null,
+    callcenter,
+  });
+  const telefone = p.para || String(p.card?.telefone || "");
+  const { error } = await sb.from("ic_alertas_reclamacao").insert({
+    cliente_crm_id: clienteId,
+    nome: String(p.card?.nome || "").trim() || null,
+    telefone,
+    mensagem: texto.slice(0, 1000),
+    motivo: rec.motivo,
+    termo: rec.termo,
+    contexto,
+    tem_pedido: !!pedidoEm,
+  });
+  await p.log("reclamacao", error ? "alerta_nao_gravado" : "alerta_registrado", {
+    motivo: error ? error.message : rec.termo,
+  });
+}
+
 async function pedidoAgendamentoRecente(sb: SupabaseClient, clienteId: string): Promise<boolean> {
   const { data, error } = await sb
     .from("crm_conversas")

@@ -110,6 +110,7 @@ import {
   diaLocal, HORAS_ATE_COBRAR_PEDIDO, horaDoAvisoGrupo, interpretarRespostaGrupo, montarPendencias, numerosMarcados, type Pendencia, pausasHumanas,
   temPalavraDeFeito, TEXTO_NAO_ACHEI, textoAvulsoGrupo, textoPendenciasGrupo, vagaDoAvisoTime,
 } from "../_shared/grupo-pendencias.ts";
+import { textoAlertaReclamacao } from "../_shared/reclamacao.ts";
 import { decidirGrupo, ehEventoGrupoZapi, extrairMensagemGrupo, type GrupoLido } from "../_shared/grupo-leitura.ts";
 
 type Provedor = "meta" | "zapi";
@@ -1963,7 +1964,7 @@ const CHAVES_GRUPO_PEND = [
   "grupo_pendencias_ligado", "grupo_pendencias_hora", "grupo_pendencias_ultimo",
   "grupo_pendencias_ignorar", "grupo_pendencias_marcar", "grupo_mensagem_avulsa",
   "time_pendencias_ligado", "time_pendencias_horas", "time_pendencias_ultimo",
-  "aviso_agendamento_whatsapp", "callcenter_whatsapp",
+  "aviso_agendamento_whatsapp", "callcenter_whatsapp", "alerta_reclamacao_ligado",
 ];
 
 // Leitura sempre fresca (sem o cache de 60 s): a trava do dia depende dela.
@@ -2171,7 +2172,62 @@ async function avisoTime(sb: Supa): Promise<void> {
   console.log(LOGG, "aviso ao time enviado:", lidas.pendencias.length, "pendencia(s)");
 }
 
+// Reclamacao de paciente (SQL 55, pedido do Fabio em 24/11/2026): a
+// ic-ia-pre-atendimento grava o alerta; aqui ele vai ao grupo (marcando os
+// responsaveis) e ao numero do time de agendamento. Seg-sab, das 8h as 20h.
+// Cada destino e marcado em separado: se um falhar, so ele e tentado de novo
+// (ate 5 rodadas).
+async function alertasReclamacao(sb: Supa): Promise<void> {
+  const cfg = await configGrupoPendencias(sb);
+  if (!cfg || String(cfg.alerta_reclamacao_ligado ?? "true").toLowerCase() === "false") return;
+  const agora = new Date();
+  if (!horaDoAvisoGrupo(agora, 8)) return;
+  const { data: fila, error } = await sb.from("ic_alertas_reclamacao")
+    .select("*").or("enviado_grupo_em.is.null,enviado_time_em.is.null").lt("tentativas", 5)
+    .order("criado_em", { ascending: true }).limit(3);
+  if (error || !fila || !fila.length) return;
+  const marcar = numerosMarcados(cfg.grupo_pendencias_marcar);
+  const destinosTime = numerosAviso(cfg.callcenter_whatsapp);
+  const grupo = await grupoDasPendencias(sb);
+  const canal = await canalZapiDoGrupo(sb);
+  if (!canal) return;
+  for (const al of fila as any[]) {
+    // Trava: so uma rodada envia cada alerta.
+    const { data: trava } = await sb.from("ic_alertas_reclamacao")
+      .update({ tentativas: Number(al.tentativas) + 1 }).eq("id", al.id).eq("tentativas", al.tentativas).select("id");
+    if (!trava || !(trava as any[]).length) continue;
+    const base = {
+      nome: String(al.nome || ""), telefone: String(al.telefone || ""), mensagem: String(al.mensagem || ""),
+      motivo: al.motivo, contexto: String(al.contexto || ""), recebidaEm: String(al.recebida_em),
+      temPedido: !!al.tem_pedido,
+    } as const;
+    const marcas: Record<string, string> = {};
+    if (!al.enviado_grupo_em && grupo) {
+      const texto = textoAlertaReclamacao({ ...base, para: "grupo", marcar });
+      const r = await enviarTextoZapi({ canal, para: grupo, texto, prefixoLog: LOGG, delayTyping: segundosDigitando(texto), mencionados: marcar });
+      if (r.ok) marcas.enviado_grupo_em = new Date().toISOString();
+    }
+    if (!al.enviado_time_em) {
+      if (!destinosTime.length) marcas.enviado_time_em = new Date().toISOString(); // sem numero: nada a enviar
+      else {
+        const texto = textoAlertaReclamacao({ ...base, para: "time" });
+        let ok = 0;
+        for (const d of destinosTime) {
+          const r = await enviarTextoZapi({ canal, para: d, texto, prefixoLog: LOGG, delayTyping: segundosDigitando(texto) });
+          if (r.ok) ok++;
+        }
+        if (ok) marcas.enviado_time_em = new Date().toISOString();
+      }
+    }
+    if (Object.keys(marcas).length) await sb.from("ic_alertas_reclamacao").update(marcas).eq("id", al.id);
+    await logGrupo(sb, "alerta_reclamacao", {
+      alerta: al.id, grupo: !!(al.enviado_grupo_em || marcas.enviado_grupo_em), time: !!(al.enviado_time_em || marcas.enviado_time_em),
+    }, al.cliente_crm_id);
+  }
+}
+
 async function rodadaPendencias(sb: Supa): Promise<void> {
+  await alertasReclamacao(sb).catch((e) => console.error(LOGG, "erro no alerta de reclamacao:", e));
   await avisoDiarioGrupo(sb).catch((e) => console.error(LOGG, "erro no aviso do dia:", e));
   await avisoTime(sb).catch((e) => console.error(LOGG, "erro no aviso ao time:", e));
 }
