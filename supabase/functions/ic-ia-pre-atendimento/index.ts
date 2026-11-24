@@ -1511,6 +1511,50 @@ async function responderPendentes(sb: SupabaseClient): Promise<Record<string, un
   return { decisao: "lista_vazia" };
 }
 
+// Recado aprovado pelo Fabio para um paciente (24/11/2026): quem tem acesso ao
+// banco grava crm_ia_config.recado_paciente = "<id do card>|<texto>" (paragrafos
+// separados por linha em branco viram baloes). Na proxima rodada do varredor a
+// Jully envia, pelo numero da clinica, com "digitando". A chave e limpa ANTES do
+// envio: o recado nunca sai duas vezes.
+async function enviarRecadoPaciente(sb: SupabaseClient): Promise<Record<string, unknown> | null> {
+  const { data: linha } = await sb.from("crm_ia_config").select("valor").eq("chave", "recado_paciente").maybeSingle();
+  const valor = String((linha as any)?.valor || "").trim();
+  if (!valor) return null;
+  const { data: trava } = await sb.from("crm_ia_config").update({ valor: "" })
+    .eq("chave", "recado_paciente").eq("valor", (linha as any).valor).select("chave");
+  if (!trava || !(trava as any[]).length) return null; // outra rodada pegou
+  const corte = valor.indexOf("|");
+  const clienteId = corte > 0 ? valor.slice(0, corte).trim() : "";
+  const texto = corte > 0 ? valor.slice(corte + 1).trim() : "";
+  if (!/^[0-9a-f-]{36}$/i.test(clienteId) || !texto) return { ok: false, erro: "recado_invalido" };
+  const cfg = await iaConfig(sb);
+  const { data: card } = await sb
+    .from("clientes_crm").select("id, nome, numero_whatsapp, telefone, vendedor_id, funil_id, deleted_at")
+    .eq("id", clienteId).maybeSingle();
+  if (!card || (card as any).deleted_at) return { ok: false, erro: "card_nao_encontrado" };
+  const para = canonicoTelefone(String((card as any).numero_whatsapp || (card as any).telefone || ""));
+  if (!telefonePlausivel(para)) return { ok: false, erro: "telefone_invalido" };
+  const p = new Pipeline(sb, { cliente_crm_id: clienteId, conversa_id: null, vendedor_id: (card as any).vendedor_id, funil_id: (card as any).funil_id });
+  p.modelo = cfg.modelo || "claude-sonnet-5-5";
+  p.cfg = cfg;
+  p.card = card;
+  p.para = para;
+  p.envioLigado = await icFlag(sb, "envio_whatsapp_cloud_api");
+  if ((card as any).vendedor_id) {
+    const res = await canalDoVendedor(sb, String((card as any).vendedor_id));
+    if (res.ok) p.canal = res.canal;
+  }
+  const partes = texto.split(/\n\s*\n/).map((x) => x.trim()).filter(Boolean);
+  let enviados = 0;
+  await p.comVez(async () => {
+    for (const parte of partes) {
+      const env = await p.enviar(parte, "recado_paciente", "enviado", { origem: "recado_aprovado" });
+      if (env.enviado) enviados++;
+    }
+  });
+  return { ok: enviados === partes.length, card: clienteId, enviados, partes: partes.length };
+}
+
 async function upsertConfig(sb: SupabaseClient, chave: string, valor: string): Promise<void> {
   const { error } = await sb.from("crm_ia_config").upsert({ chave, valor }, { onConflict: "chave" });
   if (error) console.warn(LOG, "crm_ia_config", chave, "falhou:", error.message);
@@ -2505,6 +2549,11 @@ Deno.serve(async (req: Request) => {
         console.error(LOG, "teste de aviso falhou:", e instanceof Error ? e.message : e);
         return { ok: false, erro: "excecao" };
       });
+      // Recado aprovado para um paciente (crm_ia_config.recado_paciente).
+      const recado = await enviarRecadoPaciente(sb).catch((e) => {
+        console.error(LOG, "recado ao paciente falhou:", e instanceof Error ? e.message : e);
+        return { ok: false, erro: "excecao" };
+      });
       const r = await encerrarInativas(sb);
       // Lembrete de confirmacao (temporario; desliga com confirmacao_antes_horas vazio).
       const confirmacoes = await lembrarConfirmacoes(sb).catch((e) => {
@@ -2516,7 +2565,7 @@ Deno.serve(async (req: Request) => {
         console.error(LOG, "retomada pos-queda falhou:", e instanceof Error ? e.message : e);
         return { ok: false, erro: "excecao" };
       });
-      return json({ ...r, confirmacoes, retomada_queda, teste_aviso, pendentes });
+      return json({ ...r, confirmacoes, retomada_queda, teste_aviso, pendentes, recado });
     }
 
     const clienteId = String(body.cliente_crm_id || "").trim();
