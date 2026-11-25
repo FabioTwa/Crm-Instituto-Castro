@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
-import { dataHoraLocal, deveAvisarPedido, numerosAviso, telefoneLegivel, textoAvisoAgendamento, textoAvisoCancelamento, textoAvisoCentral } from "./aviso-agendamento.ts";
+import { dataHoraLocal, destinosDoTime, deveAvisarPedido, numerosAviso, telefoneLegivel, textoAvisoAgendamento, textoAvisoCancelamento, textoAvisoCentral } from "./aviso-agendamento.ts";
 
 Deno.test("numerosAviso: aceita lista, normaliza e tira repetidos e invalidos", () => {
   assertEquals(numerosAviso(""), []);
@@ -132,4 +132,12 @@ Deno.test("deveAvisarPedido: nao repete na mesma resposta nem dentro da janela",
   assertEquals(deveAvisarPedido({ jaAvisouNestaResposta: false, ultimoAvisoMs: agora - 29 * 60000, agoraMs: agora }), false);
   assertEquals(deveAvisarPedido({ jaAvisouNestaResposta: false, ultimoAvisoMs: agora - 30 * 60000, agoraMs: agora }), true);
   assertEquals(deveAvisarPedido({ jaAvisouNestaResposta: false, ultimoAvisoMs: agora - 5 * 60000, agoraMs: agora, janelaMin: 0 }), true);
+});
+
+Deno.test("destinosDoTime: numero do time mais copias, sem repetir", () => {
+  assertEquals(destinosDoTime("551120208098", ""), ["551120208098"]);
+  assertEquals(destinosDoTime("551120208098", "5511916863913"), ["551120208098", "5511916863913"]);
+  assertEquals(destinosDoTime("551120208098", "551120208098, 5511916863913"), ["551120208098", "5511916863913"]);
+  assertEquals(destinosDoTime("", "5511916863913"), ["5511916863913"]);
+  assertEquals(destinosDoTime(null, null), []);
 });

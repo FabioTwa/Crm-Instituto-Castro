@@ -16,6 +16,16 @@ export function numerosAviso(valor: string | null | undefined): string[] {
   return out;
 }
 
+// Quem recebe o que vai ao time de agendamento (lembretes de pendencias e
+// alertas de reclamacao): o numero do time (callcenter_whatsapp) mais as copias
+// (time_copia_whatsapp, pedido do Fabio em 25/11/2026). As copias nao entram na
+// distribuicao de leads: o paciente continua ouvindo so o numero do time.
+export function destinosDoTime(callcenter: string | null | undefined, copias: string | null | undefined): string[] {
+  const out = numerosAviso(callcenter);
+  for (const n of numerosAviso(copias)) if (!out.includes(n)) out.push(n);
+  return out;
+}
+
 const DIAS = ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"];
 
 export function dataHoraLocal(iso: string, tz: string = TZ_PADRAO): string {

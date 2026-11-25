@@ -105,7 +105,7 @@ import {
   segundosDigitando, tokenWebhookZapiValido,
 } from "../_shared/zapi.ts";
 import { canalDaLinha } from "../_shared/whatsapp-envio.ts";
-import { numerosAviso } from "../_shared/aviso-agendamento.ts";
+import { destinosDoTime, numerosAviso } from "../_shared/aviso-agendamento.ts";
 import {
   diaLocal, HORAS_ATE_COBRAR_PEDIDO, horaDoAvisoGrupo, interpretarRespostaGrupo, montarPendencias, numerosMarcados, type Pendencia, pausasHumanas,
   temPalavraDeFeito, TEXTO_NAO_ACHEI, textoAvulsoGrupo, textoPendenciasGrupo, vagaDoAvisoTime,
@@ -790,7 +790,7 @@ async function carregarVendedores(supabase: Supa): Promise<string | null> {
   // Quem recebe o aviso de agendamento da IA (SQL 37) e o call center do
   // pre-agendamento (SQL 51) tambem sao da casa: o eco do aviso nao pode virar
   // card de lead.
-  const { data: avisos } = await supabase.from("crm_ia_config").select("valor").in("chave", ["aviso_agendamento_whatsapp", "callcenter_whatsapp"]);
+  const { data: avisos } = await supabase.from("crm_ia_config").select("valor").in("chave", ["aviso_agendamento_whatsapp", "callcenter_whatsapp", "time_copia_whatsapp"]);
   for (const linha of (avisos as any[]) || []) {
     for (const parte of String(linha?.valor || "").split(/[,;\n]/)) {
       const c = canonicoTelefone(parte.trim());
@@ -1965,6 +1965,7 @@ const CHAVES_GRUPO_PEND = [
   "grupo_pendencias_ignorar", "grupo_pendencias_marcar", "grupo_mensagem_avulsa",
   "time_pendencias_ligado", "time_pendencias_horas", "time_pendencias_ultimo",
   "aviso_agendamento_whatsapp", "callcenter_whatsapp", "alerta_reclamacao_ligado",
+  "time_copia_whatsapp",
 ];
 
 // Leitura sempre fresca (sem o cache de 60 s): a trava do dia depende dela.
@@ -2003,6 +2004,7 @@ async function lerPendenciasGrupo(
   const ignorar = [
     ...numerosAviso(cfg.aviso_agendamento_whatsapp),
     ...numerosAviso(cfg.callcenter_whatsapp),
+    ...numerosAviso(cfg.time_copia_whatsapp),
     ...numerosAviso(cfg.grupo_pendencias_ignorar),
   ];
   return {
@@ -2142,7 +2144,7 @@ async function avisoTime(sb: Supa): Promise<void> {
     console.error(LOGG, "aviso ao time adiado:", motivo);
   };
 
-  const destinos = numerosAviso(cfg.callcenter_whatsapp);
+  const destinos = destinosDoTime(cfg.callcenter_whatsapp, cfg.time_copia_whatsapp);
   if (!destinos.length) {
     await logGrupo(sb, "time_sem_numero", { vaga });
     return;
@@ -2187,7 +2189,7 @@ async function alertasReclamacao(sb: Supa): Promise<void> {
     .order("criado_em", { ascending: true }).limit(3);
   if (error || !fila || !fila.length) return;
   const marcar = numerosMarcados(cfg.grupo_pendencias_marcar);
-  const destinosTime = numerosAviso(cfg.callcenter_whatsapp);
+  const destinosTime = destinosDoTime(cfg.callcenter_whatsapp, cfg.time_copia_whatsapp);
   const grupo = await grupoDasPendencias(sb);
   const canal = await canalZapiDoGrupo(sb);
   if (!canal) return;
@@ -2333,7 +2335,7 @@ async function processarRespostaGrupo(
 async function processarRespostaTimeDireto(sb: Supa, numero: string, messageId: string, texto: string): Promise<void> {
   const cfg = await configGrupoPendencias(sb);
   if (!cfg || cfg.time_pendencias_ligado !== "true") return;
-  const time = [...numerosAviso(cfg.callcenter_whatsapp), ...numerosAviso(cfg.aviso_agendamento_whatsapp)];
+  const time = [...destinosDoTime(cfg.callcenter_whatsapp, cfg.time_copia_whatsapp), ...numerosAviso(cfg.aviso_agendamento_whatsapp)];
   if (!time.includes(numero)) return;
   const marcou = await aplicarRespostaDoTime(sb, cfg, {
     origem: "time", destino: numero, messageId, texto, autor: "WhatsApp do agendamento (" + numero.slice(-4) + ")",
