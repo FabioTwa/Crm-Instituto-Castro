@@ -7,10 +7,13 @@ Faz SO isto, devagar, como uma pessoa faria:
   2. abre Relatorios > Agenda > Relatorio de agendamentos;
   3. preenche o periodo (do dia 1 do mes atual ao ultimo dia do mes seguinte);
   4. clica em "Gerar relatorio" e depois em "Excel";
-  5. sai do sistema (Sair);
-  6. le o Excel, manda ao CRM so as colunas necessarias (sem o nome do
-     paciente) e apaga o arquivo.
-Nao clica em mais nada. Se qualquer tela estiver diferente do esperado, se o
+  5. abre a tela do chamado de suporte (SC_CHAMADO_ID) e SO LE o status, a
+     ultima atualizacao e a ultima parte da conversa (nao digita nem clica);
+  6. sai do sistema (Sair);
+  7. le o Excel, manda ao CRM so as colunas necessarias (sem o nome do
+     paciente) e apaga o arquivo; manda o status do chamado.
+Nao clica em mais nada. Se a leitura do chamado falhar, a exportacao segue
+normalmente (o chamado e so informativo). Se qualquer tela estiver diferente do esperado, se o
 login falhar ou se aparecer captcha/codigo de verificacao, PARA na hora, nao
 tenta de novo e avisa o Fabio por WhatsApp (via funcao ic-supportclinic).
 
@@ -18,6 +21,7 @@ Variaveis de ambiente (segredos do GitHub):
   SC_USUARIO, SC_SENHA     login do usuario do IC no Support Clinic (o mesmo da equipe)
   SC_IMPORT_TOKEN          token da funcao ic-supportclinic
   SC_FUNCAO_URL            URL da funcao (nao e segredo)
+  SC_CHAMADO_ID            numero do chamado a acompanhar (opcional; vazio = nao le)
 Nada de paciente e impresso no log: so contagens.
 """
 import calendar
@@ -37,6 +41,7 @@ BASE = "https://app.supportclinic.com.br"
 URL_LOGIN = BASE + "/login"
 URL_RELATORIO = BASE + "/atendimento/agendar-atendimentos/agendamento/relatorios"
 URL_SAIR = BASE + "/logout"
+URL_CHAMADO = BASE + "/chamados/{}"
 FUSO = ZoneInfo("America/Sao_Paulo")
 
 # Colunas do Excel conferidas em 25/11/2026. Se mudarem, o robo para.
@@ -201,6 +206,54 @@ def exportar(pagina, pasta):
     return arquivo, ini, fim
 
 
+def ler_chamado(pagina):
+    """So le a tela do chamado. Nunca digita, nunca clica. Erro aqui nao para o robo."""
+    numero = (os.environ.get("SC_CHAMADO_ID") or "").strip()
+    if not numero.isdigit():
+        return None
+    try:
+        pausa(4, 9)
+        pagina.goto(URL_CHAMADO.format(numero), wait_until="domcontentloaded")
+        pausa(5, 11)
+        if pagina.locator(".ticket-meta").count() != 1:
+            log("chamado: tela diferente do esperado; pulei")
+            return None
+        conferir_sem_bloqueio(pagina, "relatorio")
+        cab = pagina.locator(".content-wrapper .panel").first
+        titulo_cab = cab.locator(".panel-heading, .panel-title").first.inner_text().strip()
+        codigo = titulo_cab.split("\n")[0].replace("Chamado", "").strip()[:20]
+        status = cab.locator(".label").first.inner_text().strip()
+        meta = {}
+        for bloco in pagina.locator(".ticket-meta > div").all():
+            rot = bloco.locator(".ticket-meta-label")
+            val = bloco.locator(".ticket-meta-value")
+            if rot.count() and val.count():
+                meta[sem_acento(rot.first.inner_text().strip())] = val.first.inner_text().strip()
+        respostas, resumo = 0, ""
+        conversa = pagina.locator(".content-wrapper .panel").filter(
+            has=pagina.locator(".panel-heading", has_text="Conversa"))
+        if conversa.count() and conversa.first.locator(".comment-empty").count() == 0:
+            corpo = conversa.first.locator(".panel-body").first
+            texto = " ".join(corpo.inner_text().split())
+            respostas = max(1, corpo.locator("[class*='comment']").count())
+            resumo = texto[-300:]
+        time.sleep(random.uniform(2, 5))  # "lendo" a tela
+        log(f"chamado {codigo}: {status}, respostas: {respostas}")
+        return {
+            "acao": "chamado",
+            "chamado": codigo or ("#" + numero),
+            "status": status,
+            "ultima_atualizacao": meta.get("ultima atualizacao", ""),
+            "respostas": respostas,
+            "resumo": resumo,
+        }
+    except Parada:
+        raise
+    except Exception as e:
+        log(f"chamado: nao consegui ler ({type(e).__name__}); segue a exportacao")
+        return None
+
+
 def sair(pagina):
     try:
         pausa(3, 7)
@@ -259,10 +312,12 @@ def main():
             pagina = contexto.new_page()
             pagina.set_default_timeout(45000)
             logado = False
+            chamado = None
             try:
                 entrar(pagina)
                 logado = True
                 arquivo, ini, fim = exportar(pagina, pasta)
+                chamado = ler_chamado(pagina)
             finally:
                 if logado:
                     sair(pagina)
@@ -285,6 +340,12 @@ def main():
         if not r.get("ok"):
             raise Parada("importacao", f"o CRM recusou o relatório ({r.get('erro', 'sem detalhe')})")
         log("crm: " + json.dumps({k: r.get(k) for k in ("linhas", "casados", "movidos", "voltaram", "ignorado")}))
+        if chamado:
+            try:
+                rc = chamar_funcao(chamado)
+                log(f"status do chamado gravado: {rc.get('ok')}")
+            except Exception as e:  # informativo: nao derruba a importacao
+                log(f"status do chamado nao gravado ({type(e).__name__})")
         return 0
     except Parada as e:
         log(f"PAROU na etapa {e.etapa}: {e.motivo}")

@@ -12,6 +12,10 @@
 //          {codigo, telefone, data, tipo, profissional, agendado_por, status, criado}]}
 //     -> public.ic_sc_importar (SQL 58): so linhas de cards do CRM ficam; move as etapas.
 //     200 {ok, linhas, casados, movidos, voltaram} | {ok, ignorado:'importacao_desligada'}
+//   POST {acao:'chamado', chamado, status, ultima_atualizacao, respostas, resumo}
+//     -> crm_ia_config.sc_chamado_status = JSON (o mesmo + lido_em). So leitura da tela
+//        do chamado no Support Clinic; a checagem das 9h le esta chave.
+//     200 {ok}
 //   POST {acao:'falha', etapa, motivo}
 //     -> WhatsApp ao numero de crm_ia_config.sc_alerta_whatsapp (pelo numero Z-API ativo).
 //     200 {ok, enviado}
@@ -32,7 +36,7 @@ import { iguaisTempoConstante } from "../_shared/crypto.ts";
 import { canalDaLinha } from "../_shared/whatsapp-envio.ts";
 import { enviarTextoZapi } from "../_shared/zapi.ts";
 import { canonicoTelefone } from "../_shared/telefone.ts";
-import { textoAlertaFalha, validarImportacao } from "../_shared/support-clinic.ts";
+import { textoAlertaFalha, validarChamado, validarImportacao } from "../_shared/support-clinic.ts";
 
 const LOG = "[ic-supportclinic]";
 
@@ -64,6 +68,22 @@ Deno.serve(async (req: Request) => {
       const enviado = await avisarFalha(sb, body.etapa, body.motivo);
       console.warn(LOG, "robo informou falha na etapa", String(body.etapa || "").slice(0, 20), "aviso enviado:", enviado);
       return json({ ok: true, enviado });
+    }
+
+    if (body && body.acao === "chamado") {
+      const c = validarChamado(body, new Date());
+      if (!c.ok) return json({ ok: false, erro: c.erro }, 400);
+      const { error } = await sb.from("crm_ia_config").upsert({
+        chave: "sc_chamado_status",
+        valor: JSON.stringify(c.chamado),
+        descricao: "Status do chamado no suporte do Support Clinic, lido pelo robo diario (JSON).",
+      }, { onConflict: "chave" });
+      if (error) {
+        console.error(LOG, "status do chamado nao gravado:", error.message);
+        return json({ ok: false, erro: "gravar_falhou" }, 500);
+      }
+      console.log(LOG, "chamado", c.chamado.chamado, "status:", c.chamado.status, "respostas:", c.chamado.respostas);
+      return json({ ok: true });
     }
 
     if (!body || body.acao !== "importar") return json({ ok: false, erro: "payload_invalido" }, 400);

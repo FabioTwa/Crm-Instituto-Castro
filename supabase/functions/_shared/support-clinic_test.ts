@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert";
-import { textoAlertaFalha, validarImportacao } from "./support-clinic.ts";
+import { textoAlertaFalha, validarChamado, validarImportacao } from "./support-clinic.ts";
 
 Deno.test("importacao valida descarta o nome do paciente e campos desconhecidos", () => {
   const r = validarImportacao({
@@ -34,4 +34,18 @@ Deno.test("aviso de falha cita a etapa e corta o motivo", () => {
   assert(t.includes("08:05"));
   assert(!t.includes("x".repeat(301)));
   assert(textoAlertaFalha("??", "", new Date()).includes("rodar o robô"));
+});
+
+Deno.test("status do chamado: limpa, corta e exige numero e status", () => {
+  const agora = new Date("2026-11-27T10:30:00Z");
+  const r = validarChamado({ chamado: "TT-001526", status: " Em  andamento ", ultima_atualizacao: "27/11/2026 09:12", respostas: "2", resumo: "y".repeat(400), extra: "x" }, agora);
+  assert(r.ok);
+  if (!r.ok) return;
+  assertEquals(r.chamado.status, "Em andamento");
+  assertEquals(r.chamado.respostas, 2);
+  assertEquals(r.chamado.resumo.length, 300);
+  assertEquals(r.chamado.lido_em, "2026-11-27T10:30:00.000Z");
+  assertEquals((r.chamado as any).extra, undefined);
+  assertEquals(validarChamado({ chamado: "", status: "Novo" }, agora), { ok: false, erro: "chamado_invalido" });
+  assertEquals(validarChamado(null, agora), { ok: false, erro: "payload_invalido" });
 });

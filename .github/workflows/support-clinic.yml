@@ -42,6 +42,9 @@ permissions:
 
 env:
   SC_FUNCAO_URL: https://xoppuccjdinafbkxfatg.supabase.co/functions/v1/ic-supportclinic
+  # Chamado de suporte que o robo so le (status vai para crm_ia_config.sc_chamado_status).
+  # Vazio = nao le chamado nenhum.
+  SC_CHAMADO_ID: "1526"
 
 jobs:
   sorteio:
