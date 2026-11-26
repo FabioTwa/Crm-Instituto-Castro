@@ -90,6 +90,6 @@ jobs:
             flag=""
             if echo " ${SEM_JWT} " | grep -q " $fn "; then flag="--no-verify-jwt"; fi
             echo "::group::Publicando $fn $flag"
-            supabase functions deploy "$fn" $flag --project-ref "${PROJECT_REF}"
+            supabase functions deploy "$fn" $flag --project-ref "${PROJECT_REF}" --yes
             echo "::endgroup::"
           done
