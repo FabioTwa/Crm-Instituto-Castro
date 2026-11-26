@@ -75,17 +75,34 @@ def pausa(minimo=3.0, maximo=8.0):
     time.sleep(random.uniform(minimo, maximo))
 
 
+def olhar(pagina, minimo, maximo):
+    """Fica na tela como quem le: mexe o mouse e rola um pouco, devagar.
+    So movimento e rolagem; nunca clica."""
+    fim = time.monotonic() + random.uniform(minimo, maximo)
+    while time.monotonic() < fim:
+        try:
+            acao = random.random()
+            if acao < 0.55:
+                pagina.mouse.move(random.randint(120, 1240), random.randint(120, 700),
+                                  steps=random.randint(8, 30))
+            elif acao < 0.85:
+                pagina.mouse.wheel(0, random.choice([1, 1, -1]) * random.randint(80, 360))
+        except Exception:
+            pass
+        time.sleep(min(random.uniform(1.5, 6.0), max(0.0, fim - time.monotonic())))
+
+
 def digitar(pagina, seletor, texto):
     """Clica no campo, limpa e digita letra por letra, com ritmo variavel."""
     campo = pagina.locator(seletor)
     campo.click()
-    time.sleep(random.uniform(0.4, 1.0))
+    time.sleep(random.uniform(0.8, 2.0))
     campo.press("Control+a")
     campo.press("Backspace")
     for letra in texto:
         pagina.keyboard.type(letra)
-        time.sleep(random.uniform(0.08, 0.22))
-    time.sleep(random.uniform(0.5, 1.2))
+        time.sleep(random.uniform(0.12, 0.38))
+    time.sleep(random.uniform(1.0, 2.5))
 
 
 def sem_acento(s):
@@ -131,21 +148,22 @@ def conferir_sem_bloqueio(pagina, etapa):
 
 def entrar(pagina):
     pagina.goto(URL_LOGIN, wait_until="domcontentloaded")
-    pausa(4, 9)
+    olhar(pagina, 8, 18)
     if "/login" not in pagina.url or pagina.locator("input[name='email']").count() != 1:
         raise Parada("login", "a tela de login está diferente do esperado")
     conferir_sem_bloqueio(pagina, "login")
     digitar(pagina, "input[name='email']", os.environ["SC_USUARIO"])
-    pausa(1.5, 3.5)
+    pausa(3, 7)
     digitar(pagina, "input[name='password']", os.environ["SC_SENHA"])
-    pausa(2, 4)
+    pausa(3, 8)
     pagina.locator("form[action$='/login'] button[type='submit']").click()
     pagina.wait_for_load_state("domcontentloaded")
-    pausa(4, 8)
+    pausa(5, 10)
     conferir_sem_bloqueio(pagina, "login")
     if "/login" in pagina.url:
         raise Parada("login", "o Support Clinic recusou o login (usuário ou senha, ou acesso bloqueado)")
     log("login ok")
+    olhar(pagina, 30, 75)  # tela inicial, como quem chega no sistema
 
 
 def titulo(pagina):
@@ -157,25 +175,25 @@ def preencher_data(pagina, seletor, valor):
     # Fecha o calendario clicando no titulo do relatorio, como uma pessoa faria
     # (Enter nao: enviaria o formulario).
     titulo(pagina).click()
-    time.sleep(random.uniform(0.8, 1.6))
+    time.sleep(random.uniform(1.5, 3.5))
     atual = pagina.locator(seletor).input_value()
     if atual != valor:
         raise Parada("periodo", f"o campo de data ficou com outro valor ({atual or 'vazio'})")
 
 
 def exportar(pagina, pasta):
-    pausa(3, 7)
+    pausa(4, 10)
     pagina.goto(URL_RELATORIO, wait_until="domcontentloaded")
-    pausa(4, 9)
+    olhar(pagina, 15, 35)
     if titulo(pagina).count() != 1 or pagina.locator("#input-start").count() != 1:
         raise Parada("relatorio", "a tela do relatório está diferente do esperado (ou o usuário não tem acesso)")
     conferir_sem_bloqueio(pagina, "relatorio")
 
     ini, fim = periodo_hoje()
     preencher_data(pagina, "#input-start", ini.strftime("%d/%m/%Y"))
-    pausa(1.5, 3.5)
+    pausa(4, 9)
     preencher_data(pagina, "#input-end", fim.strftime("%d/%m/%Y"))
-    pausa(2, 5)
+    pausa(6, 14)
 
     gerar = pagina.locator("button.btn-search")
     if gerar.count() != 1:
@@ -188,7 +206,7 @@ def exportar(pagina, pasta):
         )
     except Exception:
         raise Parada("relatorio", "o relatório não carregou em 90 segundos")
-    pausa(4, 9)
+    olhar(pagina, 45, 100)  # confere a lista antes de exportar
 
     botao = pagina.locator("button.buttons-excel")
     if botao.count() != 1:
@@ -203,6 +221,7 @@ def exportar(pagina, pasta):
     except Exception:
         raise Parada("exportar", "o Excel não foi baixado em 3 minutos")
     log("excel baixado")
+    olhar(pagina, 20, 45)
     return arquivo, ini, fim
 
 
@@ -212,9 +231,9 @@ def ler_chamado(pagina):
     if not numero.isdigit():
         return None
     try:
-        pausa(4, 9)
+        pausa(6, 14)
         pagina.goto(URL_CHAMADO.format(numero), wait_until="domcontentloaded")
-        pausa(5, 11)
+        olhar(pagina, 10, 20)
         if pagina.locator(".ticket-meta").count() < 1:  # a tela tem 2 blocos
             log("chamado: tela diferente do esperado; pulei")
             return None
@@ -237,7 +256,7 @@ def ler_chamado(pagina):
             texto = " ".join(corpo.inner_text().split())
             respostas = max(1, corpo.locator("[class*='comment']").count())
             resumo = texto[-300:]
-        time.sleep(random.uniform(2, 5))  # "lendo" a tela
+        olhar(pagina, 25, 60)  # lendo o chamado
         log(f"chamado {codigo}: {status}, respostas: {respostas}")
         return {
             "acao": "chamado",
@@ -256,7 +275,7 @@ def ler_chamado(pagina):
 
 def sair(pagina):
     try:
-        pausa(3, 7)
+        pausa(8, 20)
         pagina.goto(URL_SAIR, wait_until="domcontentloaded")
         log("saiu do sistema")
     except Exception:
