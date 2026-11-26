@@ -328,6 +328,83 @@ export const TEXTO_NAO_ACHEI =
   "Não encontrei esse nome entre as pendências 🤔 Pode me mandar o primeiro nome e o final do telefone? " +
   'Ex.: "Diana 1343 confirmada".';
 
+// ---------------------------------------------------------------------------
+// Resposta do time SEM nome (pedido do Fabio, 26/11/2026)
+// ---------------------------------------------------------------------------
+// Na conversa direta (2020-8098 e copias), o time as vezes manda so
+// "confirmada" ou "agendada". Em vez de so pedir o nome, a Jully cruza com as
+// pendencias e pergunta pelo paciente mais provavel ("E a Samara (final 3538)?").
+// "sim" marca; "nao" faz ela pedir o nome e o final do telefone. Uma pergunta
+// aberta por numero; enquanto estiver aberta, nao pergunta de novo.
+
+// Validade da pergunta: depois disso, um "sim" solto nao marca nada.
+export const MINUTOS_PERGUNTA_VALIDA = 120;
+// Nao repete o pedido de nome ao mesmo numero dentro deste intervalo.
+export const MINUTOS_SEM_REPETIR_PEDIDO_NOME = 30;
+
+export type PerguntaTime = {
+  cliente: string; // clienteId do candidato
+  nome: string;
+  final: string;
+  em: string; // ISO de quando perguntou
+  rejeitados?: string[]; // clienteIds que o time ja disse que nao eram
+};
+
+// So a palavra de "feito" (com ou sem artigo/emoji), sem nome nem final: e a
+// resposta que precisa de candidato.
+export function respostaSemNome(texto: string | null | undefined, pendencias: Pendencia[]): boolean {
+  const t = normalizarTexto(String(texto || ""));
+  if (!t || !RE_FEITO.test(t) || RE_DUVIDA.test(t)) return false;
+  if (citadas(t, pendencias).length) return false;
+  // Numero de 4+ digitos solto: o time tentou dizer quem era (final que nao bate).
+  if (/\d{4}/.test(t)) return false;
+  return true;
+}
+
+// Paciente mais provavel para uma resposta sem nome: o pedido de agendamento
+// mais recente ainda aberto (e o que o time acabou de receber); se nao houver,
+// o agendamento a confirmar mais proximo. Ignora quem o time ja disse que nao era.
+export function candidatoSemNome(pendencias: Pendencia[], rejeitados: string[] = []): Pendencia | null {
+  const fora = new Set(rejeitados);
+  const livres = pendencias.filter((p) => !fora.has(p.clienteId));
+  const agendar = livres.filter((p) => p.tipo === "agendar").sort((a, b) => b.quando.localeCompare(a.quando));
+  if (agendar.length) return agendar[0];
+  const confirmar = livres.filter((p) => p.tipo === "confirmar").sort((a, b) => a.quando.localeCompare(b.quando));
+  return confirmar[0] ?? null;
+}
+
+export function textoPerguntaCandidato(p: Pendencia): string {
+  return `Obrigada! Só para eu atualizar certinho no CRM: é ${quem(p)}? ` +
+    'Se for, me responda "sim". Se não for, me mande o primeiro nome e o final do telefone.';
+}
+
+// "sim" / "nao" curtos em resposta a pergunta da Jully. Qualquer outra coisa: null.
+const RE_SIM = /^(?:sim|s|ss|isso|isso mesmo|isso ai|e ela|eh ela|e sim|ela mesma|essa mesma|e essa|e esse|ele mesmo|esse mesmo|correto|certo|exato|exatamente|positivo|confirmo|pode marcar|👍|✅)(?:\s*(?:sim|isso|e ela|ela mesma|mesmo|mesma|obrigad[oa]|👍|✅))*[\s.!👍✅]*$/;
+const RE_NAO = /^(?:nao|n|nao e|nao e ela|nao e ele|nao e essa|nao e esse|negativo|errado|outra pessoa|outro paciente)\b/;
+export function respostaSimNao(texto: string | null | undefined): "sim" | "nao" | null {
+  const t = normalizarTexto(String(texto || "")).replace(/[,]/g, " ").replace(/\s+/g, " ").trim();
+  if (!t) return null;
+  if (RE_NAO.test(t)) return "nao";
+  if (RE_SIM.test(t)) return "sim";
+  return null;
+}
+
+export function perguntaValida(p: PerguntaTime | null | undefined, agora: Date): boolean {
+  if (!p || !p.cliente || !p.em) return false;
+  const em = new Date(p.em).getTime();
+  return Number.isFinite(em) && agora.getTime() - em < MINUTOS_PERGUNTA_VALIDA * 60000 && agora.getTime() >= em - 60000;
+}
+
+// Estado guardado em crm_ia_config.time_pergunta: { "<numero>": PerguntaTime }.
+export function lerEstadoPerguntas(valor: string | null | undefined): Record<string, PerguntaTime> {
+  try {
+    const o = JSON.parse(String(valor || "{}"));
+    return o && typeof o === "object" && !Array.isArray(o) ? o as Record<string, PerguntaTime> : {};
+  } catch {
+    return {};
+  }
+}
+
 // Horarios do aviso ao time (time_pendencias_horas, ex. "9,15"). Devolve a
 // "vaga" atual (AAAA-MM-DD-H da ultima hora ja passada hoje) ou null fora do
 // horario (domingo, antes da primeira hora, das 20h em diante).

@@ -1,6 +1,7 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
   diaLocal, horaDoAvisoGrupo, interpretarRespostaGrupo, MAX_ITENS_POR_LISTA, minutoDoAviso, montarPendencias, numerosMarcados, pausasHumanas,
+  candidatoSemNome, lerEstadoPerguntas, perguntaValida, respostaSemNome, respostaSimNao, textoPerguntaCandidato,
   temPalavraDeFeito, type Pendencia, textoAvulsoGrupo, textoMarcacoes, textoPendenciasGrupo, vagaDoAvisoTime,
 } from "./grupo-pendencias.ts";
 import { corpoTextoZapi, destinoZapi } from "./zapi.ts";
@@ -219,4 +220,52 @@ Deno.test("cobranca ao time: pedido de hoje entra depois do prazo", () => {
     pedidosAntesDe: new Date("2026-11-23T16:00:00Z"),
   });
   assert(depois.some((x) => x.clienteId === "c-ariana"));
+});
+
+// Resposta do time sem nome (26/11)
+const PSN: Pendencia[] = [
+  { tipo: "agendar", clienteId: "rafa", agendamentoId: null, nome: "Rafaela", final: "7026", quando: "2026-11-24T15:31:00Z" },
+  { tipo: "agendar", clienteId: "sama", agendamentoId: null, nome: "Samara", final: "3538", quando: "2026-11-25T02:29:00Z" },
+  { tipo: "confirmar", clienteId: "dia", agendamentoId: "ag1", nome: "Diana", final: "1343", quando: "2026-11-27T17:00:00Z" },
+];
+
+Deno.test("respostaSemNome: so a palavra de feito, sem nome nem final", () => {
+  assert(respostaSemNome("confirmada", PSN));
+  assert(respostaSemNome("Agendada ✅", PSN));
+  assert(respostaSemNome("ok, confirmada", PSN));
+  assert(!respostaSemNome("Samara confirmada", PSN));
+  assert(!respostaSemNome("3538 agendada", PSN));
+  assert(!respostaSemNome("Joana 9999 agendada", PSN));
+  assert(!respostaSemNome("ainda nao confirmada", PSN));
+  assert(!respostaSemNome("bom dia", PSN));
+});
+
+Deno.test("candidatoSemNome: pedido mais recente; depois agendamento mais proximo; respeita rejeitados", () => {
+  assertEquals(candidatoSemNome(PSN)?.clienteId, "sama");
+  assertEquals(candidatoSemNome(PSN, ["sama"])?.clienteId, "rafa");
+  assertEquals(candidatoSemNome(PSN, ["sama", "rafa"])?.clienteId, "dia");
+  assertEquals(candidatoSemNome(PSN, ["sama", "rafa", "dia"]), null);
+  assertEquals(candidatoSemNome([]), null);
+});
+
+Deno.test("textoPerguntaCandidato: nome e final, pede sim ou nome", () => {
+  const t = textoPerguntaCandidato(PSN[1]);
+  assert(t.includes("Samara (final 3538)"));
+  assert(t.includes('"sim"'));
+});
+
+Deno.test("respostaSimNao", () => {
+  for (const s of ["sim", "Sim!", "isso", "Isso mesmo", "é ela", "Sim, é ela", "ela mesma", "👍", "exato", "s"]) assertEquals(respostaSimNao(s), "sim", s);
+  for (const n of ["não", "Não é ela", "nao, é a Rafaela", "negativo", "n"]) assertEquals(respostaSimNao(n), "nao", n);
+  for (const x of ["confirmada", "Rafaela 7026 agendada", "sim, mas amanhã eu vejo a outra", "", "ok"]) assertEquals(respostaSimNao(x), null, x);
+});
+
+Deno.test("perguntaValida e lerEstadoPerguntas", () => {
+  const agora = new Date("2026-11-26T15:00:00Z");
+  assert(perguntaValida({ cliente: "sama", nome: "Samara", final: "3538", em: "2026-11-26T14:00:00Z" }, agora));
+  assert(!perguntaValida({ cliente: "sama", nome: "Samara", final: "3538", em: "2026-11-26T12:00:00Z" }, agora));
+  assert(!perguntaValida(null, agora));
+  assertEquals(lerEstadoPerguntas(""), {});
+  assertEquals(lerEstadoPerguntas("lixo"), {});
+  assertEquals(lerEstadoPerguntas('{"551120208098":{"cliente":"x","nome":"X","final":"1","em":"2026"}}')["551120208098"].cliente, "x");
 });
