@@ -91,3 +91,35 @@ export function textoAlertaFalha(etapa: unknown, motivo: unknown, quando: Date):
     "Nada foi alterado no Support Clinic. O robô não tenta de novo hoje; amanhã ele roda no horário sorteado.",
   ].join("\n");
 }
+
+// Status do chamado aberto no suporte do Support Clinic (o robo so le a tela).
+// Vai para crm_ia_config.sc_chamado_status (JSON), lido pela checagem das 9h.
+export type ChamadoSC = {
+  chamado: string;
+  status: string;
+  ultima_atualizacao: string;
+  respostas: number;
+  resumo: string;
+  lido_em: string;
+};
+
+export function validarChamado(body: any, agora: Date):
+  | { ok: true; chamado: ChamadoSC }
+  | { ok: false; erro: string } {
+  if (!body || typeof body !== "object") return { ok: false, erro: "payload_invalido" };
+  const chamado = texto(body.chamado, 20);
+  const status = texto(body.status, 40);
+  if (!chamado || !status) return { ok: false, erro: "chamado_invalido" };
+  const n = Number(body.respostas);
+  return {
+    ok: true,
+    chamado: {
+      chamado,
+      status,
+      ultima_atualizacao: texto(body.ultima_atualizacao, 20),
+      respostas: Number.isFinite(n) && n >= 0 ? Math.min(Math.floor(n), 999) : 0,
+      resumo: texto(body.resumo, 300),
+      lido_em: agora.toISOString(),
+    },
+  };
+}
