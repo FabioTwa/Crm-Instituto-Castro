@@ -3,7 +3,7 @@
 
 Roda no GitHub (workflow .github/workflows/support-clinic.yml), uma vez por dia.
 Faz SO isto, devagar, como uma pessoa faria:
-  1. abre a tela de login e entra com o usuario dedicado do IC;
+  1. abre a tela de login e entra com o usuario do IC (o mesmo da equipe; sessao propria do robo);
   2. abre Relatorios > Agenda > Relatorio de agendamentos;
   3. preenche o periodo (do dia 1 do mes atual ao ultimo dia do mes seguinte);
   4. clica em "Gerar relatorio" e depois em "Excel";
@@ -15,7 +15,7 @@ login falhar ou se aparecer captcha/codigo de verificacao, PARA na hora, nao
 tenta de novo e avisa o Fabio por WhatsApp (via funcao ic-supportclinic).
 
 Variaveis de ambiente (segredos do GitHub):
-  SC_USUARIO, SC_SENHA     login do usuario dedicado do IC no Support Clinic
+  SC_USUARIO, SC_SENHA     login do usuario do IC no Support Clinic (o mesmo da equipe)
   SC_IMPORT_TOKEN          token da funcao ic-supportclinic
   SC_FUNCAO_URL            URL da funcao (nao e segredo)
 Nada de paciente e impresso no log: so contagens.

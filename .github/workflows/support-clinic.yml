@@ -13,7 +13,8 @@
 #     de 0 a 4 min a mais, ao acaso.
 #
 # SEGREDOS (Settings > Secrets and variables > Actions > Secrets)
-#   SC_USUARIO, SC_SENHA   usuario dedicado do IC no Support Clinic (so relatorios)
+#   SC_USUARIO, SC_SENHA   usuario do IC no Support Clinic (o mesmo da equipe; o robo
+#                          abre a propria sessao e so sai dela)
 #   SC_IMPORT_TOKEN        o mesmo valor do segredo SC_IMPORT_TOKEN da funcao no Supabase
 #
 # Se algo falhar, o Fabio recebe aviso no WhatsApp (crm_ia_config.sc_alerta_whatsapp).

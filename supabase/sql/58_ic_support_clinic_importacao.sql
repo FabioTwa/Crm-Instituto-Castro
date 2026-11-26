@@ -2,7 +2,7 @@
 --    (pedido do Fabio, 25 e 26/11/2026)
 --
 -- Um robo no GitHub (workflow "Support Clinic - exportacao diaria") entra uma vez
--- por dia no Support Clinic com o usuario dedicado do IC, exporta o relatorio de
+-- por dia no Support Clinic com o usuario do IC, exporta o relatorio de
 -- agendamentos (mes atual + seguinte) e manda as linhas para a funcao
 -- ic-supportclinic, que chama public.ic_sc_importar().
 --
