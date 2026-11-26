@@ -27,7 +27,7 @@ env:
   PROJECT_REF: xoppuccjdinafbkxfatg
   # Funcoes chamadas sem login (webhook da Z-API, varredor, chamadas internas):
   # publicadas com --no-verify-jwt. As demais exigem login (verify_jwt ligado).
-  SEM_JWT: "ic-ia-pre-atendimento ic-meta-webhook ic-agendamento"
+  SEM_JWT: "ic-ia-pre-atendimento ic-meta-webhook ic-agendamento ic-supportclinic"
 
 jobs:
   publicar:
