@@ -109,6 +109,8 @@ import { destinosDoTime, numerosAviso } from "../_shared/aviso-agendamento.ts";
 import {
   diaLocal, HORAS_ATE_COBRAR_PEDIDO, horaDoAvisoGrupo, interpretarRespostaGrupo, montarPendencias, numerosMarcados, type Pendencia, pausasHumanas,
   temPalavraDeFeito, TEXTO_NAO_ACHEI, textoAvulsoGrupo, textoPendenciasGrupo, vagaDoAvisoTime,
+  candidatoSemNome, lerEstadoPerguntas, MINUTOS_SEM_REPETIR_PEDIDO_NOME, perguntaValida, type PerguntaTime,
+  respostaSemNome, respostaSimNao, textoPerguntaCandidato,
 } from "../_shared/grupo-pendencias.ts";
 import { textoAlertaReclamacao } from "../_shared/reclamacao.ts";
 import { decidirGrupo, ehEventoGrupoZapi, extrairMensagemGrupo, type GrupoLido } from "../_shared/grupo-leitura.ts";
@@ -1965,7 +1967,7 @@ const CHAVES_GRUPO_PEND = [
   "grupo_pendencias_ignorar", "grupo_pendencias_marcar", "grupo_mensagem_avulsa",
   "time_pendencias_ligado", "time_pendencias_horas", "time_pendencias_ultimo",
   "aviso_agendamento_whatsapp", "callcenter_whatsapp", "alerta_reclamacao_ligado",
-  "time_copia_whatsapp",
+  "time_copia_whatsapp", "time_pergunta",
 ];
 
 // Leitura sempre fresca (sem o cache de 60 s): a trava do dia depende dela.
@@ -2254,7 +2256,15 @@ async function aplicarRespostaDoTime(
   }
   const escolhidas = interpretarRespostaGrupo(msg.texto, lidas.pendencias);
   if (!escolhidas.length) return 0;
+  return await marcarPendencias(sb, escolhidas, msg);
+}
 
+// Marca no CRM as pendencias que o time deu como resolvidas.
+async function marcarPendencias(
+  sb: Supa, escolhidas: Pendencia[],
+  msg: { origem: "grupo" | "time"; messageId: string; autor: string },
+): Promise<number> {
+  const agora = new Date();
   const motivo = msg.origem === "grupo" ? "time confirmou no grupo do WhatsApp" : "time confirmou pelo WhatsApp do agendamento";
   let marcou = 0;
   for (const p of escolhidas) {
@@ -2293,7 +2303,8 @@ const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // 3-8 s e so entao reage com ✅ ou responde. Roda solta (waitUntil), para nao
 // segurar o processamento da entrada.
 function reagirComoPessoa(
-  sb: Supa, destino: string, messageId: string, acao: { reagir: boolean; responder: string | null },
+  sb: Supa, destino: string, messageId: string,
+  acao: { reagir: boolean; responder: string | null; log?: string; clienteId?: string | null },
 ): void {
   const trabalho = (async () => {
     const canal = await canalZapiDoGrupo(sb);
@@ -2308,7 +2319,7 @@ function reagirComoPessoa(
       const r = await enviarTextoZapi({
         canal, para: destino, texto: acao.responder, prefixoLog: LOGG, delayTyping: segundosDigitando(acao.responder),
       });
-      await logGrupo(sb, "time_nome_nao_encontrado", { message_id: messageId, respondido: r.ok });
+      await logGrupo(sb, acao.log || "time_nome_nao_encontrado", { message_id: messageId, destino, respondido: r.ok }, acao.clienteId ?? null);
     }
   })().catch((e) => console.error(LOGG, "reacao ao time falhou:", e));
   const espera = (globalThis as any).EdgeRuntime?.waitUntil;
@@ -2329,23 +2340,103 @@ async function processarRespostaGrupo(
   if (marcou) reagirComoPessoa(sb, msg.grupoId, msg.messageId, { reagir: true, responder: null });
 }
 
-// Resposta do time na conversa direta (numero do call center ou dos avisos).
-// Se a pessoa diz que confirmou mas o nome nao bate com a lista, a Jully pede o
-// nome e o final do telefone (so na conversa direta; no grupo fica em silencio).
+// Resposta do time na conversa direta (numero do call center, copias e avisos).
+// Com nome/final: marca e reage ✅. So "confirmada"/"agendada" (26/11, pedido do
+// Fabio): pergunta pelo paciente mais provavel e marca no "sim"; no "nao" pede o
+// nome e o final do telefone. Pede uma vez so. No grupo fica em silencio.
 async function processarRespostaTimeDireto(sb: Supa, numero: string, messageId: string, texto: string): Promise<void> {
   const cfg = await configGrupoPendencias(sb);
   if (!cfg || cfg.time_pendencias_ligado !== "true") return;
   const time = [...destinosDoTime(cfg.callcenter_whatsapp, cfg.time_copia_whatsapp), ...numerosAviso(cfg.aviso_agendamento_whatsapp)];
   if (!time.includes(numero)) return;
-  const marcou = await aplicarRespostaDoTime(sb, cfg, {
-    origem: "time", destino: numero, messageId, texto, autor: "WhatsApp do agendamento (" + numero.slice(-4) + ")",
-  });
-  // Conversa direta: como uma pessoa, le toda mensagem do time; reage se marcou,
-  // pede o nome se disse que confirmou e nao achou ninguem.
-  reagirComoPessoa(sb, numero, messageId, {
-    reagir: marcou > 0,
-    responder: !marcou && temPalavraDeFeito(texto) ? TEXTO_NAO_ACHEI : null,
-  });
+  const autor = "WhatsApp do agendamento (" + numero.slice(-4) + ")";
+  const agora = new Date();
+  const estado = lerEstadoPerguntas(cfg.time_pergunta);
+  const pergunta = perguntaValida(estado[numero], agora) ? estado[numero] : null;
+
+  // 1) Resposta a pergunta da Jully ("E a Samara (final 3538)?").
+  if (pergunta) {
+    const sn = respostaSimNao(texto);
+    if (sn) {
+      if (!(await gravarPergunta(sb, cfg.time_pergunta, numero, null, sn === "nao" ? pergunta.cliente : null))) {
+        reagirComoPessoa(sb, numero, messageId, { reagir: false, responder: null });
+        return;
+      }
+      if (sn === "sim") {
+        const lidas = await lerPendenciasGrupo(sb, cfg, agora, true);
+        const p = lidas.ok ? lidas.pendencias.find((x) => x.clienteId === pergunta.cliente) : undefined;
+        const marcou = p ? await marcarPendencias(sb, [p], { origem: "time", messageId, autor }) : 0;
+        await logGrupo(sb, marcou ? "time_candidato_confirmado" : "time_candidato_ja_resolvido", { message_id: messageId, destino: numero }, pergunta.cliente);
+        reagirComoPessoa(sb, numero, messageId, { reagir: true, responder: null });
+        return;
+      }
+      reagirComoPessoa(sb, numero, messageId, { reagir: false, responder: TEXTO_NAO_ACHEI, log: "time_candidato_negado", clienteId: pergunta.cliente });
+      return;
+    }
+  }
+
+  // 2) Resposta com nome/final: marca direto.
+  const marcou = await aplicarRespostaDoTime(sb, cfg, { origem: "time", destino: numero, messageId, texto, autor });
+  if (marcou > 0) {
+    if (pergunta) await gravarPergunta(sb, cfg.time_pergunta, numero, null, null);
+    reagirComoPessoa(sb, numero, messageId, { reagir: true, responder: null });
+    return;
+  }
+  if (!temPalavraDeFeito(texto)) {
+    reagirComoPessoa(sb, numero, messageId, { reagir: false, responder: null });
+    return;
+  }
+
+  // 3) "confirmada"/"agendada" sem nome. Pergunta ja aberta: nao pergunta de
+  //    novo (pedir so uma vez). Senao, pergunta pelo paciente mais provavel.
+  if (pergunta) {
+    await logGrupo(sb, "time_sem_nome_aguardando", { message_id: messageId, destino: numero }, pergunta.cliente);
+    reagirComoPessoa(sb, numero, messageId, { reagir: false, responder: null });
+    return;
+  }
+  const lidas = await lerPendenciasGrupo(sb, cfg, agora, true);
+  const pendencias = lidas.ok ? lidas.pendencias : [];
+  // "Nao era essa pessoa" vale por 24 h; depois a lista de pendencias ja mudou.
+  const ant = estado[numero];
+  const rejeitados = ant && ant.em && agora.getTime() - new Date(ant.em).getTime() < 24 * 3600000 ? (ant.rejeitados ?? []) : [];
+  const cand = respostaSemNome(texto, pendencias) ? candidatoSemNome(pendencias, rejeitados) : null;
+  if (cand) {
+    const nova: PerguntaTime = { cliente: cand.clienteId, nome: cand.nome, final: cand.final, em: agora.toISOString(), rejeitados };
+    if (await gravarPergunta(sb, cfg.time_pergunta, numero, nova, null)) {
+      reagirComoPessoa(sb, numero, messageId, { reagir: false, responder: textoPerguntaCandidato(cand), log: "time_pergunta_candidato", clienteId: cand.clienteId });
+    } else {
+      reagirComoPessoa(sb, numero, messageId, { reagir: false, responder: null }); // outra mensagem ja perguntou
+    }
+    return;
+  }
+  // Sem candidato: pede o nome, uma vez a cada MINUTOS_SEM_REPETIR_PEDIDO_NOME.
+  const desde = new Date(agora.getTime() - MINUTOS_SEM_REPETIR_PEDIDO_NOME * 60000).toISOString();
+  const { data: recentes } = await sb.from("ia_decisoes_log").select("id")
+    .eq("etapa_pipeline", "grupo_pendencias").in("decisao", ["time_nome_nao_encontrado", "time_candidato_negado"])
+    .gte("criado_em", desde).limit(1);
+  const jaPediu = !!recentes && (recentes as any[]).length > 0;
+  reagirComoPessoa(sb, numero, messageId, { reagir: false, responder: jaPediu ? null : TEXTO_NAO_ACHEI });
+}
+
+// Grava (ou limpa, com nova=null) a pergunta aberta de um numero em
+// crm_ia_config.time_pergunta. Troca so se o valor nao mudou desde a leitura
+// (duas mensagens seguidas do time nao geram duas perguntas). rejeitar: guarda
+// quem o time disse que nao era, para a proxima pergunta pular essa pessoa.
+async function gravarPergunta(
+  sb: Supa, valorLido: string | undefined, numero: string, nova: PerguntaTime | null, rejeitar: string | null,
+): Promise<boolean> {
+  const anterior = valorLido ?? "{}";
+  const estado = lerEstadoPerguntas(anterior);
+  const antes = estado[numero];
+  const rejeitados = [...(nova?.rejeitados ?? antes?.rejeitados ?? [])];
+  if (rejeitar && !rejeitados.includes(rejeitar)) rejeitados.push(rejeitar);
+  if (nova) estado[numero] = { ...nova, rejeitados };
+  else if (rejeitados.length) estado[numero] = { cliente: "", nome: "", final: "", em: new Date().toISOString(), rejeitados };
+  else delete estado[numero];
+  const { data, error } = await sb.from("crm_ia_config")
+    .update({ valor: JSON.stringify(estado) }).eq("chave", "time_pergunta").eq("valor", anterior).select("chave");
+  if (error) console.error(LOGG, "pergunta ao time nao gravada:", error.message);
+  return !error && !!data && (data as any[]).length > 0;
 }
 
 // Aviso de conexao da Z-API. So aceita instancia cadastrada (ativa, provedor
