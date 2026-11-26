@@ -215,7 +215,7 @@ def ler_chamado(pagina):
         pausa(4, 9)
         pagina.goto(URL_CHAMADO.format(numero), wait_until="domcontentloaded")
         pausa(5, 11)
-        if pagina.locator(".ticket-meta").count() != 1:
+        if pagina.locator(".ticket-meta").count() < 1:  # a tela tem 2 blocos
             log("chamado: tela diferente do esperado; pulei")
             return None
         conferir_sem_bloqueio(pagina, "relatorio")
