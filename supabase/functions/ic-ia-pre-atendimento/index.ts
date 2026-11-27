@@ -1527,6 +1527,12 @@ async function enviarRecadoPaciente(sb: SupabaseClient): Promise<Record<string, 
   const clienteId = corte > 0 ? valor.slice(0, corte).trim() : "";
   const texto = corte > 0 ? valor.slice(corte + 1).trim() : "";
   if (!/^[0-9a-f-]{36}$/i.test(clienteId) || !texto) return { ok: false, erro: "recado_invalido" };
+  return await enviarRecadoPara(sb, clienteId, texto, "recado_aprovado");
+}
+
+// Envia um recado aprovado (texto pronto, paragrafos = baloes) a um card, pelo
+// numero da clinica, com "digitando" e a trava de vez da conversa.
+async function enviarRecadoPara(sb: SupabaseClient, clienteId: string, texto: string, origem: string): Promise<Record<string, unknown>> {
   const cfg = await iaConfig(sb);
   const { data: card } = await sb
     .from("clientes_crm").select("id, nome, numero_whatsapp, telefone, vendedor_id, funil_id, deleted_at")
@@ -1548,11 +1554,55 @@ async function enviarRecadoPaciente(sb: SupabaseClient): Promise<Record<string, 
   let enviados = 0;
   await p.comVez(async () => {
     for (const parte of partes) {
-      const env = await p.enviar(parte, "recado_paciente", "enviado", { origem: "recado_aprovado" });
+      const env = await p.enviar(parte, "recado_paciente", "enviado", { origem });
       if (env.enviado) enviados++;
     }
   });
   return { ok: enviados === partes.length, card: clienteId, enviados, partes: partes.length };
+}
+
+// Fila de recados aprovados pelo Fabio (27/11/2026, aviso da troca de numero):
+// crm_ia_config.recados_fila = JSON [{"card":"<id>","texto":"..."}], na ordem de
+// envio. A cada rodada do varredor (1x por minuto), dentro de
+// retomada_queda_horario e respeitando recados_intervalo_min (padrao 5) desde o
+// ultimo envio, tira o PRIMEIRO item da fila (antes de enviar: nunca sai duas
+// vezes) e envia. Um paciente por vez, para o numero parecer humano.
+async function enviarFilaRecados(sb: SupabaseClient): Promise<Record<string, unknown> | null> {
+  const chaves = ["recados_fila", "recados_fila_ultimo", "recados_intervalo_min", "retomada_queda_horario"];
+  const { data: linhas, error } = await sb.from("crm_ia_config").select("chave, valor").in("chave", chaves);
+  if (error) return { decisao: "erro_leitura_fila", erro: error.message };
+  const cfg: Record<string, string> = {};
+  for (const r of (linhas as any[]) || []) cfg[r.chave] = String(r.valor ?? "");
+  const bruto = (cfg.recados_fila || "").trim();
+  if (!bruto) return null;
+  let fila: Array<{ card?: string; texto?: string }>;
+  try {
+    const v = JSON.parse(bruto);
+    if (!Array.isArray(v)) throw new Error("nao_e_lista");
+    fila = v;
+  } catch (_e) {
+    return { decisao: "fila_invalida" };
+  }
+  if (!fila.length) return null;
+  const agora = new Date();
+  if (!podeMandarFollowup(agora, configRetomadaQueda(cfg).horario, TZ_PADRAO)) return { decisao: "fora_da_janela", faltam: fila.length };
+  const n = Math.floor(Number(cfg.recados_intervalo_min || "5"));
+  const intervaloMs = (Number.isFinite(n) ? Math.min(60, Math.max(1, n)) : 5) * 60000;
+  const ultimo = Date.parse(cfg.recados_fila_ultimo || "");
+  if (Number.isFinite(ultimo) && agora.getTime() - ultimo < intervaloMs) return { decisao: "aguardando_intervalo", faltam: fila.length };
+  const [item, ...resto] = fila;
+  // Trava: so quem trocar a fila exatamente como leu envia o item.
+  const { data: trava } = await sb.from("crm_ia_config")
+    .update({ valor: resto.length ? JSON.stringify(resto) : "" })
+    .eq("chave", "recados_fila").eq("valor", (linhas as any[]).find((r) => r.chave === "recados_fila")?.valor)
+    .select("chave");
+  if (!trava || !(trava as any[]).length) return { decisao: "outra_rodada" };
+  await upsertConfig(sb, "recados_fila_ultimo", agora.toISOString());
+  const clienteId = String(item?.card || "").trim();
+  const texto = String(item?.texto || "").trim();
+  if (!/^[0-9a-f-]{36}$/i.test(clienteId) || !texto) return { ok: false, erro: "item_invalido", faltam: resto.length };
+  const r = await enviarRecadoPara(sb, clienteId, texto, "recado_fila");
+  return { ...r, faltam: resto.length };
 }
 
 async function upsertConfig(sb: SupabaseClient, chave: string, valor: string): Promise<void> {
@@ -2554,6 +2604,11 @@ Deno.serve(async (req: Request) => {
         console.error(LOG, "recado ao paciente falhou:", e instanceof Error ? e.message : e);
         return { ok: false, erro: "excecao" };
       });
+      // Fila de recados aprovados (crm_ia_config.recados_fila): um por rodada, com intervalo.
+      const recados_fila = await enviarFilaRecados(sb).catch((e) => {
+        console.error(LOG, "fila de recados falhou:", e instanceof Error ? e.message : e);
+        return { ok: false, erro: "excecao" };
+      });
       const r = await encerrarInativas(sb);
       // Lembrete de confirmacao (temporario; desliga com confirmacao_antes_horas vazio).
       const confirmacoes = await lembrarConfirmacoes(sb).catch((e) => {
@@ -2565,7 +2620,7 @@ Deno.serve(async (req: Request) => {
         console.error(LOG, "retomada pos-queda falhou:", e instanceof Error ? e.message : e);
         return { ok: false, erro: "excecao" };
       });
-      return json({ ...r, confirmacoes, retomada_queda, teste_aviso, pendentes, recado });
+      return json({ ...r, confirmacoes, retomada_queda, teste_aviso, pendentes, recado, recados_fila });
     }
 
     const clienteId = String(body.cliente_crm_id || "").trim();
