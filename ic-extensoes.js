@@ -1648,9 +1648,9 @@
     // leitura, para e mostra "Gerar novo QR Code" (recomendação da Z-API).
     // "Lembrar depois" esconde a janela por 5 minutos; a faixa continua, com o botão
     // "Conectar WhatsApp" para o Admin abrir a tela WhatsApp.
-    // Numero OFICIAL do Instituto (atualizado 18/11/2026: final 4992, conectado pelo IC em 17/11): os avisos mandam ler o QR
+    // Numero OFICIAL do Instituto (atualizado 27/11/2026: final 2475, substitui o final 4992): os avisos mandam ler o QR
     // Code com o celular DESTE numero, qualquer que seja o cadastrado/conectado agora.
-    var IC_WA_OFICIAL = { digitos: '5511911844992', exibir: '(11) 91184-4992' };
+    var IC_WA_OFICIAL = { digitos: '5511950612475', exibir: '(11) 95061-2475' };
     function icWaEhOficial(numero) {
         var d = String(numero || '').replace(/\D/g, '');
         if (d.length === 10 || d.length === 11) d = '55' + d;
