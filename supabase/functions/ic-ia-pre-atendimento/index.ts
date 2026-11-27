@@ -219,7 +219,11 @@ type Body = { cliente_crm_id: string; conversa_id: string | null; vendedor_id: s
 // enviada de cada vez no numero. A trava ia_vez so e segurada durante o envio;
 // o prazo e a rede de seguranca se a funcao cair no meio (cobre 4 partes com
 // "digitando..." de ate 8 s cada, as pausas e o aviso a equipe).
-const PRAZO_VEZ_S = 90;
+const PRAZO_VEZ_S = 150;
+// Entre respostas a pacientes DIFERENTES (pedido do Fabio, 27/11/2026): depois de
+// pegar a vez, espera ate intervalo_entre_pacientes_s (padrao 30) desde a ultima
+// mensagem da Jully a outro paciente. Parece humano e evita rajada no numero.
+const INTERVALO_ENTRE_PACIENTES_PADRAO_S = 30;
 // Entre as mensagens de uma resposta em partes: garante a ordem na Z-API, que
 // mostra o "digitando..." de cada uma antes de entregar.
 const PAUSA_ENTRE_MENSAGENS_MS = 1000;
@@ -281,6 +285,7 @@ class Pipeline {
     this.vezDono = dono;
     this.vezProfundidade++;
     try {
+      await this.esperarIntervaloEntrePacientes();
       await envio();
     } finally {
       this.vezProfundidade--;
@@ -291,6 +296,27 @@ class Pipeline {
       }
     }
     return true;
+  }
+
+  // Ja com a vez: espera completar o intervalo desde a ultima mensagem da Jully
+  // a OUTRO paciente. Falha ao consultar nao bloqueia o envio.
+  private async esperarIntervaloEntrePacientes(): Promise<void> {
+    const n = Number(this.cfg.intervalo_entre_pacientes_s ?? String(INTERVALO_ENTRE_PACIENTES_PADRAO_S));
+    const s = Number.isFinite(n) ? Math.min(60, Math.max(0, Math.floor(n))) : INTERVALO_ENTRE_PACIENTES_PADRAO_S;
+    if (!s) return;
+    let q = this.sb.from("crm_conversas").select("criada_em").eq("autor", "ia");
+    if (this.body.cliente_crm_id) q = q.neq("cliente_crm_id", this.body.cliente_crm_id);
+    const { data, error } = await q.order("criada_em", { ascending: false }).limit(1);
+    if (error) {
+      console.warn(LOG, "intervalo entre pacientes: consulta falhou (segue):", error.message);
+      return;
+    }
+    const ultimo = Date.parse(String((data as any[])?.[0]?.criada_em || ""));
+    if (!Number.isFinite(ultimo)) return;
+    const falta = Math.min(ultimo + s * 1000 - Date.now(), s * 1000);
+    if (falta <= 0) return;
+    await this.log("fila", "intervalo_entre_pacientes", { detalhe: { esperou_ms: falta } });
+    await new Promise((r) => setTimeout(r, falta));
   }
 
   async log(
@@ -656,8 +682,9 @@ async function rodar(sb: SupabaseClient, body: Body): Promise<Record<string, unk
 // fila_espera_segundos (padrao 35). erro = ultima falha ao ler a trava (nesse caso nao envia).
 async function esperarVez(sb: SupabaseClient, dono: string, cfg: Record<string, string>): Promise<{ ok: boolean; erro: string | null; esperou_ms: number }> {
   const inicio = Date.now();
-  const n = Number(cfg.fila_espera_segundos || "35");
-  const limiteMs = (Number.isFinite(n) ? Math.min(60, Math.max(5, n)) : 35) * 1000;
+  // Ate 150 s: com o intervalo entre pacientes, quem esta na fila espera mais.
+  const n = Number(cfg.fila_espera_segundos || "120");
+  const limiteMs = (Number.isFinite(n) ? Math.min(150, Math.max(5, n)) : 120) * 1000;
   for (;;) {
     const { data, error } = await sb.rpc("ic_ia_pegar_vez", { p_dono: dono, p_segundos: PRAZO_VEZ_S });
     if (!error && data === true) return { ok: true, erro: null, esperou_ms: Date.now() - inicio };
@@ -2627,12 +2654,24 @@ Deno.serve(async (req: Request) => {
     if (!clienteId) return json({ ok: false, erro: "payload_invalido" }, 400);
 
     const inicio = Date.now();
-    const resultado = await rodar(sb, {
+    const entrada = {
       cliente_crm_id: clienteId,
       conversa_id: body.conversa_id ? String(body.conversa_id) : null,
       vendedor_id: body.vendedor_id ? String(body.vendedor_id) : null,
       funil_id: body.funil_id ? String(body.funil_id) : null,
-    });
+    };
+    // Em segundo plano (27/11/2026): com a rajada, a fila de um paciente por vez e o
+    // intervalo entre pacientes, o atendimento pode passar do limite de 150 s para
+    // responder a requisicao. Responde 202 na hora e segue ate o limite da funcao.
+    const espera = (globalThis as any).EdgeRuntime?.waitUntil;
+    if (typeof espera === "function") {
+      const tarefa = rodar(sb, entrada)
+        .then((r) => console.log(LOG, "card", clienteId, "->", r.decisao || r.erro, `(${Date.now() - inicio} ms)`))
+        .catch((e) => console.error(LOG, "card", clienteId, "falhou:", e instanceof Error ? e.message : e));
+      espera.call((globalThis as any).EdgeRuntime, tarefa);
+      return json({ ok: true, decisao: "em_segundo_plano" }, 202);
+    }
+    const resultado = await rodar(sb, entrada);
     console.log(LOG, "card", clienteId, "->", resultado.decisao || resultado.erro, `(${Date.now() - inicio} ms)`);
     return json({ ...resultado, duracao_ms: Date.now() - inicio });
   } catch (e) {
