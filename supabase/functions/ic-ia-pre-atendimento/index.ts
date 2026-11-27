@@ -977,7 +977,19 @@ async function rodarNaVez(
   // numero): no maximo um lembrete por dia, depois silencio. A urgencia e a
   // duvida clinica acima continuam com o texto fixo.
   const pre = preAgendamentoDoCard(cfg, body.cliente_crm_id);
-  if (pre.ativo && ((await pedidoAgendamentoRecente(sb, body.cliente_crm_id)) || (await agendamentoAtivo(sb, body.cliente_crm_id)))) {
+  // Recado aprovado nas ultimas 48 h (ex.: aviso da troca de numero, 27/11/2026,
+  // que pergunta se deu tudo certo com o agendamento): a resposta do paciente e a
+  // esse recado, entao a Jully conversa normalmente em vez do texto pronto.
+  const { data: recadoRecente } = await sb
+    .from("ia_decisoes_log")
+    .select("id")
+    .eq("cliente_crm_id", body.cliente_crm_id)
+    .eq("etapa_pipeline", "recado_paciente")
+    .gte("criado_em", new Date(Date.now() - 48 * 3600 * 1000).toISOString())
+    .limit(1);
+  const respondeRecado = !!(recadoRecente && recadoRecente.length);
+  if (respondeRecado) await p.log("pre_agendamento", "responde_recado_conversa_normal");
+  if (!respondeRecado && pre.ativo && ((await pedidoAgendamentoRecente(sb, body.cliente_crm_id)) || (await agendamentoAtivo(sb, body.cliente_crm_id)))) {
     const { data: jaLembrou } = await sb
       .from("crm_conversas")
       .select("id")
