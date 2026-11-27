@@ -6670,8 +6670,32 @@ try {
 } catch (e) { /* storage bloqueado: sem efeito */ }
 var _icAuthStorage;
 try { window.sessionStorage.setItem('ic_teste_storage', '1'); window.sessionStorage.removeItem('ic_teste_storage'); _icAuthStorage = window.sessionStorage; } catch (e) { _icAuthStorage = undefined; }
+// PRAZO NAS CHAMADAS AO BANCO. Sem prazo, uma requisicao que nunca volta
+// (aba que acordou de segundo plano, rede trocando, renovacao de sessao presa)
+// segura a tela girando para sempre: enquanto a renovacao do login nao
+// termina, todas as consultas seguintes ficam esperando. Com prazo, a chamada
+// falha, a sessao tenta de novo e a tela recebe erro em vez de ficar parada.
+// Edge Functions (envio de WhatsApp, IA) e Storage (upload) ficam de fora:
+// podem demorar de verdade e nao podem ser cortadas no meio.
+var IC_PRAZO_FETCH = 20000;
+function icFetchComPrazo(input, init) {
+    var url = typeof input === 'string' ? input : ((input && input.url) || String(input || ''));
+    if (typeof AbortController === 'undefined' || /\/functions\/v1\/|\/storage\/v1\//.test(url)) {
+        return fetch(input, init);
+    }
+    var ctrl = new AbortController();
+    var sinalOrig = init && init.signal;
+    if (sinalOrig) {
+        if (sinalOrig.aborted) ctrl.abort();
+        else sinalOrig.addEventListener('abort', function () { ctrl.abort(); });
+    }
+    var timer = setTimeout(function () { ctrl.abort(); }, IC_PRAZO_FETCH);
+    var opts = Object.assign({}, init || {}, { signal: ctrl.signal });
+    return fetch(input, opts).finally(function () { clearTimeout(timer); });
+}
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    auth: { autoRefreshToken: true, persistSession: true, detectSessionInUrl: true, storage: _icAuthStorage }
+    auth: { autoRefreshToken: true, persistSession: true, detectSessionInUrl: true, storage: _icAuthStorage },
+    global: { fetch: icFetchComPrazo }
 });
 
 // ===================================================================
@@ -8222,19 +8246,46 @@ async function loadCRM() {
     var _bAntes = document.getElementById('crm-busca-pro');
     if (_bAntes) _bAntes.value = '';
     var container = document.getElementById('crm-pipeline-content');
-    container.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div></div>';
+    // Opcoes so quando vier um objeto simples ({ silencioso: true }); clique
+    // ou evento passado por engano nao conta.
+    var opcoes = (arguments[0] && arguments[0].constructor === Object) ? arguments[0] : {};
+    // Cada carga tem numero e so a mais recente pode desenhar a tela. Antes,
+    // duas cargas ao mesmo tempo (ex.: voltar para a aba + reconexao do tempo
+    // real) disputavam o mesmo container, e a que travava deixava o spinner
+    // por cima do Kanban.
+    var seq = ++_crmCargaSeq;
+    var jaMontado = !!container.querySelector('.crm-col-body, .crm-card-pro');
+    // Recarga de fundo (ressincronia do tempo real) nao apaga o Kanban que a
+    // pessoa esta vendo: troca so quando os dados novos chegam.
+    if (!(opcoes.silencioso && jaMontado)) {
+        container.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div></div>';
+    }
 
-    try { await _loadCRMImpl(container); }
+    try { await icComPrazo(_loadCRMImpl(container, seq), IC_PRAZO_CRM, 'pipeline'); }
     catch (err) {
+        if (seq !== _crmCargaSeq) return; // uma carga mais nova ja assumiu a tela
+        if (err && err.icPrazo) {
+            console.warn('[loadCRM] servidor nao respondeu a tempo');
+            // Recarga de fundo com Kanban na tela: mantem o que esta la.
+            if (opcoes.silencioso && jaMontado) return;
+            // Primeira vez: tenta de novo sozinho (a sessao costuma ter
+            // acabado de renovar). Na segunda, mostra a tela de erro.
+            if (!opcoes._retentativa) return loadCRM({ _retentativa: true });
+        }
         console.error('[loadCRM] Erro:', err);
+        var msgErro = (err && err.icPrazo) ? 'O servidor n\u00e3o respondeu a tempo. Seus dados est\u00e3o salvos.'
+            : (err && err.message ? err.message : 'Erro desconhecido');
         container.innerHTML = '<div style="padding:40px;text-align:center"><h3 style="color:var(--ic-danger)">Erro ao carregar CRM</h3>'
-            + '<p style="color:var(--ic-muted);font-size:13px;margin-top:8px">' + (err && err.message ? err.message : 'Erro desconhecido') + '</p>'
+            + '<p style="color:var(--ic-muted);font-size:13px;margin-top:8px">' + msgErro + '</p>'
             + '<button onclick="loadCRM()" class="btn-primary" style="margin-top:14px;padding:8px 16px;border:none;border-radius:6px;background:var(--ic-secondary);color:white;cursor:pointer">Tentar novamente</button></div>';
     }
     return;
 }
 
-async function _loadCRMImpl(container) {
+var _crmCargaSeq = 0;
+var IC_PRAZO_CRM = 25000;
+
+async function _loadCRMImpl(container, seq) {
 
     // Load funis (crm_funis)
     if (crmPipelines.length === 0) {
@@ -8754,6 +8805,8 @@ async function _loadCRMImpl(container) {
     html += '<div id="crm-dp-section" style="margin-top:28px;display:none">';
     html += '</div>';
 
+    // Carga antiga que terminou depois de uma mais nova: descarta.
+    if (seq !== undefined && seq !== _crmCargaSeq) return;
     container.innerHTML = html;
 
     // Scroll infinito por coluna: observa as sentinelas no fim de cada coluna
@@ -10393,7 +10446,7 @@ function crmIniciarRealtime() {
                 if (window._crmRealtimeCaiu) {
                     window._crmRealtimeCaiu = false;
                     var v = document.getElementById('view-crm');
-                    if (v && v.classList.contains('active') && typeof loadCRM === 'function') loadCRM();
+                    if (v && v.classList.contains('active') && typeof loadCRM === 'function') loadCRM({ silencioso: true });
                 }
             } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
                 if (window._crmRealtimeDesligando) return; // fechamento intencional, nao reconectar
