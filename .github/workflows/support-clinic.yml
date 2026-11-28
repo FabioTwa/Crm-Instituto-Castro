@@ -2,15 +2,12 @@
 # ao CRM (funcao ic-supportclinic). Script: automacao/support-clinic/exportar.py
 #
 # QUANDO RODA
-#   - Manual: aba Actions > "Support Clinic - exportação diária" > Run workflow.
-#   - Agendado: so quando a variavel do repositorio SC_AGENDADO = true
-#     (Settings > Secrets and variables > Actions > Variables). Sem ela, nada roda
-#     sozinho e nada e cobrado.
-#   - Uma vez por dia, entre 7h e 9h (Brasilia), em horario sorteado: o GitHub
-#     acorda a cada 15 min nessa janela, mas so UM dos 8 horarios do dia e o
-#     sorteado (sorteio pelo dia, igual em todas as tentativas). Os outros 7
-#     encerram em segundos, sem abrir navegador. No horario sorteado ainda espera
-#     de 0 a 4 min a mais, ao acaso.
+#   So quando alguem dispara (workflow_dispatch). NAO usa o agendamento do
+#   GitHub: em 27/11/2026 ele disparou com 9 horas de atraso (16h23 em vez de
+#   7h-8h45). O horario e sorteado todo dia, entre 7h e 8h45 (Brasilia), por uma
+#   tarefa agendada do Claude, que dispara este workflow no minuto sorteado.
+#   Manual: aba Actions > "Support Clinic - exportação diária" > Run workflow.
+#   Antes de abrir o navegador ainda espera de 0 a 4 min, ao acaso.
 #
 # SEGREDOS (Settings > Secrets and variables > Actions > Secrets)
 #   SC_USUARIO, SC_SENHA   usuario do IC no Support Clinic (o mesmo da equipe; o robo
@@ -22,16 +19,6 @@ name: Support Clinic - exportação diária
 
 on:
   workflow_dispatch:
-  schedule:
-    # 7h00 a 8h45 de Brasilia (UTC-3). A ordem desta lista e usada no sorteio.
-    - cron: "0 10 * * *"
-    - cron: "15 10 * * *"
-    - cron: "30 10 * * *"
-    - cron: "45 10 * * *"
-    - cron: "0 11 * * *"
-    - cron: "15 11 * * *"
-    - cron: "30 11 * * *"
-    - cron: "45 11 * * *"
 
 concurrency:
   group: support-clinic
@@ -47,39 +34,7 @@ env:
   SC_CHAMADO_ID: "1526"
 
 jobs:
-  sorteio:
-    if: github.event_name == 'workflow_dispatch' || vars.SC_AGENDADO == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    outputs:
-      rodar: ${{ steps.s.outputs.rodar }}
-    steps:
-      - id: s
-        env:
-          EVENTO: ${{ github.event_name }}
-          AGENDA: ${{ github.event.schedule }}
-        run: |
-          python3 - <<'PY'
-          import datetime as dt, hashlib, os
-          horarios = ["0 10 * * *", "15 10 * * *", "30 10 * * *", "45 10 * * *",
-                      "0 11 * * *", "15 11 * * *", "30 11 * * *", "45 11 * * *"]
-          rotulos = ["7h00", "7h15", "7h30", "7h45", "8h00", "8h15", "8h30", "8h45"]
-          dia = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=3)).date().isoformat()
-          sorteado = hashlib.sha256(("ic-support-clinic-" + dia).encode()).digest()[0] % len(horarios)
-          if os.environ["EVENTO"] == "workflow_dispatch":
-              rodar = True
-              print("Execução manual.")
-          else:
-              atual = horarios.index(os.environ["AGENDA"]) if os.environ["AGENDA"] in horarios else -1
-              rodar = atual == sorteado
-              print(f"Dia {dia}: horário sorteado {rotulos[sorteado]}. Este é o das {rotulos[atual] if atual >= 0 else '?'}: {'roda' if rodar else 'não roda'}.")
-          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"rodar={'true' if rodar else 'false'}\n")
-          PY
-
   exportar:
-    needs: sorteio
-    if: needs.sorteio.outputs.rodar == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -97,7 +52,6 @@ jobs:
           python -m playwright install --with-deps chromium
 
       - name: Espera ao acaso
-        if: github.event_name == 'schedule'
         run: sleep $(( RANDOM % 240 ))
 
       - name: Exportar e enviar ao CRM
